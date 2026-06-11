@@ -1,0 +1,50 @@
+# Beacon Agent Configuration
+# /etc/beacon/agent.toml
+
+# Beacon server WebSocket address (TLS required in production)
+server_addr = "wss://beacon.example.com/ws/ingest/"
+
+# Username for API authentication
+username = "admin"
+
+# Local SQLite storage directory
+storage_dir = "/var/lib/beacon/agent"
+
+# Collection interval in seconds (1, 5, 30, 60)
+interval_seconds = 5
+
+[collectors]
+cpu         = true
+ram         = true
+storage     = true
+network     = true
+process     = true
+systemd     = true
+docker      = false
+# Enable k3s / Kubernetes metrics collection.
+# Requires kubectl on PATH and /etc/rancher/k3s/k3s.yaml to be readable.
+kubernetes  = false
+temperature = true
+power       = false
+# Maximum number of processes to track per collection
+max_processes = 512
+
+[tls]
+# Set to false only for development/testing
+verify_cert  = true
+# Optional custom CA cert path (leave empty to use system certs)
+ca_cert_path = ""
+
+[queue]
+# Max retries before moving to Dead Letter Queue
+max_retries      = 5
+# Max messages buffered offline
+max_queue_size   = 100000
+# Retry backoff base in milliseconds
+retry_backoff_ms = 1000
+
+[encryption]
+# Enable AES-256-GCM payload encryption
+enabled           = true
+# Key rotation interval in days (0 = manual only)
+key_rotation_days = 30

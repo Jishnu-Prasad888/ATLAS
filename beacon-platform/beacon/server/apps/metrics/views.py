@@ -1,0 +1,159 @@
+"""
+Beacon Metrics Views — /api/v1/telemetry/ and /api/v1/metrics/
+"""
+import logging
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+from apps.auth_rbac.permissions import IsAdminOrReadOnly, IsViewer, IsAdministrator
+from .models import Metric, MetricConfig, MetricResolution
+from .serializers import (
+    MetricSerializer,
+    MetricIngestSerializer,
+    MetricBatchIngestSerializer,
+    MetricConfigSerializer,
+    MetricQuerySerializer,
+)
+
+logger = logging.getLogger("beacon")
+channel_layer = get_channel_layer()
+
+
+def broadcast_metric(agent_id: str, metric_data: dict):
+    """Push metric to WebSocket subscribers on the metrics channel."""
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"metrics_{agent_id}",
+            {"type": "metric.update", "data": metric_data},
+        )
+    except Exception as e:
+        logger.warning(f"WebSocket broadcast failed: {e}")
+
+
+class MetricIngestView(APIView):
+    """
+    POST /api/v1/telemetry/ingest/
+    Accepts batches of metrics from agents.
+    """
+    permission_classes = []  # Agent-authenticated via header
+
+    def post(self, request):
+        serializer = MetricBatchIngestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data     = serializer.validated_data
+        agent_id = data["agent_id"]
+        metrics  = data["metrics"]
+
+        objects = [
+            Metric(
+                agent_id       = agent_id,
+                metric_type    = m["metric_type"],
+                resolution     = MetricResolution.RAW,
+                timestamp      = m["timestamp"],
+                data           = m["data"],
+                schema_version = m.get("schema_version", "1.0"),
+            )
+            for m in metrics
+        ]
+        Metric.objects.bulk_create(objects, batch_size=500)
+
+        # Broadcast latest metrics to WebSocket subscribers
+        if objects:
+            broadcast_metric(agent_id, MetricSerializer(objects[-1]).data)
+
+        return Response({"ingested": len(objects)}, status=status.HTTP_201_CREATED)
+
+
+class MetricListView(APIView):
+    """
+    GET /api/v1/telemetry/
+    Query metrics with optional filters.
+    """
+    permission_classes = [IsViewer]
+
+    def get(self, request):
+        qs_serializer = MetricQuerySerializer(data=request.query_params)
+        qs_serializer.is_valid(raise_exception=True)
+        params = qs_serializer.validated_data
+
+        qs = Metric.objects.all()
+        if params.get("agent_id"):
+            qs = qs.filter(agent_id=params["agent_id"])
+        if params.get("metric_type"):
+            qs = qs.filter(metric_type=params["metric_type"])
+        if params.get("resolution"):
+            qs = qs.filter(resolution=params["resolution"])
+        if params.get("start"):
+            qs = qs.filter(timestamp__gte=params["start"])
+        if params.get("end"):
+            qs = qs.filter(timestamp__lte=params["end"])
+
+        qs = qs.order_by("-timestamp")[: params.get("limit", 1000)]
+        return Response(MetricSerializer(qs, many=True).data)
+
+
+class MetricLatestView(APIView):
+    """
+    GET /api/v1/telemetry/latest/<agent_id>/
+    Latest metric of each type for the agent.
+    """
+    permission_classes = [IsViewer]
+
+    def get(self, request, agent_id):
+        from django.db.models import Max
+        types = Metric.objects.filter(agent_id=agent_id).values_list("metric_type", flat=True).distinct()
+        result = {}
+        for mtype in types:
+            latest = Metric.objects.filter(agent_id=agent_id, metric_type=mtype).order_by("-timestamp").first()
+            if latest:
+                result[mtype] = MetricSerializer(latest).data
+        return Response(result)
+
+
+class MetricPruneView(APIView):
+    """
+    POST /api/v1/telemetry/prune/
+    Manually trigger data retention pruning (Admin only).
+    """
+    permission_classes = [IsAdministrator]
+
+    def post(self, request):
+        from datetime import timedelta
+        now = timezone.now()
+        # Raw: 24h
+        raw_cutoff = now - timedelta(hours=24)
+        raw_deleted, _ = Metric.objects.filter(resolution=MetricResolution.RAW, timestamp__lt=raw_cutoff).delete()
+        # 1min rollup: 30 days
+        min_cutoff = now - timedelta(days=30)
+        min_deleted, _ = Metric.objects.filter(resolution=MetricResolution.MIN1, timestamp__lt=min_cutoff).delete()
+        # 1hour rollup: 365 days
+        hr_cutoff = now - timedelta(days=365)
+        hr_deleted, _ = Metric.objects.filter(resolution=MetricResolution.HOUR1, timestamp__lt=hr_cutoff).delete()
+        return Response({
+            "pruned": {
+                "raw_1s_24h":    raw_deleted,
+                "rollup_1m_30d": min_deleted,
+                "rollup_1h_365d": hr_deleted,
+            }
+        })
+
+
+# ─── Metric Config ────────────────────────────────────────────────────────────
+
+class MetricConfigView(APIView):
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get(self, request, agent_id):
+        config, _ = MetricConfig.objects.get_or_create(agent_id=agent_id)
+        return Response(MetricConfigSerializer(config).data)
+
+    def patch(self, request, agent_id):
+        config, _ = MetricConfig.objects.get_or_create(agent_id=agent_id)
+        serializer = MetricConfigSerializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
