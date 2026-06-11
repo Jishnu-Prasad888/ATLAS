@@ -1,0 +1,14 @@
+.env
+target/
+*.log
+*.tmp
+*.bak
+*.swp
+beacon_venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
