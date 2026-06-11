@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB:       beacon
+      POSTGRES_USER:     beacon
+      POSTGRES_PASSWORD: beacon
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beacon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: beacon_server.settings
+      SECRET_KEY:             ${SECRET_KEY:-beacon-dev-secret-change-in-production}
+      DEBUG:                  ${DEBUG:-false}
+      DB_NAME:                beacon
+      DB_USER:                beacon
+      DB_PASSWORD:            beacon
+      DB_HOST:                db
+      DB_PORT:                "5432"
+      REDIS_URL:              redis://redis:6379/0
+      ALLOWED_HOSTS:          ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CORS_ALLOWED_ORIGINS:   ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+      - ./certs:/app/certs:ro
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             daphne -b 0.0.0.0 -p 8000 beacon_server.asgi:application"
+
+volumes:
+  pgdata:
+  redisdata:
+  static_files:
+  media_files:

@@ -1,0 +1,41 @@
+[Unit]
+Description=Beacon Distributed Linux Observability Agent
+Documentation=https://github.com/your-org/beacon
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=beacon
+Group=beacon
+ExecStart=/usr/local/bin/beacon-agent start --config /etc/beacon/agent.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/beacon /var/log/beacon
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=256M
+CPUQuota=25%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=beacon-agent
+
+[Install]
+WantedBy=multi-user.target

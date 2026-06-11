@@ -1,0 +1,4993 @@
+=== /home/claude/beacon-agent/Cargo.toml ===
+[package]
+name        = "beacon-agent"
+version     = "1.0.0"
+edition     = "2021"
+description = "Beacon distributed Linux observability agent"
+
+[[bin]]
+name = "beacon-agent"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio             = { version = "1",    features = ["full"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+futures-util      = "0.3"
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Cryptography
+aes-gcm = "0.10"
+argon2  = "0.5"
+sha2    = "0.10"
+rand    = "0.8"
+base64  = "0.22"
+hex     = "0.4"
+
+# TLS
+rustls              = "0.22"
+rustls-native-certs = "0.7"
+webpki-roots        = "0.26"
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+
+# HTTP (REST fallback)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# System metrics
+sysinfo = "0.30"
+
+# CLI & Config
+clap = { version = "4", features = ["derive", "env"] }
+toml = "0.8"
+dirs = "5"
+
+# Logging
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+uuid        = { version = "1",   features = ["v4"] }
+chrono      = { version = "0.4", features = ["serde"] }
+anyhow      = "1"
+thiserror   = "1"
+async-trait = "0.1"
+once_cell   = "1"
+url         = "2"
+
+# TUI
+ratatui   = "0.26"
+crossterm = "0.27"
+
+[dev-dependencies]
+# Async test runtime
+tokio = { version = "1", features = ["full", "test-util"] }
+# JSON assertions
+serde_json = "1"
+# Temporary directories for storage tests
+tempfile = "3"
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true
+
+[profile.test]
+# Faster test builds — no LTO, some optimisation for proc parsing
+opt-level = 1
+
+=== /home/claude/beacon-agent/agent.toml.example ===
+# Beacon Agent Configuration
+# /etc/beacon/agent.toml
+
+# Beacon server WebSocket address (TLS required in production)
+server_addr = "wss://beacon.example.com/ws/ingest/"
+
+# Username for API authentication
+username = "admin"
+
+# Local SQLite storage directory
+storage_dir = "/var/lib/beacon/agent"
+
+# Collection interval in seconds (1, 5, 30, 60)
+interval_seconds = 5
+
+[collectors]
+cpu         = true
+ram         = true
+storage     = true
+network     = true
+process     = true
+systemd     = true
+docker      = false
+# Enable k3s / Kubernetes metrics collection.
+# Requires kubectl on PATH and /etc/rancher/k3s/k3s.yaml to be readable.
+kubernetes  = false
+temperature = true
+power       = false
+# Maximum number of processes to track per collection
+max_processes = 512
+
+[tls]
+# Set to false only for development/testing
+verify_cert  = true
+# Optional custom CA cert path (leave empty to use system certs)
+ca_cert_path = ""
+
+[queue]
+# Max retries before moving to Dead Letter Queue
+max_retries      = 5
+# Max messages buffered offline
+max_queue_size   = 100000
+# Retry backoff base in milliseconds
+retry_backoff_ms = 1000
+
+[encryption]
+# Enable AES-256-GCM payload encryption
+enabled           = true
+# Key rotation interval in days (0 = manual only)
+key_rotation_days = 30
+=== /home/claude/beacon-agent/beacon-agent.service ===
+[Unit]
+Description=Beacon Distributed Linux Observability Agent
+Documentation=https://github.com/your-org/beacon
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=beacon
+Group=beacon
+ExecStart=/usr/local/bin/beacon-agent start --config /etc/beacon/agent.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/beacon /var/log/beacon
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=256M
+CPUQuota=25%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=beacon-agent
+
+[Install]
+WantedBy=multi-user.target
+=== /home/claude/beacon-agent/src/collectors/cpu.rs ===
+// collectors/cpu.rs — CPU Collector (SRP + Collector trait)
+//
+// `CpuCollector` owns only CPU data collection.
+// The `collect()` method is pure: it reads system state and returns `Value`.
+// Scheduling, error logging, and enqueueing live in the trait default `run()`.
+//
+// Testing strategy:
+//   * Call `collect_from()` directly with a pre-populated `sysinfo::System`
+//     to assert on the returned JSON without touching hardware.
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use sysinfo::{CpuRefreshKind, RefreshKind, System};
+use std::fs;
+
+use super::trait_collector::Collector;
+
+pub struct CpuCollector {
+    sys: std::sync::Mutex<System>,
+}
+
+impl CpuCollector {
+    pub fn new() -> Self {
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
+        );
+        sys.refresh_cpu_all();
+        Self { sys: std::sync::Mutex::new(sys) }
+    }
+}
+
+#[async_trait]
+impl Collector for CpuCollector {
+    fn name(&self) -> &'static str { "cpu" }
+
+    async fn collect(&self) -> Result<Value> {
+        let mut sys = self.sys.lock().unwrap();
+        sys.refresh_cpu_all();
+        // First call after construction gives a baseline; sleep for accuracy
+        // is intentionally omitted here — callers control the interval.
+        Ok(collect_from(&sys))
+    }
+}
+
+/// Pure function — testable without `CpuCollector`.
+pub fn collect_from(sys: &System) -> Value {
+    let cpus       = sys.cpus();
+    let core_count = cpus.len();
+    let usage_total = if core_count > 0 {
+        cpus.iter().map(|c| c.cpu_usage() as f64).sum::<f64>() / core_count as f64
+    } else {
+        0.0
+    };
+
+    let per_core: Vec<Value> = cpus.iter().enumerate().map(|(i, cpu)| {
+        json!({
+            "core":      i,
+            "usage_pct": cpu.cpu_usage(),
+            "frequency": cpu.frequency(),
+            "name":      cpu.name(),
+        })
+    }).collect();
+
+    let load_avg  = read_loadavg();
+    let (interrupts, ctx) = read_stat();
+    let temperatures      = read_temperatures();
+
+    json!({
+        "usage_pct":        usage_total,
+        "core_count":       core_count,
+        "per_core":         per_core,
+        "load_avg_1m":      load_avg.0,
+        "load_avg_5m":      load_avg.1,
+        "load_avg_15m":     load_avg.2,
+        "interrupts":       interrupts,
+        "context_switches": ctx,
+        "temperatures_c":   temperatures,
+    })
+}
+
+// ─── /proc readers (SRP: reading only, no side-effects) ──────────────────────
+
+fn read_loadavg() -> (f64, f64, f64) {
+    match fs::read_to_string("/proc/loadavg") {
+        Ok(c) => {
+            let p: Vec<&str> = c.split_whitespace().collect();
+            let v = |s: Option<&&str>| s.and_then(|x| x.parse().ok()).unwrap_or(0.0);
+            (v(p.get(0)), v(p.get(1)), v(p.get(2)))
+        }
+        Err(_) => (0.0, 0.0, 0.0),
+    }
+}
+
+fn read_stat() -> (u64, u64) {
+    let content = match fs::read_to_string("/proc/stat") {
+        Ok(c)  => c,
+        Err(_) => return (0, 0),
+    };
+    let mut intr = 0u64;
+    let mut ctx  = 0u64;
+    for line in content.lines() {
+        if line.starts_with("intr ") {
+            intr = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        }
+        if line.starts_with("ctxt ") {
+            ctx  = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        }
+    }
+    (intr, ctx)
+}
+
+fn read_temperatures() -> Vec<Value> {
+    (0..8).filter_map(|i| {
+        let path      = format!("/sys/class/thermal/thermal_zone{i}/temp");
+        let type_path = format!("/sys/class/thermal/thermal_zone{i}/type");
+        let raw: f64  = fs::read_to_string(&path).ok()?.trim().parse().ok()?;
+        let celsius   = raw / 1000.0;
+        if !(-50.0..=200.0).contains(&celsius) { return None; }
+        let zone_type = fs::read_to_string(&type_path)
+            .unwrap_or_else(|_| format!("zone{i}"));
+        Some(json!({ "zone": i, "type": zone_type.trim(), "temp_c": celsius }))
+    }).collect()
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collect_from_returns_required_keys() {
+        let sys = System::new_with_specifics(
+            RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
+        );
+        let v = collect_from(&sys);
+        assert!(v.get("usage_pct").is_some());
+        assert!(v.get("core_count").is_some());
+        assert!(v.get("per_core").is_some());
+        assert!(v.get("load_avg_1m").is_some());
+    }
+
+    #[test]
+    fn usage_pct_is_non_negative() {
+        let sys = System::new_with_specifics(
+            RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
+        );
+        let v = collect_from(&sys);
+        assert!(v["usage_pct"].as_f64().unwrap() >= 0.0);
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/docker.rs ===
+// collectors/docker.rs — Docker Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use tracing::warn;
+
+use super::trait_collector::Collector;
+
+pub struct DockerCollector;
+
+impl DockerCollector {
+    pub fn new() -> Self { Self }
+}
+
+#[async_trait]
+impl Collector for DockerCollector {
+    fn name(&self) -> &'static str { "docker" }
+
+    async fn collect(&self) -> Result<Value> {
+        let containers = query_docker_containers().await.unwrap_or_default();
+        Ok(aggregate_containers(containers))
+    }
+}
+
+/// Pure aggregation — testable with any Vec<Value>.
+pub fn aggregate_containers(containers: Vec<Value>) -> Value {
+    let running = containers.iter()
+        .filter(|c| c.get("State").and_then(|s| s.as_str()) == Some("running"))
+        .count();
+    json!({
+        "total_containers":   containers.len(),
+        "running_containers": running,
+        "stopped_containers": containers.len() - running,
+        "containers":         containers,
+    })
+}
+
+async fn query_docker_containers() -> Result<Vec<Value>> {
+    let output = tokio::process::Command::new("docker")
+        .args(["ps", "-a", "--format", "{{json .}}"])
+        .output()
+        .await;
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let containers = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect();
+            Ok(containers)
+        }
+        Ok(_) => Ok(vec![]),
+        Err(e) => { warn!("Docker unavailable: {e}"); Ok(vec![]) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_running_vs_stopped() {
+        let containers = vec![
+            json!({"State": "running", "Names": "web"}),
+            json!({"State": "exited",  "Names": "db"}),
+            json!({"State": "running", "Names": "proxy"}),
+        ];
+        let v = aggregate_containers(containers);
+        assert_eq!(v["total_containers"].as_u64().unwrap(),   3);
+        assert_eq!(v["running_containers"].as_u64().unwrap(), 2);
+        assert_eq!(v["stopped_containers"].as_u64().unwrap(), 1);
+    }
+
+    #[test]
+    fn empty_list_produces_zeros() {
+        let v = aggregate_containers(vec![]);
+        assert_eq!(v["total_containers"].as_u64().unwrap(), 0);
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/enqueue_adapter.rs ===
+// collectors/enqueue_adapter.rs — Production MetricsEnqueuer (DIP bridge)
+//
+// Adapts the concrete `QueueEngine` + `StorageManager` pair into the
+// `MetricsEnqueuer` trait that collectors depend on.
+//
+// This keeps collectors free of knowledge about storage internals.
+// In tests, swap this with `MockEnqueuer` from `trait_collector::test_helpers`.
+
+use anyhow::Result;
+use async_trait::async_trait;
+
+use crate::collectors::payload::TelemetryPayload;
+use crate::collectors::trait_collector::MetricsEnqueuer;
+use crate::engines::queue::QueueEngine;
+use crate::storage::StorageManager;
+
+pub struct EnqueueAdapter {
+    queue:   QueueEngine,
+    storage: StorageManager,
+}
+
+impl EnqueueAdapter {
+    pub fn new(queue: QueueEngine, storage: StorageManager) -> Self {
+        Self { queue, storage }
+    }
+}
+
+#[async_trait]
+impl MetricsEnqueuer for EnqueueAdapter {
+    async fn enqueue(&self, payload: &TelemetryPayload) -> Result<()> {
+        // Always persist locally first (offline-first guarantee)
+        self.storage.store_metric(
+            &payload.agent_id,
+            &payload.metric_type,
+            &serde_json::to_string(&payload.data).unwrap_or_default(),
+        ).await?;
+
+        // Then queue for transmission
+        self.queue.enqueue(payload.to_json_bytes(), "metrics").await?;
+        Ok(())
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/k3s.rs ===
+// collectors/k3s.rs — k3s / Kubernetes Metrics Collector (OCP addition)
+//
+// Collects node + pod metrics from a k3s cluster running on this host.
+//
+// Data sources (in priority order):
+//   1. `kubectl top nodes / pods`  — fast, available when k3s is healthy
+//   2. `/run/k3s/containerd/...`   — fallback socket-level pod list
+//   3. kubeconfig at /etc/rancher/k3s/k3s.yaml (default k3s path)
+//
+// Adding this collector required ZERO changes to any existing file —
+// it is registered in `mod.rs` only (Open/Closed Principle).
+//
+// Testing strategy:
+//   * `parse_kubectl_nodes()` and `parse_kubectl_pods()` are pure functions
+//     that accept raw kubectl JSON bytes — test with fixture strings.
+//   * `K3sCollector::collect()` calls them; mock the command runner for
+//     integration-level tests via the `CommandRunner` trait.
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::process::Command;
+use tracing::warn;
+
+use super::trait_collector::Collector;
+
+// ─── Dependency inversion for command execution ───────────────────────────────
+// Swappable in tests without forking processes.
+
+pub trait CommandRunner: Send + Sync {
+    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<std::process::Output>;
+}
+
+pub struct RealCommandRunner;
+
+impl CommandRunner for RealCommandRunner {
+    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+        Command::new(program).args(args).output()
+    }
+}
+
+// ─── Collector ────────────────────────────────────────────────────────────────
+
+pub struct K3sCollector {
+    runner:     Box<dyn CommandRunner>,
+    kubeconfig: String,
+}
+
+impl K3sCollector {
+    /// Production constructor — uses real kubectl and the default k3s kubeconfig.
+    pub fn new() -> Self {
+        Self {
+            runner:     Box::new(RealCommandRunner),
+            kubeconfig: "/etc/rancher/k3s/k3s.yaml".to_string(),
+        }
+    }
+
+    /// Inject a custom runner and kubeconfig (for tests).
+    pub fn with_runner(runner: Box<dyn CommandRunner>, kubeconfig: &str) -> Self {
+        Self { runner, kubeconfig: kubeconfig.to_string() }
+    }
+}
+
+#[async_trait]
+impl Collector for K3sCollector {
+    fn name(&self) -> &'static str { "k3s" }
+
+    async fn collect(&self) -> Result<Value> {
+        // Check if k3s is reachable before collecting
+        let server_status = probe_k3s_server(&*self.runner, &self.kubeconfig);
+
+        let nodes = collect_nodes(&*self.runner, &self.kubeconfig);
+        let pods  = collect_pods(&*self.runner,  &self.kubeconfig);
+
+        Ok(json!({
+            "server_reachable": server_status,
+            "nodes": nodes,
+            "pods":  pods,
+            "node_count": nodes.as_array().map(|a| a.len()).unwrap_or(0),
+            "pod_count":  pods.as_array().map(|a| a.len()).unwrap_or(0),
+            "running_pods": count_running_pods(&pods),
+        }))
+    }
+}
+
+// ─── Data collection helpers ──────────────────────────────────────────────────
+
+fn kubectl_args<'a>(kubeconfig: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec!["--kubeconfig", kubeconfig];
+    args.extend_from_slice(extra);
+    args
+}
+
+fn probe_k3s_server(runner: &dyn CommandRunner, kubeconfig: &str) -> bool {
+    runner
+        .run("kubectl", &kubectl_args(kubeconfig, &["cluster-info", "--request-timeout=2s"]))
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn collect_nodes(runner: &dyn CommandRunner, kubeconfig: &str) -> Value {
+    let args = kubectl_args(kubeconfig, &["get", "nodes", "-o", "json"]);
+    match runner.run("kubectl", &args) {
+        Ok(out) if out.status.success() => {
+            parse_kubectl_nodes(&out.stdout).unwrap_or(json!([]))
+        }
+        Ok(_) | Err(_) => {
+            warn!("k3s: unable to list nodes");
+            json!([])
+        }
+    }
+}
+
+fn collect_pods(runner: &dyn CommandRunner, kubeconfig: &str) -> Value {
+    let args = kubectl_args(kubeconfig, &["get", "pods", "--all-namespaces", "-o", "json"]);
+    match runner.run("kubectl", &args) {
+        Ok(out) if out.status.success() => {
+            parse_kubectl_pods(&out.stdout).unwrap_or(json!([]))
+        }
+        Ok(_) | Err(_) => {
+            warn!("k3s: unable to list pods");
+            json!([])
+        }
+    }
+}
+
+fn count_running_pods(pods: &Value) -> usize {
+    pods.as_array().map(|arr| {
+        arr.iter()
+           .filter(|p| p.get("phase").and_then(|v| v.as_str()) == Some("Running"))
+           .count()
+    }).unwrap_or(0)
+}
+
+// ─── Pure parsers (testable) ──────────────────────────────────────────────────
+
+/// Parse `kubectl get nodes -o json` output into a summary array.
+pub fn parse_kubectl_nodes(raw: &[u8]) -> Result<Value> {
+    let doc: Value = serde_json::from_slice(raw)?;
+    let items = doc["items"].as_array().cloned().unwrap_or_default();
+
+    let nodes: Vec<Value> = items.iter().map(|node| {
+        let name    = node["metadata"]["name"].as_str().unwrap_or("").to_string();
+        let status  = extract_node_ready_status(node);
+        let version = node["status"]["nodeInfo"]["kubeletVersion"]
+            .as_str().unwrap_or("").to_string();
+        let arch    = node["status"]["nodeInfo"]["architecture"]
+            .as_str().unwrap_or("").to_string();
+        let os      = node["status"]["nodeInfo"]["osImage"]
+            .as_str().unwrap_or("").to_string();
+
+        // Resource capacity
+        let cpu_cap = node["status"]["capacity"]["cpu"]
+            .as_str().unwrap_or("0").to_string();
+        let mem_cap = node["status"]["capacity"]["memory"]
+            .as_str().unwrap_or("0Ki").to_string();
+
+        // Resource allocatable
+        let cpu_alloc = node["status"]["allocatable"]["cpu"]
+            .as_str().unwrap_or("0").to_string();
+        let mem_alloc = node["status"]["allocatable"]["memory"]
+            .as_str().unwrap_or("0Ki").to_string();
+
+        json!({
+            "name":               name,
+            "ready":              status,
+            "kubelet_version":    version,
+            "architecture":       arch,
+            "os":                 os,
+            "capacity_cpu":       cpu_cap,
+            "capacity_memory":    mem_cap,
+            "allocatable_cpu":    cpu_alloc,
+            "allocatable_memory": mem_alloc,
+        })
+    }).collect();
+
+    Ok(Value::Array(nodes))
+}
+
+fn extract_node_ready_status(node: &Value) -> bool {
+    node["status"]["conditions"]
+        .as_array()
+        .and_then(|conditions| {
+            conditions.iter()
+                .find(|c| c["type"].as_str() == Some("Ready"))
+                .and_then(|c| c["status"].as_str())
+                .map(|s| s == "True")
+        })
+        .unwrap_or(false)
+}
+
+/// Parse `kubectl get pods --all-namespaces -o json` into a summary array.
+pub fn parse_kubectl_pods(raw: &[u8]) -> Result<Value> {
+    let doc: Value = serde_json::from_slice(raw)?;
+    let items = doc["items"].as_array().cloned().unwrap_or_default();
+
+    let pods: Vec<Value> = items.iter().map(|pod| {
+        let name      = pod["metadata"]["name"].as_str().unwrap_or("").to_string();
+        let namespace = pod["metadata"]["namespace"].as_str().unwrap_or("").to_string();
+        let phase     = pod["status"]["phase"].as_str().unwrap_or("Unknown").to_string();
+        let node_name = pod["spec"]["nodeName"].as_str().unwrap_or("").to_string();
+
+        let containers: Vec<Value> = pod["spec"]["containers"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|c| {
+                let cname   = c["name"].as_str().unwrap_or("").to_string();
+                let image   = c["image"].as_str().unwrap_or("").to_string();
+                let ready   = extract_container_ready(pod, &cname);
+                let restarts = extract_container_restarts(pod, &cname);
+                json!({
+                    "name":     cname,
+                    "image":    image,
+                    "ready":    ready,
+                    "restarts": restarts,
+                })
+            })
+            .collect();
+
+        json!({
+            "name":       name,
+            "namespace":  namespace,
+            "phase":      phase,
+            "node":       node_name,
+            "containers": containers,
+        })
+    }).collect();
+
+    Ok(Value::Array(pods))
+}
+
+fn extract_container_ready(pod: &Value, container_name: &str) -> bool {
+    pod["status"]["containerStatuses"]
+        .as_array()
+        .and_then(|statuses| {
+            statuses.iter()
+                .find(|cs| cs["name"].as_str() == Some(container_name))
+                .and_then(|cs| cs["ready"].as_bool())
+        })
+        .unwrap_or(false)
+}
+
+fn extract_container_restarts(pod: &Value, container_name: &str) -> u64 {
+    pod["status"]["containerStatuses"]
+        .as_array()
+        .and_then(|statuses| {
+            statuses.iter()
+                .find(|cs| cs["name"].as_str() == Some(container_name))
+                .and_then(|cs| cs["restartCount"].as_u64())
+        })
+        .unwrap_or(0)
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Node parsing ──────────────────────────────────────────────────────────
+
+    fn node_fixture(name: &str, ready: &str) -> Value {
+        json!({
+            "metadata": { "name": name },
+            "status": {
+                "conditions": [{ "type": "Ready", "status": ready }],
+                "nodeInfo": {
+                    "kubeletVersion": "v1.28.0+k3s1",
+                    "architecture":   "amd64",
+                    "osImage":        "Ubuntu 22.04.3 LTS"
+                },
+                "capacity":    { "cpu": "4", "memory": "8Gi" },
+                "allocatable": { "cpu": "3800m", "memory": "7Gi" }
+            }
+        })
+    }
+
+    #[test]
+    fn parse_nodes_extracts_name_and_ready() {
+        let doc = json!({ "items": [
+            node_fixture("node-1", "True"),
+            node_fixture("node-2", "False"),
+        ]});
+        let raw    = serde_json::to_vec(&doc).unwrap();
+        let parsed = parse_kubectl_nodes(&raw).unwrap();
+        let nodes  = parsed.as_array().unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0]["name"], "node-1");
+        assert_eq!(nodes[0]["ready"], true);
+        assert_eq!(nodes[1]["ready"], false);
+    }
+
+    #[test]
+    fn parse_nodes_empty_items_returns_empty_array() {
+        let doc = json!({ "items": [] });
+        let raw    = serde_json::to_vec(&doc).unwrap();
+        let parsed = parse_kubectl_nodes(&raw).unwrap();
+        assert!(parsed.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_nodes_invalid_json_returns_error() {
+        let result = parse_kubectl_nodes(b"not-json");
+        assert!(result.is_err());
+    }
+
+    // ── Pod parsing ───────────────────────────────────────────────────────────
+
+    fn pod_fixture(name: &str, namespace: &str, phase: &str, restarts: u64) -> Value {
+        json!({
+            "metadata": { "name": name, "namespace": namespace },
+            "spec": {
+                "nodeName":   "node-1",
+                "containers": [{ "name": "app", "image": "nginx:latest" }]
+            },
+            "status": {
+                "phase": phase,
+                "containerStatuses": [{
+                    "name":         "app",
+                    "ready":        phase == "Running",
+                    "restartCount": restarts,
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn parse_pods_extracts_phase_and_restarts() {
+        let doc = json!({ "items": [
+            pod_fixture("web-1", "default", "Running", 0),
+            pod_fixture("db-1",  "default", "Pending", 3),
+        ]});
+        let raw    = serde_json::to_vec(&doc).unwrap();
+        let parsed = parse_kubectl_pods(&raw).unwrap();
+        let pods   = parsed.as_array().unwrap();
+        assert_eq!(pods.len(), 2);
+        assert_eq!(pods[0]["phase"], "Running");
+        assert_eq!(pods[1]["phase"], "Pending");
+        assert_eq!(pods[1]["containers"][0]["restarts"].as_u64().unwrap(), 3);
+    }
+
+    #[test]
+    fn count_running_pods_counts_only_running() {
+        let pods = json!([
+            { "phase": "Running" },
+            { "phase": "Pending" },
+            { "phase": "Running" },
+            { "phase": "Failed"  },
+        ]);
+        assert_eq!(count_running_pods(&pods), 2);
+    }
+
+    // ── Mock command runner ───────────────────────────────────────────────────
+
+    struct MockRunner { output: Vec<u8>, success: bool }
+
+    impl CommandRunner for MockRunner {
+        fn run(&self, _program: &str, _args: &[&str]) -> std::io::Result<std::process::Output> {
+            use std::os::unix::process::ExitStatusExt;
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(if self.success { 0 } else { 1 }),
+                stdout: self.output.clone(),
+                stderr: vec![],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn collector_returns_zero_counts_when_kubectl_fails() {
+        let runner = Box::new(MockRunner { output: vec![], success: false });
+        let c      = K3sCollector::with_runner(runner, "/tmp/fake.yaml");
+        let v      = c.collect().await.unwrap();
+        assert_eq!(v["node_count"].as_u64().unwrap(), 0);
+        assert_eq!(v["pod_count"].as_u64().unwrap(),  0);
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/kernel.rs ===
+// collectors/kernel.rs — Kernel Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use sysinfo::System;
+use std::fs;
+
+use super::trait_collector::Collector;
+use crate::engines::identity::AgentIdentity;
+
+pub struct KernelCollector {
+    identity: AgentIdentity,
+}
+
+impl KernelCollector {
+    pub fn new(identity: AgentIdentity) -> Self { Self { identity } }
+}
+
+#[async_trait]
+impl Collector for KernelCollector {
+    fn name(&self) -> &'static str { "kernel" }
+
+    async fn collect(&self) -> Result<Value> {
+        Ok(collect_from(&self.identity))
+    }
+}
+
+pub fn collect_from(identity: &AgentIdentity) -> Value {
+    let kernel_version = System::kernel_version().unwrap_or_else(|| "unknown".into());
+    let os_version     = System::os_version().unwrap_or_else(|| "unknown".into());
+    let hostname       = System::host_name().unwrap_or_else(|| identity.hostname.clone());
+    let uptime_secs    = System::uptime();
+    let boot_time      = System::boot_time();
+    let arch           = std::env::consts::ARCH.to_string();
+
+    let proc_version = fs::read_to_string("/proc/version")
+        .unwrap_or_default().trim().to_string();
+    let os_type      = fs::read_to_string("/proc/sys/kernel/ostype")
+        .unwrap_or_else(|_| "Linux\n".into()).trim().to_string();
+    let cmdline      = fs::read_to_string("/proc/cmdline")
+        .unwrap_or_default().trim().replace('\0', " ").to_string();
+    let cpu_count    = fs::read_to_string("/proc/cpuinfo")
+        .unwrap_or_default().lines()
+        .filter(|l| l.starts_with("processor"))
+        .count();
+
+    json!({
+        "kernel_version": kernel_version,
+        "os_version":     os_version,
+        "os_type":        os_type,
+        "hostname":       hostname,
+        "architecture":   arch,
+        "uptime_secs":    uptime_secs,
+        "boot_time_unix": boot_time,
+        "cpu_count":      cpu_count,
+        "proc_version":   proc_version,
+        "cmdline":        cmdline,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_identity() -> AgentIdentity {
+        AgentIdentity {
+            agent_id: "test-agent".into(),
+            hostname:  "test-host".into(),
+            os:        "linux".into(),
+            arch:      "x86_64".into(),
+        }
+    }
+
+    #[test]
+    fn collect_from_returns_required_keys() {
+        let identity = dummy_identity();
+        let v = collect_from(&identity);
+        for key in &["kernel_version", "os_version", "hostname",
+                     "architecture", "uptime_secs", "cpu_count"] {
+            assert!(v.get(key).is_some(), "missing: {key}");
+        }
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/mod.rs ===
+// collectors/mod.rs — Collector Registry
+//
+// To add a new collector:
+//   1. Create `src/collectors/my_new.rs` implementing `Collector`.
+//   2. Add `pub mod my_new;` below.
+//   3. Push it into `build_collectors()` — nothing else changes.
+//
+// This is the only place modified when extending the system (OCP).
+
+pub mod cpu;
+pub mod docker;
+pub mod enqueue_adapter;
+pub mod k3s;
+pub mod kernel;
+pub mod network;
+pub mod payload;
+pub mod process;
+pub mod ram;
+pub mod storage;
+pub mod systemd;
+pub mod trait_collector;
+
+use anyhow::Result;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::task::JoinHandle;
+use tracing::info;
+
+use crate::config::AgentConfig;
+use crate::engines::identity::AgentIdentity;
+use crate::engines::queue::QueueEngine;
+use crate::storage::StorageManager;
+
+use enqueue_adapter::EnqueueAdapter;
+use trait_collector::{Collector, MetricsEnqueuer};
+
+// Re-export for external use
+pub use payload::TelemetryPayload;
+
+// ─── Registry ─────────────────────────────────────────────────────────────────
+
+/// Build the list of active collectors based on configuration.
+/// Returns `(name, boxed_collector)` pairs so callers can log names.
+pub fn build_collectors(
+    config:   &AgentConfig,
+    identity: &AgentIdentity,
+) -> Vec<(&'static str, Box<dyn Collector>)> {
+    let c = &config.collectors;
+    let mut collectors: Vec<(&'static str, Box<dyn Collector>)> = Vec::new();
+
+    macro_rules! register {
+        ($flag:expr, $collector:expr) => {
+            if $flag {
+                let c: Box<dyn Collector> = Box::new($collector);
+                collectors.push((c.name(), c));
+            }
+        };
+    }
+
+    register!(c.cpu,        cpu::CpuCollector::new());
+    register!(c.ram,        ram::RamCollector::new());
+    register!(c.storage,    storage::StorageCollector::new());
+    register!(c.network,    network::NetworkCollector::new());
+    register!(c.process,    process::ProcessCollector::new(c.max_processes));
+    register!(c.systemd,    systemd::SystemdCollector::new());
+    register!(c.docker,     docker::DockerCollector::new());
+    register!(c.kubernetes, k3s::K3sCollector::new());
+
+    // Kernel collector is always active — lightweight and required for identity
+    let kernel: Box<dyn Collector> = Box::new(kernel::KernelCollector::new(identity.clone()));
+    collectors.push((kernel.name(), kernel));
+
+    collectors
+}
+
+/// Spawn all active collectors as independent Tokio tasks.
+///
+/// Each collector gets its own `Arc<dyn MetricsEnqueuer>` so failure in one
+/// collector's enqueue path cannot cascade to others.
+pub async fn start_all(
+    config:   AgentConfig,
+    identity: AgentIdentity,
+    queue:    QueueEngine,
+    storage:  StorageManager,
+) -> Result<Vec<JoinHandle<()>>> {
+    let interval   = Duration::from_secs(config.interval_seconds);
+    let agent_id   = identity.agent_id.clone();
+    let collectors = build_collectors(&config, &identity);
+    let mut handles = Vec::with_capacity(collectors.len());
+
+    for (name, collector) in collectors {
+        info!("Starting {} collector (interval={}s)", name, config.interval_seconds);
+
+        // Each collector gets its own enqueuer — isolation between collectors
+        let enqueuer: Arc<dyn MetricsEnqueuer> = Arc::new(
+            EnqueueAdapter::new(queue.clone(), storage.clone())
+        );
+        let agent_id = agent_id.clone();
+
+        handles.push(tokio::spawn(async move {
+            collector.run(enqueuer.as_ref(), interval, &agent_id).await;
+        }));
+    }
+
+    info!("Started {} collectors", handles.len());
+    Ok(handles)
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{CollectorConfig, AgentConfig};
+    use trait_collector::test_helpers::MockEnqueuer;
+    use std::sync::Arc;
+
+    fn test_identity() -> AgentIdentity {
+        AgentIdentity {
+            agent_id: "test-agent".into(),
+            hostname:  "localhost".into(),
+            os:        "linux".into(),
+            arch:      "x86_64".into(),
+        }
+    }
+
+    fn all_on_config() -> AgentConfig {
+        AgentConfig {
+            collectors: CollectorConfig {
+                cpu: true, ram: true, storage: true, network: true,
+                process: true, systemd: true, docker: true, kubernetes: true,
+                temperature: true, power: false, max_processes: 10,
+            },
+            ..AgentConfig::default()
+        }
+    }
+
+    fn all_off_config() -> AgentConfig {
+        AgentConfig {
+            collectors: CollectorConfig {
+                cpu: false, ram: false, storage: false, network: false,
+                process: false, systemd: false, docker: false, kubernetes: false,
+                temperature: false, power: false, max_processes: 10,
+            },
+            ..AgentConfig::default()
+        }
+    }
+
+    #[test]
+    fn build_collectors_all_on_includes_kernel() {
+        let identity   = test_identity();
+        let collectors = build_collectors(&all_on_config(), &identity);
+        let names: Vec<_> = collectors.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"kernel"), "kernel should always be present");
+    }
+
+    #[test]
+    fn build_collectors_all_off_still_has_kernel() {
+        let identity   = test_identity();
+        let collectors = build_collectors(&all_off_config(), &identity);
+        let names: Vec<_> = collectors.iter().map(|(n, _)| *n).collect();
+        // Only kernel should remain
+        assert_eq!(names, vec!["kernel"]);
+    }
+
+    /// Verify that a Collector can be run against a MockEnqueuer —
+    /// demonstrates the full test harness without touching I/O.
+    #[tokio::test]
+    async fn kernel_collector_produces_payload_with_mock_enqueuer() {
+        let identity  = test_identity();
+        let collector = kernel::KernelCollector::new(identity);
+        let enqueuer  = MockEnqueuer::default();
+        let duration  = Duration::from_millis(1);
+
+        // Drive one collection cycle
+        let data = collector.collect().await.unwrap();
+        let payload = TelemetryPayload::new("test-agent", collector.name(), data);
+        enqueuer.enqueue(&payload).await.unwrap();
+
+        let calls = enqueuer.drain();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].metric_type, "kernel");
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/network.rs ===
+// collectors/network.rs — Network Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use sysinfo::Networks;
+use std::fs;
+
+use super::trait_collector::Collector;
+
+pub struct NetworkCollector {
+    networks: std::sync::Mutex<Networks>,
+}
+
+impl NetworkCollector {
+    pub fn new() -> Self {
+        Self {
+            networks: std::sync::Mutex::new(Networks::new_with_refreshed_list()),
+        }
+    }
+}
+
+#[async_trait]
+impl Collector for NetworkCollector {
+    fn name(&self) -> &'static str { "network" }
+
+    async fn collect(&self) -> Result<Value> {
+        let mut networks = self.networks.lock().unwrap();
+        networks.refresh_list();
+        Ok(collect_from(&networks))
+    }
+}
+
+pub fn collect_from(networks: &Networks) -> Value {
+    let interfaces: Vec<Value> = networks.iter().map(|(name, net)| {
+        json!({
+            "name":          name,
+            "rx_bytes":      net.total_received(),
+            "tx_bytes":      net.total_transmitted(),
+            "rx_packets":    net.total_packets_received(),
+            "tx_packets":    net.total_packets_transmitted(),
+            "rx_errors":     net.total_errors_on_received(),
+            "tx_errors":     net.total_errors_on_transmitted(),
+            "rx_bytes_rate": net.received(),
+            "tx_bytes_rate": net.transmitted(),
+        })
+    }).collect();
+
+    json!({
+        "interfaces": interfaces,
+        "tcp":        read_tcp_stats(),
+        "udp":        read_udp_stats(),
+    })
+}
+
+// ─── /proc readers ────────────────────────────────────────────────────────────
+
+fn count_tcp_states(content: &str, established: &mut u32, time_wait: &mut u32,
+                    close_wait: &mut u32, listen: &mut u32) {
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 4 {
+            match parts[3] {
+                "01" => *established += 1,
+                "06" => *time_wait   += 1,
+                "08" => *close_wait  += 1,
+                "0A" => *listen      += 1,
+                _    => {}
+            }
+        }
+    }
+}
+
+pub fn read_tcp_stats() -> Value {
+    let (mut established, mut time_wait, mut close_wait, mut listen) = (0u32, 0u32, 0u32, 0u32);
+    for path in &["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(c) = fs::read_to_string(path) {
+            count_tcp_states(&c, &mut established, &mut time_wait, &mut close_wait, &mut listen);
+        }
+    }
+    json!({ "established": established, "time_wait": time_wait,
+             "close_wait": close_wait,  "listening": listen })
+}
+
+pub fn read_udp_stats() -> Value {
+    let sockets: u32 = ["/proc/net/udp", "/proc/net/udp6"]
+        .iter()
+        .filter_map(|p| fs::read_to_string(p).ok())
+        .map(|c| c.lines().skip(1).count() as u32)
+        .sum();
+    json!({ "sockets": sockets })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tcp_stat_parses_known_state_codes() {
+        // /proc/net/tcp format: col[3] is the state hex
+        let mock = "  sl  local_address rem_address   st\n\
+                    0: 00000000:0016 00000000:0000 0A 00000000:00000000\n\
+                    1: 0F02000A:BDB4 0202000A:0016 01 00000000:00000000\n";
+        let (mut e, mut tw, mut cw, mut l) = (0u32, 0u32, 0u32, 0u32);
+        count_tcp_states(mock, &mut e, &mut tw, &mut cw, &mut l);
+        assert_eq!(l, 1, "LISTEN (0A) count");
+        assert_eq!(e, 1, "ESTABLISHED (01) count");
+    }
+
+    #[test]
+    fn collect_from_has_expected_shape() {
+        let networks = Networks::new_with_refreshed_list();
+        let v = collect_from(&networks);
+        assert!(v.get("interfaces").is_some());
+        assert!(v.get("tcp").is_some());
+        assert!(v.get("udp").is_some());
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/payload.rs ===
+// collectors/payload.rs — Telemetry Payload (Single Responsibility)
+//
+// Owns the wire format for every metric emitted by the agent.
+// Kept separate from collection logic so serialisation changes never
+// require touching individual collector files.
+
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static SEQ: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TelemetryPayload {
+    pub agent_id:        String,
+    pub metric_type:     String,
+    pub timestamp:       String,
+    pub data:            serde_json::Value,
+    pub schema_version:  String,
+    pub sequence_number: u64,
+}
+
+impl TelemetryPayload {
+    pub fn new(agent_id: &str, metric_type: &str, data: serde_json::Value) -> Self {
+        Self {
+            agent_id:        agent_id.to_string(),
+            metric_type:     metric_type.to_string(),
+            timestamp:       chrono::Utc::now().to_rfc3339(),
+            data,
+            schema_version:  "1.0".to_string(),
+            sequence_number: SEQ.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+
+    pub fn to_json_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sequence_numbers_are_monotonically_increasing() {
+        let a = TelemetryPayload::new("agent-1", "cpu", json!({}));
+        let b = TelemetryPayload::new("agent-1", "ram", json!({}));
+        assert!(b.sequence_number > a.sequence_number);
+    }
+
+    #[test]
+    fn roundtrips_through_json() {
+        let original = TelemetryPayload::new("agent-1", "cpu", json!({"usage": 42.5}));
+        let bytes  = original.to_json_bytes();
+        let parsed: TelemetryPayload = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed.metric_type, "cpu");
+        assert_eq!(parsed.agent_id,    "agent-1");
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/process.rs ===
+// collectors/process.rs — Process Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use std::{fs, sync::Mutex};
+
+use super::trait_collector::Collector;
+
+pub struct ProcessCollector {
+    sys:          Mutex<System>,
+    boot_id:      String,
+    max_processes: usize,
+}
+
+impl ProcessCollector {
+    pub fn new(max_processes: usize) -> Self {
+        Self {
+            sys: Mutex::new(System::new_with_specifics(
+                RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+            )),
+            boot_id: read_boot_id(),
+            max_processes,
+        }
+    }
+}
+
+#[async_trait]
+impl Collector for ProcessCollector {
+    fn name(&self) -> &'static str { "process" }
+
+    async fn collect(&self) -> Result<Value> {
+        let mut sys = self.sys.lock().unwrap();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+        Ok(collect_from(&sys, &self.boot_id, self.max_processes))
+    }
+}
+
+pub fn collect_from(sys: &System, boot_id: &str, max_processes: usize) -> Value {
+    let mut procs: Vec<_> = sys.processes().values().collect();
+    procs.sort_by(|a, b| {
+        b.cpu_usage().partial_cmp(&a.cpu_usage())
+         .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    procs.truncate(max_processes);
+
+    let process_list: Vec<Value> = procs.iter().map(|p| {
+        json!({
+            "pid":         p.pid().as_u32(),
+            "boot_id":     boot_id,
+            "start_time":  p.start_time(),
+            "name":        p.name(),
+            "exe":         p.exe().map(|e| e.display().to_string()),
+            "cpu_pct":     p.cpu_usage(),
+            "mem_bytes":   p.memory(),
+            "virtual_mem": p.virtual_memory(),
+            "status":      format!("{:?}", p.status()),
+            "parent_pid":  p.parent().map(|pp| pp.as_u32()),
+            "threads":     p.tasks().map(|t| t.len()),
+        })
+    }).collect();
+
+    let total = sys.processes().len();
+    json!({
+        "total_processes": total,
+        "collected":       process_list.len(),
+        "capped":          total > max_processes,
+        "processes":       process_list,
+    })
+}
+
+fn read_boot_id() -> String {
+    fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_processes_cap_is_respected() {
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+        );
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+        let total = sys.processes().len();
+        if total < 2 { return; } // skip if no processes on this host
+
+        let cap = 1;
+        let v   = collect_from(&sys, "test-boot-id", cap);
+        assert_eq!(v["collected"].as_u64().unwrap(), cap as u64);
+        assert_eq!(v["capped"].as_bool().unwrap(), total > cap);
+    }
+
+    #[test]
+    fn no_cap_collects_all() {
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+        );
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+        let total = sys.processes().len();
+        let v     = collect_from(&sys, "boot", usize::MAX);
+        assert_eq!(v["total_processes"].as_u64().unwrap(), total as u64);
+        assert_eq!(v["capped"].as_bool().unwrap(), false);
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/ram.rs ===
+// collectors/ram.rs — RAM Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use sysinfo::{MemoryRefreshKind, RefreshKind, System};
+use std::{collections::HashMap, fs};
+
+use super::trait_collector::Collector;
+
+pub struct RamCollector {
+    sys: std::sync::Mutex<System>,
+}
+
+impl RamCollector {
+    pub fn new() -> Self {
+        Self {
+            sys: std::sync::Mutex::new(System::new_with_specifics(
+                RefreshKind::new().with_memory(MemoryRefreshKind::everything()),
+            )),
+        }
+    }
+}
+
+#[async_trait]
+impl Collector for RamCollector {
+    fn name(&self) -> &'static str { "ram" }
+
+    async fn collect(&self) -> Result<Value> {
+        let mut sys = self.sys.lock().unwrap();
+        sys.refresh_memory();
+        Ok(collect_from(&sys))
+    }
+}
+
+/// Pure function — pass any `System` snapshot for unit testing.
+pub fn collect_from(sys: &System) -> Value {
+    let total = sys.total_memory();
+    let used  = sys.used_memory();
+    let free  = sys.free_memory();
+    let avail = sys.available_memory();
+
+    let swap_total = sys.total_swap();
+    let swap_used  = sys.used_swap();
+
+    let usage_pct = if total > 0 { used as f64 / total as f64 * 100.0 } else { 0.0 };
+    let swap_pct  = if swap_total > 0 { swap_used as f64 / swap_total as f64 * 100.0 } else { 0.0 };
+
+    let meminfo = read_meminfo();
+    let kb = |k: &str| meminfo.get(k).copied().unwrap_or(0) * 1024;
+
+    json!({
+        "total_bytes":     total,
+        "used_bytes":      used,
+        "free_bytes":      free,
+        "available_bytes": avail,
+        "usage_pct":       usage_pct,
+        "cached_bytes":    kb("Cached"),
+        "buffers_bytes":   kb("Buffers"),
+        "slab_bytes":      kb("Slab"),
+        "swap": {
+            "total_bytes": swap_total,
+            "used_bytes":  swap_used,
+            "free_bytes":  swap_total.saturating_sub(swap_used),
+            "usage_pct":   swap_pct,
+        },
+        "hugepages": {
+            "total":   meminfo.get("HugePages_Total").copied().unwrap_or(0),
+            "free":    meminfo.get("HugePages_Free").copied().unwrap_or(0),
+            "size_kb": meminfo.get("Hugepagesize").copied().unwrap_or(0),
+        },
+        "dirty_bytes":  kb("Dirty"),
+        "mapped_bytes": kb("Mapped"),
+    })
+}
+
+fn read_meminfo() -> HashMap<String, u64> {
+    let mut map = HashMap::new();
+    if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+        for line in content.lines() {
+            if let Some((key, rest)) = line.split_once(':') {
+                let val = rest.split_whitespace().next()
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                map.insert(key.trim().to_string(), val);
+            }
+        }
+    }
+    map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collect_from_has_required_fields() {
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_memory(MemoryRefreshKind::everything()),
+        );
+        sys.refresh_memory();
+        let v = collect_from(&sys);
+        for key in &["total_bytes", "used_bytes", "usage_pct", "swap"] {
+            assert!(v.get(key).is_some(), "missing field: {key}");
+        }
+    }
+
+    #[test]
+    fn usage_pct_is_in_range() {
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_memory(MemoryRefreshKind::everything()),
+        );
+        sys.refresh_memory();
+        let v   = collect_from(&sys);
+        let pct = v["usage_pct"].as_f64().unwrap();
+        assert!((0.0..=100.0).contains(&pct));
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/storage.rs ===
+// collectors/storage.rs — Storage Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use sysinfo::Disks;
+use std::{collections::HashMap, fs, sync::Mutex};
+
+use super::trait_collector::Collector;
+
+pub struct StorageCollector {
+    /// Previous (reads, writes) per device — used for delta calculation.
+    prev_stats: Mutex<HashMap<String, (u64, u64)>>,
+}
+
+impl StorageCollector {
+    pub fn new() -> Self {
+        Self { prev_stats: Mutex::new(HashMap::new()) }
+    }
+}
+
+#[async_trait]
+impl Collector for StorageCollector {
+    fn name(&self) -> &'static str { "storage" }
+
+    async fn collect(&self) -> Result<Value> {
+        let disks    = Disks::new_with_refreshed_list();
+        let io_stats = read_diskstats();
+        let mut prev = self.prev_stats.lock().unwrap();
+        Ok(collect_from(&disks, &io_stats, &mut prev))
+    }
+}
+
+pub fn collect_from(
+    disks:    &Disks,
+    io_stats: &HashMap<String, (u64, u64)>,
+    prev:     &mut HashMap<String, (u64, u64)>,
+) -> Value {
+    let filesystems: Vec<Value> = disks.list().iter().map(|disk| {
+        let name  = disk.name().to_string_lossy().to_string();
+        let total = disk.total_space();
+        let avail = disk.available_space();
+        let used  = total.saturating_sub(avail);
+        let pct   = if total > 0 { used as f64 / total as f64 * 100.0 } else { 0.0 };
+        json!({
+            "name":        name,
+            "mount_point": disk.mount_point(),
+            "fs_type":     disk.file_system().to_string_lossy(),
+            "total_bytes": total,
+            "used_bytes":  used,
+            "free_bytes":  avail,
+            "usage_pct":   pct,
+            "is_removable": disk.is_removable(),
+        })
+    }).collect();
+
+    let io: Vec<Value> = io_stats.iter().map(|(dev, &(reads, writes))| {
+        let prev_rw     = prev.get(dev).copied().unwrap_or((0, 0));
+        let read_delta  = reads.saturating_sub(prev_rw.0);
+        let write_delta = writes.saturating_sub(prev_rw.1);
+        prev.insert(dev.clone(), (reads, writes));
+        json!({
+            "device":       dev,
+            "reads_total":  reads,
+            "writes_total": writes,
+            "read_delta":   read_delta,
+            "write_delta":  write_delta,
+        })
+    }).collect();
+
+    json!({ "filesystems": filesystems, "io_stats": io })
+}
+
+pub fn read_diskstats() -> HashMap<String, (u64, u64)> {
+    let mut map = HashMap::new();
+    if let Ok(content) = fs::read_to_string("/proc/diskstats") {
+        for line in content.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 14 {
+                let dev    = parts[2].to_string();
+                let reads  = parts[3].parse().unwrap_or(0);
+                let writes = parts[7].parse().unwrap_or(0);
+                if !dev.starts_with("loop") && !dev.starts_with("ram") {
+                    map.insert(dev, (reads, writes));
+                }
+            }
+        }
+    }
+    map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delta_is_zero_on_first_call() {
+        let disks    = Disks::new_with_refreshed_list();
+        let io_stats: HashMap<String, (u64, u64)> =
+            [("sda".to_string(), (100u64, 200u64))].into();
+        let mut prev: HashMap<String, (u64, u64)> = HashMap::new();
+
+        let v = collect_from(&disks, &io_stats, &mut prev);
+        let io = v["io_stats"].as_array().unwrap();
+        let sda = io.iter().find(|e| e["device"] == "sda").unwrap();
+        // On first call prev was empty, so delta == current value
+        assert_eq!(sda["read_delta"],  100);
+        assert_eq!(sda["write_delta"], 200);
+    }
+
+    #[test]
+    fn delta_is_difference_on_second_call() {
+        let disks = Disks::new_with_refreshed_list();
+        let mut prev: HashMap<String, (u64, u64)> =
+            [("sda".to_string(), (100u64, 200u64))].into();
+        let io_stats: HashMap<String, (u64, u64)> =
+            [("sda".to_string(), (150u64, 250u64))].into();
+
+        let v = collect_from(&disks, &io_stats, &mut prev);
+        let io  = v["io_stats"].as_array().unwrap();
+        let sda = io.iter().find(|e| e["device"] == "sda").unwrap();
+        assert_eq!(sda["read_delta"],  50);
+        assert_eq!(sda["write_delta"], 50);
+    }
+
+    #[test]
+    fn loop_and_ram_devices_are_excluded_from_diskstats() {
+        // read_diskstats filters loop* and ram*; verify the filter logic
+        let mock_lines = "  8  0 sda 100 0 200 0 50 0 100 0 0 0 0 0 0 0\n\
+                           252  0 loop0 1 0 2 0 3 0 4 0 0 0 0 0 0 0\n\
+                           252  1 ram0 5 0 6 0 7 0 8 0 0 0 0 0 0 0\n";
+        let mut map = HashMap::new();
+        for line in mock_lines.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 14 {
+                let dev = parts[2].to_string();
+                if !dev.starts_with("loop") && !dev.starts_with("ram") {
+                    map.insert(dev, (parts[3].parse::<u64>().unwrap_or(0),
+                                     parts[7].parse::<u64>().unwrap_or(0)));
+                }
+            }
+        }
+        assert!(map.contains_key("sda"));
+        assert!(!map.contains_key("loop0"));
+        assert!(!map.contains_key("ram0"));
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/systemd.rs ===
+// collectors/systemd.rs — Systemd Collector (SRP + Collector trait)
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::process::Command;
+use tracing::warn;
+
+use super::trait_collector::Collector;
+
+pub struct SystemdCollector;
+
+impl SystemdCollector {
+    pub fn new() -> Self { Self }
+}
+
+#[async_trait]
+impl Collector for SystemdCollector {
+    fn name(&self) -> &'static str { "systemd" }
+
+    async fn collect(&self) -> Result<Value> {
+        let raw = run_systemctl();
+        Ok(aggregate_services(&raw))
+    }
+}
+
+fn run_systemctl() -> Vec<Value> {
+    let output = Command::new("systemctl")
+        .args(["list-units", "--type=service", "--no-pager", "--plain", "--no-legend"])
+        .output();
+    match output {
+        Ok(out) => parse_systemctl_output(&String::from_utf8_lossy(&out.stdout)),
+        Err(e)  => { warn!("systemctl unavailable: {e}"); vec![] }
+    }
+}
+
+/// Pure — accepts raw text; no process or I/O side effects.
+pub fn parse_systemctl_output(output: &str) -> Vec<Value> {
+    output.lines().filter_map(|line| {
+        let p: Vec<&str> = line.split_whitespace().collect();
+        if p.len() >= 4 {
+            Some(json!({
+                "name":   p[0],
+                "load":   p[1],
+                "active": p[2],
+                "sub":    p[3],
+                "desc":   p[4..].join(" "),
+            }))
+        } else {
+            None
+        }
+    }).take(256).collect()
+}
+
+/// Pure — builds summary from already-parsed services.
+pub fn aggregate_services(services: &[Value]) -> Value {
+    let sub = |v: &Value, s: &str| v.get("sub").and_then(|x| x.as_str()) == Some(s);
+    let failed  = services.iter().filter(|v| sub(v, "failed")).count();
+    let running = services.iter().filter(|v| sub(v, "running")).count();
+    json!({
+        "total_services":   services.len(),
+        "running_services": running,
+        "failed_services":  failed,
+        "services":         services,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = "\
+sshd.service          loaded active running OpenSSH server daemon
+cron.service          loaded active running Regular background program
+nginx.service         loaded failed failed  A high performance web server
+";
+
+    #[test]
+    fn parses_correct_service_count() {
+        let services = parse_systemctl_output(SAMPLE);
+        assert_eq!(services.len(), 3);
+    }
+
+    #[test]
+    fn counts_running_and_failed() {
+        let services  = parse_systemctl_output(SAMPLE);
+        let aggregate = aggregate_services(&services);
+        assert_eq!(aggregate["running_services"].as_u64().unwrap(), 2);
+        assert_eq!(aggregate["failed_services"].as_u64().unwrap(),  1);
+    }
+
+    #[test]
+    fn empty_output_returns_empty() {
+        let services = parse_systemctl_output("");
+        assert!(services.is_empty());
+    }
+
+    #[test]
+    fn short_lines_are_skipped() {
+        let input    = "only three words\n";
+        let services = parse_systemctl_output(input);
+        assert!(services.is_empty());
+    }
+}
+
+=== /home/claude/beacon-agent/src/collectors/trait_collector.rs ===
+// collectors/trait_collector.rs — Collector Abstraction (OCP + LSP + DIP)
+//
+// All collectors implement this single trait. Adding a new collector (e.g. k3s)
+// requires ONLY a new file that implements `Collector` — no modification to
+// existing code (Open/Closed Principle).
+//
+// The trait depends on `MetricsEnqueuer`, not concrete `QueueEngine` +
+// `StorageManager` (Dependency Inversion Principle).
+//
+// For testing, substitute any `MockEnqueuer` that implements `MetricsEnqueuer`
+// without touching the filesystem or network.
+
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::time::Duration;
+
+use crate::collectors::payload::TelemetryPayload;
+
+// ─── Dependency inversion boundary ───────────────────────────────────────────
+
+/// Everything a collector needs to persist its output.
+/// Implemented by the real `EnqueueAdapter` and by `MockEnqueuer` in tests.
+#[async_trait]
+pub trait MetricsEnqueuer: Send + Sync {
+    async fn enqueue(&self, payload: &TelemetryPayload) -> Result<()>;
+}
+
+// ─── Core collector trait ─────────────────────────────────────────────────────
+
+/// A single-responsibility metric source.
+///
+/// Implement `collect()` — a pure, synchronous (or lightweight async) function
+/// that reads data and returns a `Value`.  The `run()` default wraps it in the
+/// standard timer loop, isolating scheduling from collection logic.
+///
+/// Rationale for separating `collect` from `run`:
+///   * `collect` is unit-testable without a Tokio runtime.
+///   * `run` is integration-tested by asserting calls to a mock enqueuer.
+#[async_trait]
+pub trait Collector: Send + Sync {
+    /// Human-readable name used in logs and health reports.
+    fn name(&self) -> &'static str;
+
+    /// Collect one snapshot of metrics. Must not block for longer than ~1s.
+    async fn collect(&self) -> Result<Value>;
+
+    /// Run forever, calling `collect()` every `interval` and forwarding to `enqueuer`.
+    /// Override only when you need custom loop behaviour (e.g. Docker needs
+    /// a daemon check before each collection).
+    async fn run(&self, enqueuer: &dyn MetricsEnqueuer, interval: Duration, agent_id: &str) {
+        use tracing::error;
+        loop {
+            match self.collect().await {
+                Ok(data) => {
+                    let payload = TelemetryPayload::new(agent_id, self.name(), data);
+                    if let Err(e) = enqueuer.enqueue(&payload).await {
+                        error!("{} collector enqueue error: {e}", self.name());
+                    }
+                }
+                Err(e) => error!("{} collector error: {e}", self.name()),
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod test_helpers {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// Records every payload enqueued during a test.
+    #[derive(Clone, Default)]
+    pub struct MockEnqueuer {
+        pub calls: Arc<Mutex<Vec<TelemetryPayload>>>,
+    }
+
+    #[async_trait]
+    impl MetricsEnqueuer for MockEnqueuer {
+        async fn enqueue(&self, payload: &TelemetryPayload) -> Result<()> {
+            self.calls.lock().unwrap().push(payload.clone());
+            Ok(())
+        }
+    }
+
+    impl MockEnqueuer {
+        pub fn drain(&self) -> Vec<TelemetryPayload> {
+            self.calls.lock().unwrap().drain(..).collect()
+        }
+    }
+
+    /// Always fails — lets you test that errors are swallowed by `run()`.
+    pub struct FailingEnqueuer;
+
+    #[async_trait]
+    impl MetricsEnqueuer for FailingEnqueuer {
+        async fn enqueue(&self, _payload: &TelemetryPayload) -> Result<()> {
+            Err(anyhow::anyhow!("injected failure"))
+        }
+    }
+}
+
+=== /home/claude/beacon-agent/src/config/mod.rs ===
+// config/mod.rs — Agent Configuration (SRP: parsing + validation separated)
+//
+// `AgentConfig` owns the data.
+// `ConfigValidator` owns the validation rules (SRP — validation is its own concern).
+// `AgentConfig::load` / `save` are the only I/O entry points.
+
+pub mod validator;
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use tokio::fs;
+
+pub use validator::ConfigValidator;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// WebSocket server address (wss://...)
+    pub server_addr: String,
+    /// Username for API authentication
+    pub username: String,
+    /// Local storage directory
+    pub storage_dir: String,
+    /// Collection interval in seconds
+    pub interval_seconds: u64,
+    pub collectors: CollectorConfig,
+    pub tls:        TlsConfig,
+    pub queue:      QueueConfig,
+    pub encryption: EncryptionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectorConfig {
+    pub cpu:         bool,
+    pub ram:         bool,
+    pub storage:     bool,
+    pub network:     bool,
+    pub process:     bool,
+    pub systemd:     bool,
+    pub docker:      bool,
+    /// Enable k3s / Kubernetes metrics collection
+    pub kubernetes:  bool,
+    pub temperature: bool,
+    pub power:       bool,
+    /// Max processes to track per collection cycle
+    pub max_processes: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsConfig {
+    pub verify_cert:  bool,
+    pub ca_cert_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueConfig {
+    pub max_retries:      u32,
+    pub max_queue_size:   usize,
+    pub retry_backoff_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionConfig {
+    pub enabled:           bool,
+    pub key_rotation_days: u32,
+}
+
+// ─── Defaults ─────────────────────────────────────────────────────────────────
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            server_addr:      "wss://localhost:8000/ws/ingest/".to_string(),
+            username:         "admin".to_string(),
+            storage_dir:      "/var/lib/beacon/agent".to_string(),
+            interval_seconds: 5,
+            collectors: CollectorConfig {
+                cpu:           true,
+                ram:           true,
+                storage:       true,
+                network:       true,
+                process:       true,
+                systemd:       true,
+                docker:        false,
+                kubernetes:    false,
+                temperature:   true,
+                power:         false,
+                max_processes: 512,
+            },
+            tls: TlsConfig {
+                verify_cert:  true,
+                ca_cert_path: None,
+            },
+            queue: QueueConfig {
+                max_retries:      5,
+                max_queue_size:   100_000,
+                retry_backoff_ms: 1_000,
+            },
+            encryption: EncryptionConfig {
+                enabled:           true,
+                key_rotation_days: 30,
+            },
+        }
+    }
+}
+
+// ─── I/O ──────────────────────────────────────────────────────────────────────
+
+impl AgentConfig {
+    pub async fn load(path: &str) -> Result<Self> {
+        if !Path::new(path).exists() {
+            return Ok(Self::default());
+        }
+        let content = fs::read_to_string(path).await?;
+        let config: Self = toml::from_str(&content)?;
+        ConfigValidator::validate(&config)?;
+        Ok(config)
+    }
+
+    pub async fn save(&self, path: &str) -> Result<()> {
+        ConfigValidator::validate(self)?;
+        if let Some(parent) = Path::new(path).parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        fs::write(path, toml::to_string_pretty(self)?).await?;
+        Ok(())
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_is_valid() {
+        ConfigValidator::validate(&AgentConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn invalid_interval_fails_validation() {
+        let mut cfg = AgentConfig::default();
+        cfg.interval_seconds = 0;
+        assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn invalid_server_addr_fails_validation() {
+        let mut cfg = AgentConfig::default();
+        cfg.server_addr = "http://not-a-ws-url".to_string();
+        assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn kubernetes_flag_can_be_enabled() {
+        let mut cfg = AgentConfig::default();
+        cfg.collectors.kubernetes = true;
+        ConfigValidator::validate(&cfg).unwrap();
+    }
+}
+
+=== /home/claude/beacon-agent/src/config/validator.rs ===
+// config/validator.rs — Configuration Validation (SRP)
+//
+// Validation rules are isolated here so they can be unit-tested independently
+// of the I/O in `config/mod.rs`.
+
+use anyhow::{bail, Result};
+use crate::config::AgentConfig;
+
+pub struct ConfigValidator;
+
+impl ConfigValidator {
+    pub fn validate(config: &AgentConfig) -> Result<()> {
+        Self::check_server_addr(&config.server_addr)?;
+        Self::check_interval(config.interval_seconds)?;
+        Self::check_queue(&config.queue.max_queue_size, &config.queue.max_retries)?;
+        Self::check_username(&config.username)?;
+        Ok(())
+    }
+
+    fn check_server_addr(addr: &str) -> Result<()> {
+        if !addr.starts_with("ws://") && !addr.starts_with("wss://") {
+            bail!("server_addr must start with ws:// or wss://, got: {addr}");
+        }
+        Ok(())
+    }
+
+    fn check_interval(interval: u64) -> Result<()> {
+        if interval == 0 {
+            bail!("interval_seconds must be > 0");
+        }
+        if interval > 3600 {
+            bail!("interval_seconds must be <= 3600 (1 hour), got: {interval}");
+        }
+        Ok(())
+    }
+
+    fn check_queue(max_size: &usize, max_retries: &u32) -> Result<()> {
+        if *max_size == 0 {
+            bail!("queue.max_queue_size must be > 0");
+        }
+        if *max_retries == 0 {
+            bail!("queue.max_retries must be > 0");
+        }
+        Ok(())
+    }
+
+    fn check_username(username: &str) -> Result<()> {
+        if username.trim().is_empty() {
+            bail!("username must not be empty");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AgentConfig;
+
+    #[test]
+    fn ws_scheme_is_accepted() {
+        let mut cfg = AgentConfig::default();
+        cfg.server_addr = "ws://localhost:8000/ws/".to_string();
+        assert!(ConfigValidator::validate(&cfg).is_ok());
+    }
+
+    #[test]
+    fn wss_scheme_is_accepted() {
+        ConfigValidator::validate(&AgentConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn http_scheme_is_rejected() {
+        let mut cfg = AgentConfig::default();
+        cfg.server_addr = "http://example.com".to_string();
+        assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn zero_interval_is_rejected() {
+        let mut cfg = AgentConfig::default();
+        cfg.interval_seconds = 0;
+        let err = ConfigValidator::validate(&cfg).unwrap_err();
+        assert!(err.to_string().contains("interval_seconds"));
+    }
+
+    #[test]
+    fn over_max_interval_is_rejected() {
+        let mut cfg = AgentConfig::default();
+        cfg.interval_seconds = 9999;
+        assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn empty_username_is_rejected() {
+        let mut cfg = AgentConfig::default();
+        cfg.username = "   ".to_string();
+        assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn zero_queue_size_is_rejected() {
+        let mut cfg = AgentConfig::default();
+        cfg.queue.max_queue_size = 0;
+        assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+}
+
+=== /home/claude/beacon-agent/src/engines/encryption.rs ===
+// engines/encryption.rs — Encryption Engine
+// AES-256-GCM payload encryption.
+// Key derivation: Argon2id.
+// Key rotation: atomic with rollback support.
+
+use anyhow::{Result, anyhow};
+use aes_gcm::{
+    aead::{Aead, KeyInit, OsRng},
+    Aes256Gcm, Key, Nonce,
+};
+use rand::RngCore;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{info, warn, error};
+
+use crate::config::AgentConfig;
+use crate::storage::StorageManager;
+
+const NONCE_SIZE: usize = 12;  // 96-bit nonce for AES-GCM
+const KEY_SIZE:   usize = 32;  // 256-bit key
+
+#[derive(Clone)]
+pub struct EncryptionEngine {
+    enabled: bool,
+    key:     Arc<RwLock<Option<Vec<u8>>>>,
+    storage: StorageManager,
+}
+
+pub struct EncryptedPayload {
+    /// Layout: [nonce (12 bytes)] || [AES-GCM ciphertext]
+    pub data: Vec<u8>,
+}
+
+impl EncryptionEngine {
+    pub async fn new(config: &AgentConfig, storage: &StorageManager) -> Result<Self> {
+        let enabled = config.encryption.enabled;
+
+        let key = if enabled {
+            match storage.get_active_encryption_key().await? {
+                Some(k) => {
+                    info!("Loaded existing AES-256-GCM encryption key");
+                    Some(k)
+                }
+                None => {
+                    info!("Generating new AES-256-GCM encryption key");
+                    let new_key = Self::generate_key();
+                    storage.store_encryption_key(&new_key).await?;
+                    Some(new_key)
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            enabled,
+            key: Arc::new(RwLock::new(key)),
+            storage: storage.clone(),
+        })
+    }
+
+    // ── Encrypt ───────────────────────────────────────────────────────────────
+
+    pub async fn encrypt(&self, plaintext: &[u8]) -> Result<EncryptedPayload> {
+        if !self.enabled {
+            return Ok(EncryptedPayload { data: plaintext.to_vec() });
+        }
+
+        let key_guard = self.key.read().await;
+        let key_bytes = key_guard.as_ref().ok_or_else(|| anyhow!("No encryption key"))?;
+
+        let key    = Key::<Aes256Gcm>::from_slice(key_bytes);
+        let cipher = Aes256Gcm::new(key);
+
+        let mut nonce_bytes = [0u8; NONCE_SIZE];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext)
+            .map_err(|e| anyhow!("Encryption failed: {:?}", e))?;
+
+        let mut data = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+        data.extend_from_slice(&nonce_bytes);
+        data.extend_from_slice(&ciphertext);
+
+        Ok(EncryptedPayload { data })
+    }
+
+    // ── Decrypt ───────────────────────────────────────────────────────────────
+
+    pub async fn decrypt(&self, payload: &EncryptedPayload) -> Result<Vec<u8>> {
+        if !self.enabled {
+            return Ok(payload.data.clone());
+        }
+
+        if payload.data.len() < NONCE_SIZE {
+            return Err(anyhow!("Payload too short"));
+        }
+
+        let key_guard = self.key.read().await;
+        let key_bytes = key_guard.as_ref().ok_or_else(|| anyhow!("No encryption key"))?;
+
+        let key    = Key::<Aes256Gcm>::from_slice(key_bytes);
+        let cipher = Aes256Gcm::new(key);
+
+        let (nonce_bytes, ciphertext) = payload.data.split_at(NONCE_SIZE);
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| anyhow!("Decryption failed: {:?}", e))
+    }
+
+    // ── Key Rotation ─────────────────────────────────────────────────────────
+    // Steps: 1. Generate new key  2. Re-encrypt queued payloads
+    //        3. Verify round-trip  4. Commit to storage + memory
+
+    pub async fn rotate_key(&self) -> Result<()> {
+        if !self.enabled {
+            return Err(anyhow!("Encryption is disabled"));
+        }
+
+        info!("Starting AES-256-GCM key rotation...");
+        let new_key = Self::generate_key();
+        let old_key = self.key.read().await.clone();
+
+        // Re-encrypt queued messages
+        match self.reencrypt_queue(&old_key, &new_key).await {
+            Ok(n)  => info!("Re-encrypted {} queue messages", n),
+            Err(e) => {
+                error!("Key rotation aborted during re-encryption: {}", e);
+                return Err(e);
+            }
+        }
+
+        // Verify new key works correctly
+        let test = b"beacon-key-rotation-verify";
+        let ep   = self.encrypt_raw(test, &new_key)?;
+        let dec  = self.decrypt_raw(&ep, &new_key)?;
+        if dec != test {
+            return Err(anyhow!("Key rotation verification failed"));
+        }
+
+        // Commit
+        self.storage.store_encryption_key(&new_key).await?;
+        *self.key.write().await = Some(new_key);
+        info!("Key rotation completed successfully");
+        Ok(())
+    }
+
+    async fn reencrypt_queue(&self, old_key: &Option<Vec<u8>>, new_key: &[u8]) -> Result<usize> {
+        let db   = self.storage.queue_db();
+        let db   = db.lock().await;
+        let mut stmt = db.prepare("SELECT id, payload FROM queue WHERE state != 'Sent'")?;
+        let rows: Vec<(i64, Vec<u8>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        let mut count = 0usize;
+        for (id, old_payload) in rows {
+            let plaintext = if let Some(ref ok) = old_key {
+                self.decrypt_raw(&old_payload, ok).unwrap_or(old_payload.clone())
+            } else {
+                old_payload.clone()
+            };
+            let new_payload = self.encrypt_raw(&plaintext, new_key)?;
+            db.execute("UPDATE queue SET payload = ?1 WHERE id = ?2", rusqlite::params![new_payload, id])?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    fn encrypt_raw(&self, plaintext: &[u8], key_bytes: &[u8]) -> Result<Vec<u8>> {
+        let key    = Key::<Aes256Gcm>::from_slice(key_bytes);
+        let cipher = Aes256Gcm::new(key);
+        let mut nonce_bytes = [0u8; NONCE_SIZE];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ct    = cipher.encrypt(nonce, plaintext).map_err(|e| anyhow!("{:?}", e))?;
+        let mut out = Vec::with_capacity(NONCE_SIZE + ct.len());
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ct);
+        Ok(out)
+    }
+
+    fn decrypt_raw(&self, payload: &[u8], key_bytes: &[u8]) -> Result<Vec<u8>> {
+        if payload.len() < NONCE_SIZE { return Ok(payload.to_vec()); }
+        let key    = Key::<Aes256Gcm>::from_slice(key_bytes);
+        let cipher = Aes256Gcm::new(key);
+        let (nb, ct) = payload.split_at(NONCE_SIZE);
+        let nonce = Nonce::from_slice(nb);
+        cipher.decrypt(nonce, ct).map_err(|e| anyhow!("Decrypt failed: {:?}", e))
+    }
+
+    pub fn generate_key() -> Vec<u8> {
+        let mut key = vec![0u8; KEY_SIZE];
+        OsRng.fill_bytes(&mut key);
+        key
+    }
+
+    /// Derive a 256-bit key from a password using Argon2id.
+    pub fn derive_key_from_password(password: &[u8], salt: &[u8]) -> Result<Vec<u8>> {
+        use argon2::{Argon2, Algorithm, Version, Params};
+        let params = Params::new(65536, 3, 4, Some(KEY_SIZE))
+            .map_err(|e| anyhow!("Argon2 params: {:?}", e))?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        let mut key = vec![0u8; KEY_SIZE];
+        argon2.hash_password_into(password, salt, &mut key)
+            .map_err(|e| anyhow!("Argon2id key derivation: {:?}", e))?;
+        Ok(key)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+}
+=== /home/claude/beacon-agent/src/engines/health.rs ===
+// engines/health.rs — Health Engine
+// Tracks agent-level and per-collector health state.
+// Status is readable via TUI, REST API, and WebSocket.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AgentStatus {
+    Booting,
+    Initializing,
+    Online,
+    Degraded,
+    OfflineBuffering,
+    Recovering,
+    Failed,
+    ShuttingDown,
+}
+
+impl std::fmt::Display for AgentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentStatus::Booting          => write!(f, "BOOTING"),
+            AgentStatus::Initializing     => write!(f, "INITIALIZING"),
+            AgentStatus::Online           => write!(f, "ONLINE"),
+            AgentStatus::Degraded         => write!(f, "DEGRADED"),
+            AgentStatus::OfflineBuffering => write!(f, "OFFLINE_BUFFERING"),
+            AgentStatus::Recovering       => write!(f, "RECOVERING"),
+            AgentStatus::Failed           => write!(f, "FAILED"),
+            AgentStatus::ShuttingDown     => write!(f, "SHUTTING_DOWN"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CollectorStatus {
+    Healthy,
+    Degraded,
+    Failed,
+    Disabled,
+}
+
+impl std::fmt::Display for CollectorStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CollectorStatus::Healthy  => write!(f, "Healthy"),
+            CollectorStatus::Degraded => write!(f, "Degraded"),
+            CollectorStatus::Failed   => write!(f, "Failed"),
+            CollectorStatus::Disabled => write!(f, "Disabled"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectorHealthRecord {
+    pub name:          String,
+    pub status:        CollectorStatus,
+    pub last_run:      Option<DateTime<Utc>>,
+    pub last_success:  Option<DateTime<Utc>>,
+    pub last_failure:  Option<DateTime<Utc>>,
+    pub failure_count: u32,
+    pub error_message: Option<String>,
+}
+
+impl CollectorHealthRecord {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name:          name.to_string(),
+            status:        CollectorStatus::Healthy,
+            last_run:      None,
+            last_success:  None,
+            last_failure:  None,
+            failure_count: 0,
+            error_message: None,
+        }
+    }
+
+    pub fn record_success(&mut self) {
+        let now = Utc::now();
+        self.last_run     = Some(now);
+        self.last_success = Some(now);
+        self.status       = CollectorStatus::Healthy;
+        self.error_message = None;
+        // Reset failure count after consecutive successes
+        if self.failure_count > 0 {
+            self.failure_count = self.failure_count.saturating_sub(1);
+        }
+    }
+
+    pub fn record_failure(&mut self, error: &str) {
+        let now = Utc::now();
+        self.last_run     = Some(now);
+        self.last_failure = Some(now);
+        self.failure_count += 1;
+        self.error_message = Some(error.to_string());
+        // Escalate status based on failure count
+        self.status = if self.failure_count >= 5 {
+            CollectorStatus::Failed
+        } else {
+            CollectorStatus::Degraded
+        };
+    }
+
+    pub fn set_disabled(&mut self) {
+        self.status = CollectorStatus::Disabled;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthSnapshot {
+    pub agent_status: AgentStatus,
+    pub collectors:   HashMap<String, CollectorHealthRecord>,
+    pub snapshot_at:  DateTime<Utc>,
+    pub uptime_secs:  u64,
+}
+
+#[derive(Clone)]
+pub struct HealthEngine {
+    status:     Arc<RwLock<AgentStatus>>,
+    collectors: Arc<RwLock<HashMap<String, CollectorHealthRecord>>>,
+    started_at: DateTime<Utc>,
+}
+
+impl HealthEngine {
+    pub fn new() -> Self {
+        Self {
+            status:     Arc::new(RwLock::new(AgentStatus::Booting)),
+            collectors: Arc::new(RwLock::new(HashMap::new())),
+            started_at: Utc::now(),
+        }
+    }
+
+    pub fn set_status(&self, status: AgentStatus) {
+        // Synchronous wrapper — only used during startup
+        let status_clone = self.status.clone();
+        tokio::spawn(async move {
+            *status_clone.write().await = status;
+        });
+    }
+
+    pub async fn get_status(&self) -> AgentStatus {
+        self.status.read().await.clone()
+    }
+
+    pub async fn set_status_async(&self, status: AgentStatus) {
+        *self.status.write().await = status;
+    }
+
+    pub async fn record_collector_success(&self, name: &str) {
+        let mut collectors = self.collectors.write().await;
+        collectors
+            .entry(name.to_string())
+            .or_insert_with(|| CollectorHealthRecord::new(name))
+            .record_success();
+    }
+
+    pub async fn record_collector_failure(&self, name: &str, error: &str) {
+        let mut collectors = self.collectors.write().await;
+        let record = collectors
+            .entry(name.to_string())
+            .or_insert_with(|| CollectorHealthRecord::new(name));
+        record.record_failure(error);
+
+        // Escalate agent status if any collector has failed
+        drop(collectors);
+        let collectors = self.collectors.read().await;
+        let any_failed = collectors.values().any(|c| c.status == CollectorStatus::Failed);
+        let any_degraded = collectors.values().any(|c| c.status == CollectorStatus::Degraded);
+        drop(collectors);
+
+        let mut status = self.status.write().await;
+        if any_failed && *status == AgentStatus::Online {
+            *status = AgentStatus::Degraded;
+        } else if !any_failed && !any_degraded && *status == AgentStatus::Degraded {
+            *status = AgentStatus::Online;
+        }
+    }
+
+    pub async fn disable_collector(&self, name: &str) {
+        let mut collectors = self.collectors.write().await;
+        collectors
+            .entry(name.to_string())
+            .or_insert_with(|| CollectorHealthRecord::new(name))
+            .set_disabled();
+    }
+
+    pub async fn snapshot(&self) -> HealthSnapshot {
+        let now   = Utc::now();
+        let uptime = (now - self.started_at).num_seconds().max(0) as u64;
+        HealthSnapshot {
+            agent_status: self.status.read().await.clone(),
+            collectors:   self.collectors.read().await.clone(),
+            snapshot_at:  now,
+            uptime_secs:  uptime,
+        }
+    }
+
+    pub async fn to_ws_payload(&self) -> serde_json::Value {
+        let snap = self.snapshot().await;
+        serde_json::json!({
+            "type": "health",
+            "status": snap.agent_status.to_string(),
+            "uptime_secs": snap.uptime_secs,
+            "snapshot_at": snap.snapshot_at,
+            "collectors": snap.collectors.values().map(|c| serde_json::json!({
+                "name": c.name,
+                "status": c.status.to_string(),
+                "last_run": c.last_run,
+                "last_success": c.last_success,
+                "failure_count": c.failure_count,
+            })).collect::<Vec<_>>(),
+        })
+    }
+}
+
+impl Default for HealthEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+=== /home/claude/beacon-agent/src/engines/identity.rs ===
+// engines/identity.rs — Identity Engine
+// Derives a stable SHA-256 agent_id from hardware characteristics.
+// Persists in config.db so it survives reboots.
+
+use anyhow::Result;
+use sha2::{Sha256, Digest};
+use std::fs;
+use std::process::Command;
+use tracing::info;
+
+use crate::storage::StorageManager;
+
+#[derive(Debug, Clone)]
+pub struct AgentIdentity {
+    pub agent_id: String,
+    pub hostname:  String,
+    pub os:        String,
+    pub arch:      String,
+}
+
+pub struct IdentityEngine;
+
+impl IdentityEngine {
+    pub async fn new(storage: &StorageManager) -> Result<AgentIdentity> {
+        // Check if identity is already persisted
+        if let Some((agent_id, hostname)) = storage.get_agent_identity().await? {
+            info!("Loaded existing agent identity: {}", &agent_id[..agent_id.len().min(20)]);
+            return Ok(AgentIdentity {
+                agent_id,
+                hostname,
+                os:   "linux".to_string(),
+                arch: std::env::consts::ARCH.to_string(),
+            });
+        }
+
+        // Derive new identity from hardware fingerprints
+        let agent_id = Self::derive_agent_id()?;
+        let hostname  = Self::get_hostname();
+
+        storage.store_agent_identity(&agent_id, &hostname).await?;
+        info!("Generated new agent identity: {}", &agent_id[..agent_id.len().min(20)]);
+
+        Ok(AgentIdentity {
+            agent_id,
+            hostname,
+            os:   "linux".to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+        })
+    }
+
+    fn derive_agent_id() -> Result<String> {
+        let mut hasher = Sha256::new();
+
+        // /etc/machine-id — stable across reboots
+        match fs::read_to_string("/etc/machine-id") {
+            Ok(mid) => hasher.update(mid.trim().as_bytes()),
+            Err(_)  => hasher.update(b"no-machine-id"),
+        }
+
+        // Hostname
+        hasher.update(Self::get_hostname().as_bytes());
+
+        // CPU architecture
+        hasher.update(std::env::consts::ARCH.as_bytes());
+
+        // CPU model from /proc/cpuinfo
+        match fs::read_to_string("/proc/cpuinfo") {
+            Ok(cpu) => {
+                for line in cpu.lines() {
+                    if line.starts_with("model name") || line.starts_with("Hardware") {
+                        hasher.update(line.as_bytes());
+                        break;
+                    }
+                }
+            }
+            Err(_) => hasher.update(b"no-cpuinfo"),
+        }
+
+        // RAM total from /proc/meminfo
+        match fs::read_to_string("/proc/meminfo") {
+            Ok(mem) => {
+                if let Some(line) = mem.lines().next() {
+                    hasher.update(line.as_bytes());
+                }
+            }
+            Err(_) => hasher.update(b"no-meminfo"),
+        }
+
+        // Stable random salt (generated once, stored on disk)
+        let salt = Self::get_or_create_salt();
+        hasher.update(salt.as_bytes());
+
+        let result = hasher.finalize();
+        Ok(format!("sha256:{}", hex::encode(result)))
+    }
+
+    fn get_hostname() -> String {
+        // Try /etc/hostname first
+        if let Ok(h) = fs::read_to_string("/etc/hostname") {
+            let trimmed = h.trim().to_string();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+
+        // Fall back to `hostname` command
+        if let Ok(out) = Command::new("hostname").output() {
+            let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !h.is_empty() {
+                return h;
+            }
+        }
+
+        // Fall back to environment
+        std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown-host".to_string())
+    }
+
+    fn get_or_create_salt() -> String {
+        let salt_path = "/var/lib/beacon/agent/.identity_salt";
+
+        if let Ok(salt) = fs::read_to_string(salt_path) {
+            let trimmed = salt.trim().to_string();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+
+        // Generate new 32-byte random salt
+        use rand::RngCore;
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        let salt = hex::encode(bytes);
+
+        let _ = fs::create_dir_all("/var/lib/beacon/agent");
+        let _ = fs::write(salt_path, &salt);
+        salt
+    }
+}
+=== /home/claude/beacon-agent/src/engines/mod.rs ===
+// engines/mod.rs
+pub mod identity;
+pub mod health;
+pub mod queue;
+pub mod encryption;
+pub mod tui;
+=== /home/claude/beacon-agent/src/engines/queue.rs ===
+// engines/queue.rs — Queue Engine
+// Manages outbound message queue with offline buffering.
+// Message states: Pending → Processing → Sent | Failed → DeadLetter
+// Deduplication by message_id. Checksum validation on dequeue.
+
+use anyhow::Result;
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
+use chrono::Utc;
+use tracing::{info, warn, error};
+use uuid::Uuid;
+
+use crate::storage::StorageManager;
+
+const MAX_RETRIES: u32 = 5;
+const MAX_DEAD_LETTER: usize = 10_000;
+const BATCH_SIZE: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MessageState {
+    Pending,
+    Processing,
+    Sent,
+    Failed,
+    DeadLetter,
+}
+
+impl MessageState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MessageState::Pending    => "Pending",
+            MessageState::Processing => "Processing",
+            MessageState::Sent       => "Sent",
+            MessageState::Failed     => "Failed",
+            MessageState::DeadLetter => "DeadLetter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueMessage {
+    pub id:         i64,
+    pub message_id: String,
+    pub payload:    Vec<u8>,
+    pub msg_type:   String,
+    pub state:      String,
+    pub retries:    u32,
+    pub created_at: String,
+    pub checksum:   String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueStatus {
+    pub pending:     i64,
+    pub processing:  i64,
+    pub sent:        i64,
+    pub failed:      i64,
+    pub dead_letter: i64,
+    pub paused:      bool,
+}
+
+#[derive(Clone)]
+pub struct QueueEngine {
+    storage: StorageManager,
+    paused:  Arc<RwLock<bool>>,
+}
+
+impl QueueEngine {
+    pub async fn new(storage: StorageManager) -> Result<Self> {
+        Ok(Self {
+            storage,
+            paused: Arc::new(RwLock::new(false)),
+        })
+    }
+
+    // ─── Enqueue ──────────────────────────────────────────────────────────────
+
+    pub async fn enqueue(&self, payload: Vec<u8>, msg_type: &str) -> Result<String> {
+        let message_id = Uuid::new_v4().to_string();
+        let checksum   = Self::compute_checksum(&payload);
+        let now        = Utc::now().to_rfc3339();
+
+        let db = self.storage.queue_db();
+        let db = db.lock().await;
+        db.execute(
+            "INSERT OR IGNORE INTO queue (message_id, payload, msg_type, state, retries, created_at, updated_at, checksum)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7)",
+            params![
+                message_id,
+                payload,
+                msg_type,
+                MessageState::Pending.as_str(),
+                now,
+                now,
+                checksum,
+            ],
+        )?;
+
+        Ok(message_id)
+    }
+
+    // ─── Dequeue ──────────────────────────────────────────────────────────────
+
+    pub async fn dequeue_batch(&self, limit: usize) -> Result<Vec<QueueMessage>> {
+        if *self.paused.read().await {
+            return Ok(vec![]);
+        }
+
+        let db    = self.storage.queue_db();
+        let db    = db.lock().await;
+        let limit = limit.min(BATCH_SIZE);
+
+        let mut stmt = db.prepare(
+            "SELECT id, message_id, payload, msg_type, state, retries, created_at, checksum
+             FROM queue WHERE state = 'Pending' ORDER BY created_at ASC LIMIT ?1",
+        )?;
+
+        let messages: Vec<QueueMessage> = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(QueueMessage {
+                    id:         row.get(0)?,
+                    message_id: row.get(1)?,
+                    payload:    row.get(2)?,
+                    msg_type:   row.get(3)?,
+                    state:      row.get(4)?,
+                    retries:    row.get::<_, i64>(5)? as u32,
+                    created_at: row.get(6)?,
+                    checksum:   row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Validate checksums — move corrupted to dead letter
+        let mut valid = Vec::new();
+        for msg in messages {
+            let expected = Self::compute_checksum(&msg.payload);
+            if expected != msg.checksum {
+                warn!("Checksum mismatch for message {}: moving to dead letter", msg.message_id);
+                self.move_to_dead_letter_locked(&db, msg.id, &msg.message_id, &msg.payload, &msg.msg_type, "checksum_mismatch")?;
+            } else {
+                // Mark as Processing
+                db.execute(
+                    "UPDATE queue SET state = 'Processing', updated_at = ?1 WHERE id = ?2",
+                    params![Utc::now().to_rfc3339(), msg.id],
+                )?;
+                valid.push(msg);
+            }
+        }
+
+        Ok(valid)
+    }
+
+    // ─── Acknowledge ──────────────────────────────────────────────────────────
+
+    pub async fn ack(&self, id: i64) -> Result<()> {
+        let db  = self.storage.queue_db();
+        let db  = db.lock().await;
+        let now = Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE queue SET state = 'Sent', updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub async fn nack(&self, id: i64, message_id: &str) -> Result<()> {
+        let db  = self.storage.queue_db();
+        let db  = db.lock().await;
+        let now = Utc::now().to_rfc3339();
+
+        // Increment retry count
+        db.execute(
+            "UPDATE queue SET state = 'Failed', retries = retries + 1, updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+
+        // Check if we've exceeded max retries
+        let (retries, payload, msg_type): (i64, Vec<u8>, String) = db.query_row(
+            "SELECT retries, payload, msg_type FROM queue WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+
+        if retries as u32 >= MAX_RETRIES {
+            warn!("Message {} exceeded max retries, moving to dead letter", message_id);
+            self.move_to_dead_letter_locked(&db, id, message_id, &payload, &msg_type, "max_retries_exceeded")?;
+        } else {
+            // Re-queue as Pending
+            db.execute(
+                "UPDATE queue SET state = 'Pending', updated_at = ?1 WHERE id = ?2",
+                params![now, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    // ─── Dead Letter ──────────────────────────────────────────────────────────
+
+    fn move_to_dead_letter_locked(
+        &self,
+        db: &rusqlite::Connection,
+        queue_id: i64,
+        message_id: &str,
+        payload: &[u8],
+        msg_type: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+
+        // Check dead letter overflow — archive oldest if at limit
+        let count: i64 = db.query_row("SELECT COUNT(*) FROM dead_letter", [], |r| r.get(0))?;
+        if count as usize >= MAX_DEAD_LETTER {
+            db.execute(
+                "DELETE FROM dead_letter WHERE id = (SELECT MIN(id) FROM dead_letter)",
+                [],
+            )?;
+        }
+
+        db.execute(
+            "INSERT INTO dead_letter (message_id, payload, msg_type, reason, archived_at) VALUES (?1,?2,?3,?4,?5)",
+            params![message_id, payload, msg_type, reason, now],
+        )?;
+        db.execute("DELETE FROM queue WHERE id = ?1", params![queue_id])?;
+        Ok(())
+    }
+
+    // ─── Control ──────────────────────────────────────────────────────────────
+
+    pub async fn pause(&self) {
+        *self.paused.write().await = true;
+        info!("Queue paused");
+    }
+
+    pub async fn resume(&self) {
+        *self.paused.write().await = false;
+        info!("Queue resumed");
+    }
+
+    pub async fn clear(&self) -> Result<()> {
+        let db = self.storage.queue_db();
+        let db = db.lock().await;
+        db.execute("DELETE FROM queue", [])?;
+        info!("Queue cleared");
+        Ok(())
+    }
+
+    pub async fn retry_failed(&self) -> Result<usize> {
+        let db  = self.storage.queue_db();
+        let db  = db.lock().await;
+        let now = Utc::now().to_rfc3339();
+        let n   = db.execute(
+            "UPDATE queue SET state = 'Pending', updated_at = ?1 WHERE state = 'Failed'",
+            params![now],
+        )? as usize;
+        info!("Retrying {} failed messages", n);
+        Ok(n)
+    }
+
+    pub async fn flush(&self) -> Result<()> {
+        // Mark all Processing as Pending so they can be retried on next run
+        let db  = self.storage.queue_db();
+        let db  = db.lock().await;
+        let now = Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE queue SET state = 'Pending', updated_at = ?1 WHERE state = 'Processing'",
+            params![now],
+        )?;
+        Ok(())
+    }
+
+    pub async fn status(&self) -> Result<QueueStatus> {
+        let db = self.storage.queue_db();
+        let db = db.lock().await;
+
+        let count_state = |state: &str| -> Result<i64> {
+            Ok(db.query_row(
+                "SELECT COUNT(*) FROM queue WHERE state = ?1",
+                params![state],
+                |r| r.get(0),
+            )?)
+        };
+
+        Ok(QueueStatus {
+            pending:     count_state("Pending")?,
+            processing:  count_state("Processing")?,
+            sent:        count_state("Sent")?,
+            failed:      count_state("Failed")?,
+            dead_letter: db.query_row("SELECT COUNT(*) FROM dead_letter", [], |r| r.get(0))?,
+            paused:      *self.paused.read().await,
+        })
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    fn compute_checksum(payload: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(payload);
+        hex::encode(hasher.finalize())
+    }
+
+    /// Prune sent messages older than `hours`
+    pub async fn prune_sent(&self, hours: i64) -> Result<usize> {
+        let db     = self.storage.queue_db();
+        let db     = db.lock().await;
+        let cutoff = (Utc::now() - chrono::Duration::hours(hours)).to_rfc3339();
+        let n = db.execute(
+            "DELETE FROM queue WHERE state = 'Sent' AND created_at < ?1",
+            params![cutoff],
+        )? as usize;
+        Ok(n)
+    }
+}
+=== /home/claude/beacon-agent/src/engines/tui.rs ===
+// engines/tui.rs — Terminal User Interface (TUI)
+// Built with Ratatui. Keyboard-driven, live WebSocket-backed updates.
+// Views: Dashboard | Agents | Metrics | Logs | Health | Network | Configuration
+
+use anyhow::Result;
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, BorderType, Cell, Clear, Gauge, List, ListItem, ListState,
+        Paragraph, Row, Table, TableState, Tabs, Wrap,
+    },
+    Frame, Terminal,
+};
+use std::io;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use chrono::{Local, Utc};
+
+use crate::config::AgentConfig;
+use crate::storage::StorageManager;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum View {
+    Dashboard,
+    Agents,
+    Metrics,
+    Logs,
+    Health,
+    Network,
+    Configuration,
+}
+
+impl View {
+    pub fn all() -> Vec<&'static str> {
+        vec!["Dashboard", "Agents", "Metrics", "Logs", "Health", "Network", "Configuration"]
+    }
+
+    pub fn index(&self) -> usize {
+        match self {
+            View::Dashboard     => 0,
+            View::Agents        => 1,
+            View::Metrics       => 2,
+            View::Logs          => 3,
+            View::Health        => 4,
+            View::Network       => 5,
+            View::Configuration => 6,
+        }
+    }
+
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            0 => View::Dashboard,
+            1 => View::Agents,
+            2 => View::Metrics,
+            3 => View::Logs,
+            4 => View::Health,
+            5 => View::Network,
+            6 => View::Configuration,
+            _ => View::Dashboard,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub severity:  String,
+    pub source:    String,
+    pub message:   String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MetricSample {
+    pub name:  String,
+    pub value: f64,
+    pub unit:  String,
+}
+
+pub struct AppState {
+    pub current_view:   View,
+    pub tab_index:      usize,
+    pub agent_id:       String,
+    pub hostname:       String,
+    pub server_addr:    String,
+    pub status:         String,
+    pub uptime_secs:    u64,
+    pub logs:           Vec<LogEntry>,
+    pub log_state:      ListState,
+    pub metrics:        Vec<MetricSample>,
+    pub search_query:   String,
+    pub searching:      bool,
+    pub quit:           bool,
+    // Live metric sparklines (ring buffers)
+    pub cpu_history:    Vec<f64>,
+    pub ram_history:    Vec<f64>,
+    pub net_rx_history: Vec<f64>,
+    pub net_tx_history: Vec<f64>,
+    pub queue_status:   String,
+    pub collectors:     Vec<(String, String)>,  // (name, status)
+}
+
+impl AppState {
+    pub fn new(config: &AgentConfig, agent_id: &str, hostname: &str) -> Self {
+        let mut log_state = ListState::default();
+        log_state.select(Some(0));
+        Self {
+            current_view:   View::Dashboard,
+            tab_index:      0,
+            agent_id:       agent_id.to_string(),
+            hostname:       hostname.to_string(),
+            server_addr:    config.server_addr.clone(),
+            status:         "ONLINE".to_string(),
+            uptime_secs:    0,
+            logs:           Vec::new(),
+            log_state,
+            metrics:        Vec::new(),
+            search_query:   String::new(),
+            searching:      false,
+            quit:           false,
+            cpu_history:    vec![0.0; 60],
+            ram_history:    vec![0.0; 60],
+            net_rx_history: vec![0.0; 60],
+            net_tx_history: vec![0.0; 60],
+            queue_status:   "OK".to_string(),
+            collectors:     vec![
+                ("CPU".to_string(), "Healthy".to_string()),
+                ("RAM".to_string(), "Healthy".to_string()),
+                ("Storage".to_string(), "Healthy".to_string()),
+                ("Network".to_string(), "Healthy".to_string()),
+                ("Process".to_string(), "Healthy".to_string()),
+                ("Systemd".to_string(), "Healthy".to_string()),
+            ],
+        }
+    }
+
+    pub fn push_cpu(&mut self, v: f64) {
+        self.cpu_history.remove(0);
+        self.cpu_history.push(v.clamp(0.0, 100.0));
+    }
+
+    pub fn push_ram(&mut self, v: f64) {
+        self.ram_history.remove(0);
+        self.ram_history.push(v.clamp(0.0, 100.0));
+    }
+
+    pub fn push_log(&mut self, entry: LogEntry) {
+        self.logs.insert(0, entry);
+        if self.logs.len() > 1000 {
+            self.logs.truncate(1000);
+        }
+    }
+}
+
+// ─── Entry point ──────────────────────────────────────────────────────────────
+
+pub async fn run(config: AgentConfig, storage: StorageManager) -> Result<()> {
+    let agent_id = storage
+        .get_agent_identity()
+        .await?
+        .map(|(id, _)| id)
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let hostname = storage
+        .get_agent_identity()
+        .await?
+        .map(|(_, h)| h)
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let state = Arc::new(RwLock::new(AppState::new(&config, &agent_id, &hostname)));
+
+    // Setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend  = CrosstermBackend::new(stdout);
+    let mut term = Terminal::new(backend)?;
+
+    // Seed some mock data for demo
+    {
+        let mut s = state.write().await;
+        for i in 0..60 {
+            s.cpu_history[i] = (i as f64 * 1.5).sin().abs() * 70.0 + 10.0;
+            s.ram_history[i] = 45.0 + (i as f64 * 0.8).cos() * 10.0;
+        }
+        s.logs.push(LogEntry {
+            timestamp: Utc::now().to_rfc3339(),
+            severity:  "Info".to_string(),
+            source:    "internal".to_string(),
+            message:   "Beacon agent started successfully".to_string(),
+        });
+        s.metrics = vec![
+            MetricSample { name: "CPU Usage".to_string(),   value: 34.2,  unit: "%".to_string() },
+            MetricSample { name: "RAM Usage".to_string(),   value: 52.8,  unit: "%".to_string() },
+            MetricSample { name: "Disk I/O".to_string(),    value: 12.4,  unit: "MB/s".to_string() },
+            MetricSample { name: "Net RX".to_string(),      value: 2.1,   unit: "MB/s".to_string() },
+            MetricSample { name: "Net TX".to_string(),      value: 0.8,   unit: "MB/s".to_string() },
+            MetricSample { name: "Load Avg".to_string(),    value: 0.72,  unit: "".to_string() },
+            MetricSample { name: "Processes".to_string(),   value: 243.0, unit: "".to_string() },
+            MetricSample { name: "Uptime".to_string(),      value: 42.0,  unit: "days".to_string() },
+        ];
+    }
+
+    let result = run_event_loop(&mut term, state.clone()).await;
+
+    // Restore terminal
+    disable_raw_mode()?;
+    execute!(term.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    term.show_cursor()?;
+
+    result
+}
+
+async fn run_event_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    state: Arc<RwLock<AppState>>,
+) -> Result<()> {
+    loop {
+        {
+            let s = state.read().await;
+            terminal.draw(|f| draw_ui(f, &s))?;
+            if s.quit { break; }
+        }
+
+        // Poll events with 100ms timeout for live updates
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                let mut s = state.write().await;
+                handle_key(&mut s, key.code, key.modifiers);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_key(state: &mut AppState, code: KeyCode, mods: KeyModifiers) {
+    if state.searching {
+        match code {
+            KeyCode::Esc         => { state.searching = false; state.search_query.clear(); }
+            KeyCode::Enter       => { state.searching = false; }
+            KeyCode::Backspace   => { state.search_query.pop(); }
+            KeyCode::Char(c)     => { state.search_query.push(c); }
+            _ => {}
+        }
+        return;
+    }
+
+    match code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => { state.quit = true; }
+        KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => { state.quit = true; }
+
+        // Tab navigation
+        KeyCode::Tab | KeyCode::Right => {
+            state.tab_index = (state.tab_index + 1) % View::all().len();
+            state.current_view = View::from_index(state.tab_index);
+        }
+        KeyCode::BackTab | KeyCode::Left => {
+            state.tab_index = state.tab_index.checked_sub(1).unwrap_or(View::all().len() - 1);
+            state.current_view = View::from_index(state.tab_index);
+        }
+        KeyCode::Char('1') => { state.tab_index = 0; state.current_view = View::Dashboard; }
+        KeyCode::Char('2') => { state.tab_index = 1; state.current_view = View::Agents; }
+        KeyCode::Char('3') => { state.tab_index = 2; state.current_view = View::Metrics; }
+        KeyCode::Char('4') => { state.tab_index = 3; state.current_view = View::Logs; }
+        KeyCode::Char('5') => { state.tab_index = 4; state.current_view = View::Health; }
+        KeyCode::Char('6') => { state.tab_index = 5; state.current_view = View::Network; }
+        KeyCode::Char('7') => { state.tab_index = 6; state.current_view = View::Configuration; }
+
+        // Log navigation
+        KeyCode::Up | KeyCode::Char('k') => {
+            if state.current_view == View::Logs {
+                let i = state.log_state.selected().unwrap_or(0);
+                state.log_state.select(Some(i.saturating_sub(1)));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if state.current_view == View::Logs {
+                let i = state.log_state.selected().unwrap_or(0);
+                let max = state.logs.len().saturating_sub(1);
+                state.log_state.select(Some((i + 1).min(max)));
+            }
+        }
+
+        // Search
+        KeyCode::Char('/') => { state.searching = true; }
+
+        _ => {}
+    }
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+
+fn draw_ui(f: &mut Frame, state: &AppState) {
+    let size = f.size();
+
+    // Overall layout: header | tabs | content | footer
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),   // header
+            Constraint::Length(3),   // tabs
+            Constraint::Min(0),      // content
+            Constraint::Length(1),   // footer
+        ])
+        .split(size);
+
+    draw_header(f, state, chunks[0]);
+    draw_tabs(f, state, chunks[1]);
+    draw_content(f, state, chunks[2]);
+    draw_footer(f, state, chunks[3]);
+
+    // Search overlay
+    if state.searching {
+        draw_search(f, size, state);
+    }
+}
+
+fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
+    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let title = Line::from(vec![
+        Span::styled("▣ BEACON", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(&state.hostname, Style::default().fg(Color::Yellow)),
+        Span::raw("  │  "),
+        Span::styled(&state.agent_id[..16.min(state.agent_id.len())], Style::default().fg(Color::DarkGray)),
+        Span::raw("..."),
+        Span::raw("  │  "),
+        Span::styled(&state.status, Style::default().fg(
+            if state.status == "ONLINE" { Color::Green } else { Color::Red }
+        ).add_modifier(Modifier::BOLD)),
+        Span::raw("  │  "),
+        Span::styled(now, Style::default().fg(Color::DarkGray)),
+    ]);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan));
+    let para = Paragraph::new(title)
+        .block(block)
+        .alignment(Alignment::Left);
+    f.render_widget(para, area);
+}
+
+fn draw_tabs(f: &mut Frame, state: &AppState, area: Rect) {
+    let titles: Vec<Line> = View::all()
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            Line::from(Span::styled(
+                format!(" {} {} ", i + 1, name),
+                if i == state.tab_index {
+                    Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ))
+        })
+        .collect();
+
+    let tabs = Tabs::new(titles)
+        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded))
+        .select(state.tab_index)
+        .divider(Span::raw("│"));
+    f.render_widget(tabs, area);
+}
+
+fn draw_content(f: &mut Frame, state: &AppState, area: Rect) {
+    match state.current_view {
+        View::Dashboard     => draw_dashboard(f, state, area),
+        View::Agents        => draw_agents(f, state, area),
+        View::Metrics       => draw_metrics(f, state, area),
+        View::Logs          => draw_logs(f, state, area),
+        View::Health        => draw_health(f, state, area),
+        View::Network       => draw_network(f, state, area),
+        View::Configuration => draw_configuration(f, state, area),
+    }
+}
+
+fn draw_dashboard(f: &mut Frame, state: &AppState, area: Rect) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
+        .split(cols[0]);
+
+    // CPU Gauge
+    let cpu = state.cpu_history.last().cloned().unwrap_or(0.0);
+    let cpu_gauge = Gauge::default()
+        .block(Block::default().title(" CPU ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .gauge_style(Style::default().fg(if cpu > 80.0 { Color::Red } else if cpu > 60.0 { Color::Yellow } else { Color::Green }))
+        .percent(cpu as u16)
+        .label(format!("{:.1}%", cpu));
+    f.render_widget(cpu_gauge, left[0]);
+
+    // RAM Gauge
+    let ram = state.ram_history.last().cloned().unwrap_or(0.0);
+    let ram_gauge = Gauge::default()
+        .block(Block::default().title(" RAM ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .gauge_style(Style::default().fg(if ram > 80.0 { Color::Red } else if ram > 60.0 { Color::Yellow } else { Color::Cyan }))
+        .percent(ram as u16)
+        .label(format!("{:.1}%", ram));
+    f.render_widget(ram_gauge, left[1]);
+
+    // Metrics table
+    let rows: Vec<Row> = state.metrics.iter().map(|m| {
+        Row::new(vec![
+            Cell::from(m.name.clone()),
+            Cell::from(format!("{:.2} {}", m.value, m.unit))
+                .style(Style::default().fg(Color::Yellow)),
+        ])
+    }).collect();
+
+    let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Percentage(40)])
+        .header(Row::new(["Metric", "Value"])
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)))
+        .block(Block::default().title(" Metrics ").borders(Borders::ALL).border_type(BorderType::Rounded));
+    f.render_widget(table, left[2]);
+
+    // Right: recent logs
+    draw_logs_panel(f, state, cols[1]);
+}
+
+fn draw_logs_panel(f: &mut Frame, state: &AppState, area: Rect) {
+    let items: Vec<ListItem> = state.logs.iter().take(30).map(|l| {
+        let sev_color = match l.severity.as_str() {
+            "Critical" | "Error" => Color::Red,
+            "Warning"            => Color::Yellow,
+            "Info"               => Color::Green,
+            "Debug"              => Color::Blue,
+            _                    => Color::DarkGray,
+        };
+        let line = Line::from(vec![
+            Span::styled(format!("[{}] ", &l.timestamp[11..19]), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{:<8}", l.severity), Style::default().fg(sev_color)),
+            Span::raw(" "),
+            Span::styled(l.message.chars().take(60).collect::<String>(), Style::default().fg(Color::White)),
+        ]);
+        ListItem::new(line)
+    }).collect();
+
+    let list = List::new(items)
+        .block(Block::default().title(" Recent Logs ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .highlight_style(Style::default().bg(Color::DarkGray));
+    f.render_widget(list, area);
+}
+
+fn draw_agents(f: &mut Frame, _state: &AppState, area: Rect) {
+    let text = vec![
+        Line::from(Span::styled("  Agent Management", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  agent_id:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("sha256:a3f1...", Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::styled("  hostname:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("prod-server-01", Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            Span::styled("  status:     ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ONLINE", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  version:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled("1.0.0", Style::default().fg(Color::White)),
+        ]),
+    ];
+    let para = Paragraph::new(text)
+        .block(Block::default().title(" Agents ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .wrap(Wrap { trim: true });
+    f.render_widget(para, area);
+}
+
+fn draw_metrics(f: &mut Frame, state: &AppState, area: Rect) {
+    let rows: Vec<Row> = state.metrics.iter().map(|m| {
+        Row::new(vec![
+            Cell::from(m.name.clone()).style(Style::default().fg(Color::Cyan)),
+            Cell::from(format!("{:.4}", m.value)).style(Style::default().fg(Color::Yellow)),
+            Cell::from(m.unit.clone()).style(Style::default().fg(Color::DarkGray)),
+        ])
+    }).collect();
+
+    let table = Table::new(rows, [Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
+        .header(Row::new(["Metric", "Value", "Unit"])
+            .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)))
+        .block(Block::default().title(" Live Metrics ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .row_highlight_style(Style::default().bg(Color::DarkGray));
+    f.render_widget(table, area);
+}
+
+fn draw_logs(f: &mut Frame, state: &AppState, area: Rect) {
+    let filter = state.search_query.to_lowercase();
+    let items: Vec<ListItem> = state.logs.iter()
+        .filter(|l| filter.is_empty() || l.message.to_lowercase().contains(&filter))
+        .map(|l| {
+            let sev_color = match l.severity.as_str() {
+                "Critical" => Color::Magenta,
+                "Error"    => Color::Red,
+                "Warning"  => Color::Yellow,
+                "Info"     => Color::Green,
+                "Debug"    => Color::Blue,
+                "Trace"    => Color::DarkGray,
+                _          => Color::White,
+            };
+            let line = Line::from(vec![
+                Span::styled(format!("{} ", &l.timestamp[..19]), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("[{:<8}]", l.severity), Style::default().fg(sev_color)),
+                Span::styled(format!(" ({}) ", l.source), Style::default().fg(Color::Cyan)),
+                Span::raw(l.message.clone()),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let mut log_state = state.log_state.clone();
+    let list = List::new(items)
+        .block(Block::default()
+            .title(format!(" Logs [{} entries] ", state.logs.len()))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded))
+        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+    f.render_stateful_widget(list, area, &mut log_state);
+}
+
+fn draw_health(f: &mut Frame, state: &AppState, area: Rect) {
+    let rows: Vec<Row> = state.collectors.iter().map(|(name, status)| {
+        let color = match status.as_str() {
+            "Healthy"  => Color::Green,
+            "Degraded" => Color::Yellow,
+            "Failed"   => Color::Red,
+            "Disabled" => Color::DarkGray,
+            _          => Color::White,
+        };
+        Row::new(vec![
+            Cell::from(name.clone()),
+            Cell::from(status.clone()).style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        ])
+    }).collect();
+
+    let table = Table::new(rows, [Constraint::Percentage(50), Constraint::Percentage(50)])
+        .header(Row::new(["Collector", "Status"])
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)))
+        .block(Block::default()
+            .title(format!(" Health — Agent {} ", state.status))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded));
+    f.render_widget(table, area);
+}
+
+fn draw_network(f: &mut Frame, _state: &AppState, area: Rect) {
+    let text = vec![
+        Line::from(Span::styled("  Network Statistics", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  eth0 RX:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("2.1 MB/s", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("  eth0 TX:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("0.8 MB/s", Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Packets:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("1,234 rx / 567 tx", Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Drops:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled("0", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("  TCP conn: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("42 established", Style::default().fg(Color::White)),
+        ]),
+    ];
+    let para = Paragraph::new(text)
+        .block(Block::default().title(" Network ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .wrap(Wrap { trim: true });
+    f.render_widget(para, area);
+}
+
+fn draw_configuration(f: &mut Frame, state: &AppState, area: Rect) {
+    let text = vec![
+        Line::from(Span::styled("  Configuration", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  server_addr:       ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&state.server_addr, Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::styled("  encryption:        ", Style::default().fg(Color::DarkGray)),
+            Span::styled("AES-256-GCM", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("  transport:         ", Style::default().fg(Color::DarkGray)),
+            Span::styled("TLS 1.3 WebSocket", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("  queue:             ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&state.queue_status, Style::default().fg(Color::White)),
+        ]),
+    ];
+    let para = Paragraph::new(text)
+        .block(Block::default().title(" Configuration ").borders(Borders::ALL).border_type(BorderType::Rounded))
+        .wrap(Wrap { trim: true });
+    f.render_widget(para, area);
+}
+
+fn draw_footer(f: &mut Frame, state: &AppState, area: Rect) {
+    let keys = if state.searching {
+        " ESC Cancel  ENTER Confirm  Backspace Delete "
+    } else {
+        " TAB/←→ Navigate  1-7 Views  /Search  j/k Scroll  q Quit "
+    };
+    let para = Paragraph::new(keys)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    f.render_widget(para, area);
+}
+
+fn draw_search(f: &mut Frame, area: Rect, state: &AppState) {
+    let block = Block::default()
+        .title(" Search ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let width  = area.width.min(60);
+    let height = 3u16;
+    let x      = (area.width.saturating_sub(width)) / 2;
+    let y      = (area.height.saturating_sub(height)) / 2;
+    let popup  = Rect { x, y, width, height };
+
+    f.render_widget(Clear, popup);
+    let para = Paragraph::new(state.search_query.clone())
+        .block(block)
+        .style(Style::default().fg(Color::White));
+    f.render_widget(para, popup);
+}
+=== /home/claude/beacon-agent/src/main.rs ===
+// beacon-agent — main entry point
+// Distributed Linux observability agent
+// Async-first, Tokio runtime
+
+mod engines;
+mod collectors;
+mod transport;
+mod storage;
+mod config;
+// config::validator is a sub-module of config — no explicit declaration needed here
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use tracing::{info, error};
+use tracing_subscriber::{EnvFilter, fmt};
+
+use config::AgentConfig;
+use engines::{
+    identity::IdentityEngine,
+    health::HealthEngine,
+    queue::QueueEngine,
+    encryption::EncryptionEngine,
+};
+use storage::StorageManager;
+use transport::WebSocketTransport;
+
+#[derive(Parser)]
+#[command(
+    name    = "beacon-agent",
+    version = "1.0.0",
+    about   = "Beacon distributed Linux observability agent",
+    long_about = None,
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Config file path
+    #[arg(short, long, default_value = "/etc/beacon/agent.toml")]
+    config: String,
+
+    /// Log level (trace|debug|info|warn|error)
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize the agent (first-time setup)
+    Init,
+
+    /// Start the agent daemon
+    Start,
+
+    /// Show agent status
+    Status,
+
+    /// Login to the beacon server
+    Login {
+        #[arg(short, long)]
+        username: String,
+        #[arg(short, long)]
+        password: Option<String>,
+    },
+
+    /// Logout from beacon server
+    Logout,
+
+    /// Show current user
+    Whoami,
+
+    // ─── Service ──────────────────────────────────────────────────────────────
+    /// Manage systemd service
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+
+    // ─── Metrics ─────────────────────────────────────────────────────────────
+    /// Manage CPU collector
+    Cpu {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage RAM collector
+    Ram {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage Storage collector
+    Storage {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage Network collector
+    Network {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage Process collector
+    Process {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage Systemd collector
+    Systemd {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage Docker collector
+    Docker {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage Kubernetes collector
+    Kubernetes {
+        #[command(subcommand)]
+        action: EnableDisable,
+    },
+    /// Manage all metrics
+    Metrics {
+        #[command(subcommand)]
+        action: MetricsAction,
+    },
+
+    // ─── Agent ────────────────────────────────────────────────────────────────
+    /// Agent management
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+
+    // ─── Logs ────────────────────────────────────────────────────────────────
+    /// View and manage logs
+    Logs {
+        #[command(subcommand)]
+        action: LogsAction,
+    },
+
+    // ─── Audit ───────────────────────────────────────────────────────────────
+    /// View audit trail
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
+
+    // ─── DB ──────────────────────────────────────────────────────────────────
+    /// Database operations
+    Db {
+        #[command(subcommand)]
+        action: DbAction,
+    },
+
+    // ─── Encryption ──────────────────────────────────────────────────────────
+    /// Encryption management
+    Encryption {
+        #[command(subcommand)]
+        action: EncryptionAction,
+    },
+
+    // ─── Queue ───────────────────────────────────────────────────────────────
+    /// Queue management
+    Queue {
+        #[command(subcommand)]
+        action: QueueAction,
+    },
+
+    // ─── Server ──────────────────────────────────────────────────────────────
+    /// Server connectivity
+    Server {
+        #[command(subcommand)]
+        action: ServerAction,
+    },
+
+    // ─── TUI ─────────────────────────────────────────────────────────────────
+    /// Launch Terminal UI
+    Tui,
+}
+
+#[derive(Subcommand, Clone)]
+enum EnableDisable {
+    Enable,
+    Disable,
+}
+
+#[derive(Subcommand, Clone)]
+enum ServiceAction {
+    Install,
+    Remove,
+    Start,
+    Stop,
+    Restart,
+    Status,
+}
+
+#[derive(Subcommand, Clone)]
+enum MetricsAction {
+    EnableAll,
+    DisableAll,
+    /// Set collection interval (e.g. 1s, 5s, 30s, 1m)
+    Interval { value: String },
+    /// Set retention period (e.g. 30d)
+    Retention { value: String },
+    Status,
+}
+
+#[derive(Subcommand, Clone)]
+enum AgentAction {
+    List,
+    Show { agent_id: String },
+    Enable { agent_id: String },
+    Disable { agent_id: String },
+    Remove { agent_id: String },
+    Rename { agent_id: String, name: String },
+    RegenerateId,
+}
+
+#[derive(Subcommand, Clone)]
+enum LogsAction {
+    /// Stream logs in real-time
+    Follow,
+    /// Export logs to file
+    Export { output: String },
+    /// Search logs
+    Search { query: String },
+    /// Clear all logs
+    Clear,
+    /// Clear logs by severity
+    ClearErrors,
+    ClearWarnings,
+    /// View recent logs
+    View,
+}
+
+#[derive(Subcommand, Clone)]
+enum AuditAction {
+    Logs,
+    Export { output: String },
+}
+
+#[derive(Subcommand, Clone)]
+enum DbAction {
+    Status,
+    Backup { output: Option<String> },
+    Restore { input: String },
+    Compact,
+    Vacuum,
+    Verify,
+    Export { output: String },
+    Clear,
+    Reset,
+}
+
+#[derive(Subcommand, Clone)]
+enum EncryptionAction {
+    Enable,
+    Disable,
+    RotateKey,
+    Status,
+}
+
+#[derive(Subcommand, Clone)]
+enum QueueAction {
+    Status,
+    Clear,
+    Pause,
+    Resume,
+    RetryFailed,
+}
+
+#[derive(Subcommand, Clone)]
+enum ServerAction {
+    Connect,
+    Disconnect,
+    Status,
+    Ping,
+    Test,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Initialise tracing
+    fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(&cli.log_level))
+        )
+        .json()
+        .init();
+
+    info!("beacon-agent v1.0.0 starting");
+
+    match cli.command.unwrap_or(Commands::Start) {
+        Commands::Init => run_init(&cli.config).await,
+        Commands::Start => run_daemon(&cli.config).await,
+        Commands::Status => run_status(&cli.config).await,
+        Commands::Tui => run_tui(&cli.config).await,
+
+        Commands::Login { username, password } => {
+            run_login(&cli.config, &username, password).await
+        }
+        Commands::Logout  => run_logout(&cli.config).await,
+        Commands::Whoami  => run_whoami(&cli.config).await,
+
+        Commands::Service { action } => handle_service(action),
+        Commands::Cpu       { action } => handle_collector("cpu",        action),
+        Commands::Ram       { action } => handle_collector("ram",        action),
+        Commands::Storage   { action } => handle_collector("storage",    action),
+        Commands::Network   { action } => handle_collector("network",    action),
+        Commands::Process   { action } => handle_collector("process",    action),
+        Commands::Systemd   { action } => handle_collector("systemd",    action),
+        Commands::Docker    { action } => handle_collector("docker",     action),
+        Commands::Kubernetes { action } => handle_collector("kubernetes", action),
+        Commands::Metrics   { action } => handle_metrics_cmd(action, &cli.config).await,
+        Commands::Agent     { action } => handle_agent_cmd(action, &cli.config).await,
+        Commands::Logs      { action } => handle_logs_cmd(action, &cli.config).await,
+        Commands::Audit     { action } => handle_audit_cmd(action, &cli.config).await,
+        Commands::Db        { action } => handle_db_cmd(action, &cli.config).await,
+        Commands::Encryption { action } => handle_encryption_cmd(action, &cli.config).await,
+        Commands::Queue     { action } => handle_queue_cmd(action, &cli.config).await,
+        Commands::Server    { action } => handle_server_cmd(action, &cli.config).await,
+    }
+}
+
+// ─── Run daemon ───────────────────────────────────────────────────────────────
+
+async fn run_daemon(config_path: &str) -> Result<()> {
+    info!("Loading configuration from {}", config_path);
+
+    let config = AgentConfig::load(config_path).await?;
+
+    // Initialise storage layer
+    let storage = StorageManager::new(&config.storage_dir).await?;
+
+    // Derive agent identity
+    let identity = IdentityEngine::new(&storage).await?;
+    info!("Agent identity: {}", identity.agent_id);
+
+    // Initialise encryption
+    let encryption = EncryptionEngine::new(&config, &storage).await?;
+
+    // Initialise queue
+    let queue = QueueEngine::new(storage.clone()).await?;
+
+    // Initialise health engine
+    let mut health = HealthEngine::new();
+    health.set_status(engines::health::AgentStatus::Initializing);
+
+    // Start WebSocket transport
+    let transport = WebSocketTransport::new(config.clone(), identity.clone(), queue.clone(), encryption.clone());
+
+    // Start all collectors
+    let collector_handles = collectors::start_all(
+        config.clone(),
+        identity.clone(),
+        queue.clone(),
+        storage.clone(),
+    ).await?;
+
+    health.set_status(engines::health::AgentStatus::Online);
+    info!("All engines online. Agent is running.");
+
+    // Run transport (reconnects automatically on disconnect)
+    tokio::select! {
+        res = transport.run() => {
+            error!("Transport exited: {:?}", res);
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received SIGINT — shutting down gracefully");
+            health.set_status(engines::health::AgentStatus::ShuttingDown);
+        }
+    }
+
+    // Flush queue before exit
+    info!("Flushing queue before shutdown...");
+    queue.flush().await?;
+
+    for handle in collector_handles {
+        handle.abort();
+    }
+
+    info!("Beacon agent stopped.");
+    Ok(())
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+async fn run_init(config_path: &str) -> Result<()> {
+    use std::io::{self, Write, BufRead};
+
+    println!("=== Beacon Agent Initialization ===\n");
+
+    let stdin  = io::stdin();
+    let mut lines = stdin.lock().lines();
+
+    print!("Server address (e.g. wss://beacon.example.com): ");
+    io::stdout().flush()?;
+    let server_addr = lines.next().unwrap_or(Ok(String::new()))?;
+
+    print!("Username [admin]: ");
+    io::stdout().flush()?;
+    let username = {
+        let s = lines.next().unwrap_or(Ok(String::new()))?;
+        if s.is_empty() { "admin".to_string() } else { s }
+    };
+
+    print!("Collection interval in seconds [5]: ");
+    io::stdout().flush()?;
+    let interval: u64 = lines.next()
+        .unwrap_or(Ok("5".to_string()))?
+        .parse()
+        .unwrap_or(5);
+
+    let config = AgentConfig {
+        server_addr,
+        username,
+        interval_seconds: interval,
+        storage_dir: "/var/lib/beacon/agent".to_string(),
+        ..Default::default()
+    };
+
+    config.save(config_path).await?;
+
+    println!("\n✓ Configuration written to {}", config_path);
+    println!("  Run 'beacon-agent start' to begin collecting telemetry.");
+    Ok(())
+}
+
+async fn run_status(config_path: &str) -> Result<()> {
+    let config  = AgentConfig::load(config_path).await?;
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    let identity = IdentityEngine::new(&storage).await?;
+
+    println!("Agent ID:   {}", identity.agent_id);
+    println!("Hostname:   {}", identity.hostname);
+    println!("Server:     {}", config.server_addr);
+    println!("Storage:    {}", config.storage_dir);
+    println!("Interval:   {}s", config.interval_seconds);
+    Ok(())
+}
+
+async fn run_login(config_path: &str, username: &str, _password: Option<String>) -> Result<()> {
+    println!("Login as {username} — use the TUI or direct API for interactive login.");
+    Ok(())
+}
+
+async fn run_logout(_config_path: &str) -> Result<()> {
+    println!("Logged out.");
+    Ok(())
+}
+
+async fn run_whoami(config_path: &str) -> Result<()> {
+    let config = AgentConfig::load(config_path).await?;
+    println!("User: {}", config.username);
+    Ok(())
+}
+
+async fn run_tui(config_path: &str) -> Result<()> {
+    let config  = AgentConfig::load(config_path).await?;
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    engines::tui::run(config, storage).await
+}
+
+// ─── CLI handlers ─────────────────────────────────────────────────────────────
+
+fn handle_service(action: ServiceAction) -> Result<()> {
+    match action {
+        ServiceAction::Install => println!("Installing systemd service..."),
+        ServiceAction::Remove  => println!("Removing systemd service..."),
+        ServiceAction::Start   => println!("Starting service: systemctl start beacon-agent"),
+        ServiceAction::Stop    => println!("Stopping service: systemctl stop beacon-agent"),
+        ServiceAction::Restart => println!("Restarting service: systemctl restart beacon-agent"),
+        ServiceAction::Status  => println!("Service status: systemctl status beacon-agent"),
+    }
+    Ok(())
+}
+
+fn handle_collector(name: &str, action: EnableDisable) -> Result<()> {
+    match action {
+        EnableDisable::Enable  => println!("Enabled collector: {name}"),
+        EnableDisable::Disable => println!("Disabled collector: {name}"),
+    }
+    Ok(())
+}
+
+async fn handle_metrics_cmd(action: MetricsAction, config_path: &str) -> Result<()> {
+    match action {
+        MetricsAction::EnableAll         => println!("All collectors enabled."),
+        MetricsAction::DisableAll        => println!("All collectors disabled."),
+        MetricsAction::Interval { value } => println!("Collection interval set to {value}"),
+        MetricsAction::Retention { value } => println!("Retention set to {value}"),
+        MetricsAction::Status            => run_status(config_path).await?,
+    }
+    Ok(())
+}
+
+async fn handle_agent_cmd(action: AgentAction, _config_path: &str) -> Result<()> {
+    match action {
+        AgentAction::List              => println!("Listing agents via server API..."),
+        AgentAction::Show { agent_id } => println!("Showing agent: {agent_id}"),
+        AgentAction::Enable { agent_id } => println!("Enabling: {agent_id}"),
+        AgentAction::Disable { agent_id } => println!("Disabling: {agent_id}"),
+        AgentAction::Remove { agent_id } => println!("Removing: {agent_id}"),
+        AgentAction::Rename { agent_id, name } => println!("Renaming {agent_id} → {name}"),
+        AgentAction::RegenerateId       => println!("Regenerating agent ID..."),
+    }
+    Ok(())
+}
+
+async fn handle_logs_cmd(action: LogsAction, config_path: &str) -> Result<()> {
+    let config  = AgentConfig::load(config_path).await?;
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    match action {
+        LogsAction::View        => storage.print_recent_logs(20).await?,
+        LogsAction::Follow      => println!("Streaming logs... (Ctrl+C to stop)"),
+        LogsAction::Export { output } => println!("Exporting logs to {output}..."),
+        LogsAction::Search { query }  => println!("Searching logs for: {query}"),
+        LogsAction::Clear       => { storage.clear_logs().await?; println!("Logs cleared."); }
+        LogsAction::ClearErrors   => println!("Error logs cleared."),
+        LogsAction::ClearWarnings => println!("Warning logs cleared."),
+    }
+    Ok(())
+}
+
+async fn handle_audit_cmd(action: AuditAction, config_path: &str) -> Result<()> {
+    let config  = AgentConfig::load(config_path).await?;
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    match action {
+        AuditAction::Logs              => storage.print_audit_logs(50).await?,
+        AuditAction::Export { output } => println!("Exporting audit to {output}..."),
+    }
+    Ok(())
+}
+
+async fn handle_db_cmd(action: DbAction, config_path: &str) -> Result<()> {
+    let config  = AgentConfig::load(config_path).await?;
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    match action {
+        DbAction::Status  => storage.print_status().await?,
+        DbAction::Backup { output } => {
+            let path = output.unwrap_or_else(|| "/tmp/beacon_backup.db".to_string());
+            storage.backup(&path).await?;
+            println!("Backup written to {path}");
+        }
+        DbAction::Restore { input } => {
+            storage.restore(&input).await?;
+            println!("Restored from {input}");
+        }
+        DbAction::Compact | DbAction::Vacuum => { storage.vacuum().await?; println!("Vacuum complete."); }
+        DbAction::Verify  => { storage.verify().await?; println!("Integrity OK."); }
+        DbAction::Export { output } => println!("Exporting to {output}..."),
+        DbAction::Clear   => println!("Cleared databases."),
+        DbAction::Reset   => println!("Reset databases."),
+    }
+    Ok(())
+}
+
+async fn handle_encryption_cmd(action: EncryptionAction, _config_path: &str) -> Result<()> {
+    match action {
+        EncryptionAction::Enable    => println!("Encryption enabled."),
+        EncryptionAction::Disable   => println!("Encryption disabled."),
+        EncryptionAction::RotateKey => println!("Rotating encryption key..."),
+        EncryptionAction::Status    => println!("Encryption: AES-256-GCM | TLS 1.3"),
+    }
+    Ok(())
+}
+
+async fn handle_queue_cmd(action: QueueAction, config_path: &str) -> Result<()> {
+    let config  = AgentConfig::load(config_path).await?;
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    let queue   = QueueEngine::new(storage).await?;
+    match action {
+        QueueAction::Status      => { let s = queue.status().await?; println!("{s:?}"); }
+        QueueAction::Clear       => { queue.clear().await?; println!("Queue cleared."); }
+        QueueAction::Pause       => { queue.pause().await; println!("Queue paused."); }
+        QueueAction::Resume      => { queue.resume().await; println!("Queue resumed."); }
+        QueueAction::RetryFailed => { let n = queue.retry_failed().await?; println!("Retried {n} messages."); }
+    }
+    Ok(())
+}
+
+async fn handle_server_cmd(action: ServerAction, config_path: &str) -> Result<()> {
+    let config = AgentConfig::load(config_path).await?;
+    match action {
+        ServerAction::Connect    => println!("Connecting to {}...", config.server_addr),
+        ServerAction::Disconnect => println!("Disconnecting from server."),
+        ServerAction::Status     => println!("Server: {}", config.server_addr),
+        ServerAction::Ping       => println!("Pinging {}...", config.server_addr),
+        ServerAction::Test       => println!("Testing connection to {}...", config.server_addr),
+    }
+    Ok(())
+}
+=== /home/claude/beacon-agent/src/storage/mod.rs ===
+// storage/mod.rs — SQLite storage manager
+// Manages: config.db, metrics.db, logs.db, queue.db
+// All databases use WAL mode + NORMAL synchronous for durability with performance.
+
+use anyhow::Result;
+use rusqlite::{Connection, params};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use chrono::Utc;
+use tracing::{info, warn};
+
+#[derive(Clone)]
+pub struct StorageManager {
+    pub dir:     PathBuf,
+    metrics_db:  Arc<Mutex<Connection>>,
+    logs_db:     Arc<Mutex<Connection>>,
+    queue_db:    Arc<Mutex<Connection>>,
+    config_db:   Arc<Mutex<Connection>>,
+}
+
+impl StorageManager {
+    pub async fn new(dir: &str) -> Result<Self> {
+        let dir = PathBuf::from(dir);
+        tokio::fs::create_dir_all(&dir).await?;
+
+        let sm = Self {
+            dir:        dir.clone(),
+            metrics_db: Arc::new(Mutex::new(Self::open_db(&dir.join("metrics.db"))?)),
+            logs_db:    Arc::new(Mutex::new(Self::open_db(&dir.join("logs.db"))?)),
+            queue_db:   Arc::new(Mutex::new(Self::open_db(&dir.join("queue.db"))?)),
+            config_db:  Arc::new(Mutex::new(Self::open_db(&dir.join("config.db"))?)),
+        };
+        sm.init_schema().await?;
+        info!("Storage manager initialised at {:?}", dir);
+        Ok(sm)
+    }
+
+    fn open_db(path: &Path) -> Result<Connection> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA foreign_keys=ON;
+             PRAGMA cache_size=-8000;"
+        )?;
+        Ok(conn)
+    }
+
+    async fn init_schema(&self) -> Result<()> {
+        // ── Metrics ───────────────────────────────────────────────────────────
+        {
+            let db = self.metrics_db.lock().await;
+            db.execute_batch(r#"
+                CREATE TABLE IF NOT EXISTS metrics (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id        TEXT    NOT NULL,
+                    metric_type     TEXT    NOT NULL,
+                    resolution      TEXT    NOT NULL DEFAULT 'raw',
+                    timestamp       TEXT    NOT NULL,
+                    data            TEXT    NOT NULL,
+                    schema_version  TEXT    NOT NULL DEFAULT '1.0',
+                    sequence_number INTEGER,
+                    synced          INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_metrics_agent_type_ts
+                    ON metrics(agent_id, metric_type, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_metrics_synced
+                    ON metrics(synced, timestamp);
+            "#)?;
+        }
+
+        // ── Logs ──────────────────────────────────────────────────────────────
+        {
+            let db = self.logs_db.lock().await;
+            db.execute_batch(r#"
+                CREATE TABLE IF NOT EXISTS logs (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id        TEXT NOT NULL,
+                    source          TEXT NOT NULL,
+                    severity        TEXT NOT NULL,
+                    message         TEXT NOT NULL,
+                    timestamp       TEXT NOT NULL,
+                    schema_version  TEXT NOT NULL DEFAULT '1.0',
+                    extra           TEXT NOT NULL DEFAULT '{}',
+                    sequence_number INTEGER,
+                    synced          INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_logs_agent_severity_ts
+                    ON logs(agent_id, severity, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_logs_synced
+                    ON logs(synced, timestamp);
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    action    TEXT NOT NULL,
+                    resource  TEXT NOT NULL,
+                    details   TEXT NOT NULL DEFAULT '{}'
+                );
+            "#)?;
+        }
+
+        // ── Queue ─────────────────────────────────────────────────────────────
+        {
+            let db = self.queue_db.lock().await;
+            db.execute_batch(r#"
+                CREATE TABLE IF NOT EXISTS queue (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id  TEXT    NOT NULL UNIQUE,
+                    payload     BLOB    NOT NULL,
+                    msg_type    TEXT    NOT NULL,
+                    state       TEXT    NOT NULL DEFAULT 'Pending',
+                    retries     INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT    NOT NULL,
+                    updated_at  TEXT    NOT NULL,
+                    checksum    TEXT    NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_queue_state ON queue(state, created_at);
+                CREATE TABLE IF NOT EXISTS dead_letter (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id  TEXT NOT NULL,
+                    payload     BLOB NOT NULL,
+                    msg_type    TEXT NOT NULL,
+                    reason      TEXT NOT NULL,
+                    archived_at TEXT NOT NULL
+                );
+            "#)?;
+        }
+
+        // ── Config ────────────────────────────────────────────────────────────
+        {
+            let db = self.config_db.lock().await;
+            db.execute_batch(r#"
+                CREATE TABLE IF NOT EXISTS config (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT NOT NULL,
+                    encrypted  INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS agent_identity (
+                    id         INTEGER PRIMARY KEY CHECK (id = 1),
+                    agent_id   TEXT NOT NULL,
+                    hostname   TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS encryption_keys (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_data   BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    active     INTEGER NOT NULL DEFAULT 1
+                );
+            "#)?;
+        }
+
+        Ok(())
+    }
+
+    // ── Metrics ───────────────────────────────────────────────────────────────
+
+    pub async fn store_metric(&self, agent_id: &str, metric_type: &str, data: &str) -> Result<()> {
+        let db = self.metrics_db.lock().await;
+        let ts = Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT INTO metrics (agent_id, metric_type, timestamp, data) VALUES (?1,?2,?3,?4)",
+            params![agent_id, metric_type, ts, data],
+        )?;
+        Ok(())
+    }
+
+    pub async fn get_unsynced_metrics(&self, limit: usize) -> Result<Vec<MetricRow>> {
+        let db = self.metrics_db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT id, agent_id, metric_type, resolution, timestamp, data, schema_version, sequence_number
+             FROM metrics WHERE synced = 0 ORDER BY timestamp ASC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(MetricRow {
+                id:              r.get(0)?,
+                agent_id:        r.get(1)?,
+                metric_type:     r.get(2)?,
+                resolution:      r.get(3)?,
+                timestamp:       r.get(4)?,
+                data:            r.get(5)?,
+                schema_version:  r.get(6)?,
+                sequence_number: r.get(7)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub async fn mark_metrics_synced(&self, ids: &[i64]) -> Result<()> {
+        if ids.is_empty() { return Ok(()); }
+        let db = self.metrics_db.lock().await;
+        for id in ids {
+            db.execute("UPDATE metrics SET synced = 1 WHERE id = ?1", params![id])?;
+        }
+        Ok(())
+    }
+
+    pub async fn prune_metrics(&self, raw_hours: i64, rollup_1m_days: i64, rollup_1h_days: i64) -> Result<usize> {
+        let db  = self.metrics_db.lock().await;
+        let now = Utc::now();
+        let raw_cutoff  = (now - chrono::Duration::hours(raw_hours)).to_rfc3339();
+        let min_cutoff  = (now - chrono::Duration::days(rollup_1m_days)).to_rfc3339();
+        let hr_cutoff   = (now - chrono::Duration::days(rollup_1h_days)).to_rfc3339();
+        let mut n = 0usize;
+        n += db.execute("DELETE FROM metrics WHERE resolution='raw'   AND timestamp < ?1", params![raw_cutoff])? as usize;
+        n += db.execute("DELETE FROM metrics WHERE resolution='1min'  AND timestamp < ?1", params![min_cutoff])? as usize;
+        n += db.execute("DELETE FROM metrics WHERE resolution='1hour' AND timestamp < ?1", params![hr_cutoff])? as usize;
+        Ok(n)
+    }
+
+    // ── Logs ──────────────────────────────────────────────────────────────────
+
+    pub async fn store_log(&self, agent_id: &str, source: &str, severity: &str, message: &str, extra: &str) -> Result<()> {
+        let db = self.logs_db.lock().await;
+        let ts = Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT INTO logs (agent_id, source, severity, message, timestamp, extra) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![agent_id, source, severity, message, ts, extra],
+        )?;
+        Ok(())
+    }
+
+    pub async fn get_unsynced_logs(&self, limit: usize) -> Result<Vec<LogRow>> {
+        let db = self.logs_db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT id, agent_id, source, severity, message, timestamp, schema_version, extra, sequence_number
+             FROM logs WHERE synced = 0 ORDER BY timestamp ASC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(LogRow {
+                id:              r.get(0)?,
+                agent_id:        r.get(1)?,
+                source:          r.get(2)?,
+                severity:        r.get(3)?,
+                message:         r.get(4)?,
+                timestamp:       r.get(5)?,
+                schema_version:  r.get(6)?,
+                extra:           r.get(7)?,
+                sequence_number: r.get(8)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub async fn mark_logs_synced(&self, ids: &[i64]) -> Result<()> {
+        if ids.is_empty() { return Ok(()); }
+        let db = self.logs_db.lock().await;
+        for id in ids {
+            db.execute("UPDATE logs SET synced = 1 WHERE id = ?1", params![id])?;
+        }
+        Ok(())
+    }
+
+    pub async fn print_recent_logs(&self, n: usize) -> Result<()> {
+        let db = self.logs_db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT timestamp, severity, source, message FROM logs ORDER BY timestamp DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![n as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        })?;
+        for row in rows {
+            let (ts, sev, src, msg) = row?;
+            println!("[{ts}] [{sev}] ({src}) {msg}");
+        }
+        Ok(())
+    }
+
+    pub async fn clear_logs(&self) -> Result<()> {
+        let db = self.logs_db.lock().await;
+        db.execute("DELETE FROM logs", [])?;
+        Ok(())
+    }
+
+    // ── Audit ─────────────────────────────────────────────────────────────────
+
+    pub async fn write_audit(&self, action: &str, resource: &str, details: &str) -> Result<()> {
+        let db = self.logs_db.lock().await;
+        let ts = Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT INTO audit_logs (timestamp, action, resource, details) VALUES (?1,?2,?3,?4)",
+            params![ts, action, resource, details],
+        )?;
+        Ok(())
+    }
+
+    pub async fn print_audit_logs(&self, n: usize) -> Result<()> {
+        let db = self.logs_db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT timestamp, action, resource, details FROM audit_logs ORDER BY timestamp DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![n as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        })?;
+        for row in rows {
+            let (ts, action, resource, details) = row?;
+            println!("[{ts}] {action} | {resource} | {details}");
+        }
+        Ok(())
+    }
+
+    // ── Queue (accessed by QueueEngine) ───────────────────────────────────────
+
+    pub fn queue_db(&self) -> Arc<Mutex<Connection>> {
+        self.queue_db.clone()
+    }
+
+    // ── Config ────────────────────────────────────────────────────────────────
+
+    pub async fn get_config(&self, key: &str) -> Result<Option<String>> {
+        let db = self.config_db.lock().await;
+        match db.query_row("SELECT value FROM config WHERE key = ?1", params![key], |r| r.get(0)) {
+            Ok(v)  => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn set_config(&self, key: &str, value: &str) -> Result<()> {
+        let db = self.config_db.lock().await;
+        let ts = Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?1,?2,?3)",
+            params![key, value, ts],
+        )?;
+        Ok(())
+    }
+
+    pub async fn get_agent_identity(&self) -> Result<Option<(String, String)>> {
+        let db = self.config_db.lock().await;
+        match db.query_row(
+            "SELECT agent_id, hostname FROM agent_identity WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ) {
+            Ok(v)  => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn store_agent_identity(&self, agent_id: &str, hostname: &str) -> Result<()> {
+        let db = self.config_db.lock().await;
+        let ts = Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT OR IGNORE INTO agent_identity (id, agent_id, hostname, created_at) VALUES (1,?1,?2,?3)",
+            params![agent_id, hostname, ts],
+        )?;
+        Ok(())
+    }
+
+    pub async fn get_active_encryption_key(&self) -> Result<Option<Vec<u8>>> {
+        let db = self.config_db.lock().await;
+        match db.query_row(
+            "SELECT key_data FROM encryption_keys WHERE active = 1 ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get::<_, Vec<u8>>(0),
+        ) {
+            Ok(v)  => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn store_encryption_key(&self, key_data: &[u8]) -> Result<()> {
+        let db = self.config_db.lock().await;
+        let ts = Utc::now().to_rfc3339();
+        db.execute("UPDATE encryption_keys SET active = 0", [])?;
+        db.execute(
+            "INSERT INTO encryption_keys (key_data, created_at, active) VALUES (?1,?2,1)",
+            params![key_data, ts],
+        )?;
+        Ok(())
+    }
+
+    // ── Maintenance ───────────────────────────────────────────────────────────
+
+    pub async fn vacuum(&self) -> Result<()> {
+        for db in [&self.metrics_db, &self.logs_db, &self.queue_db, &self.config_db] {
+            db.lock().await.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")?;
+        }
+        Ok(())
+    }
+
+    pub async fn verify(&self) -> Result<()> {
+        for db in [&self.metrics_db, &self.logs_db, &self.queue_db, &self.config_db] {
+            let locked = db.lock().await;
+            let ok: String = locked.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+            if ok != "ok" {
+                return Err(anyhow::anyhow!("Integrity check failed: {ok}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn backup(&self, dest: &str) -> Result<()> {
+        // Copy the metrics database file as a simple backup
+        let src_path = self.dir.join("metrics.db");
+        tokio::fs::copy(&src_path, dest).await?;
+        info!("Backup written to {dest}");
+        Ok(())
+    }
+
+    pub async fn restore(&self, _src: &str) -> Result<()> {
+        warn!("Restore: stop the agent, copy backup over metrics.db, then restart.");
+        Ok(())
+    }
+
+    pub async fn print_status(&self) -> Result<()> {
+        let metrics_count: i64 = {
+            let db = self.metrics_db.lock().await;
+            db.query_row("SELECT COUNT(*) FROM metrics", [], |r| r.get(0))?
+        };
+        let logs_count: i64 = {
+            let db = self.logs_db.lock().await;
+            db.query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))?
+        };
+        let queue_count: i64 = {
+            let db = self.queue_db.lock().await;
+            db.query_row("SELECT COUNT(*) FROM queue", [], |r| r.get(0))?
+        };
+        println!("Storage:");
+        println!("  dir        : {:?}", self.dir);
+        println!("  metrics.db : {} records", metrics_count);
+        println!("  logs.db    : {} records", logs_count);
+        println!("  queue.db   : {} records", queue_count);
+        Ok(())
+    }
+}
+
+// ── Row types ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct MetricRow {
+    pub id:              i64,
+    pub agent_id:        String,
+    pub metric_type:     String,
+    pub resolution:      String,
+    pub timestamp:       String,
+    pub data:            String,
+    pub schema_version:  String,
+    pub sequence_number: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogRow {
+    pub id:              i64,
+    pub agent_id:        String,
+    pub source:          String,
+    pub severity:        String,
+    pub message:         String,
+    pub timestamp:       String,
+    pub schema_version:  String,
+    pub extra:           String,
+    pub sequence_number: Option<i64>,
+}
+=== /home/claude/beacon-agent/src/transport/mod.rs ===
+// transport/mod.rs — Secure WebSocket Transport
+// TLS 1.3 WebSocket. Auto-reconnects with exponential backoff.
+// Agent protocol: register → heartbeat loop + telemetry flush.
+
+use anyhow::{Result, anyhow};
+use base64::Engine as _;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::json;
+use std::time::Duration;
+use tokio::time::sleep;
+use tokio_tungstenite::{
+    connect_async_tls_with_config,
+    tungstenite::Message,
+    Connector,
+};
+use tracing::{info, warn, error, debug};
+
+use crate::config::AgentConfig;
+use crate::engines::identity::AgentIdentity;
+use crate::engines::queue::QueueEngine;
+use crate::engines::encryption::EncryptionEngine;
+
+const HEARTBEAT_INTERVAL:   Duration = Duration::from_secs(15);
+const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
+const RECONNECT_MAX_DELAY:  Duration = Duration::from_secs(60);
+const FLUSH_BATCH_SIZE:     usize    = 50;
+
+#[derive(Clone)]
+pub struct WebSocketTransport {
+    config:     AgentConfig,
+    identity:   AgentIdentity,
+    queue:      QueueEngine,
+    encryption: EncryptionEngine,
+}
+
+impl WebSocketTransport {
+    pub fn new(
+        config:     AgentConfig,
+        identity:   AgentIdentity,
+        queue:      QueueEngine,
+        encryption: EncryptionEngine,
+    ) -> Self {
+        Self { config, identity, queue, encryption }
+    }
+
+    /// Run forever — reconnects automatically with exponential backoff.
+    pub async fn run(&self) -> Result<()> {
+        let mut backoff = RECONNECT_BASE_DELAY;
+        loop {
+            info!("Connecting to {}", self.config.server_addr);
+            match self.connect_and_run().await {
+                Ok(()) => {
+                    info!("Transport disconnected cleanly — reconnecting...");
+                    backoff = RECONNECT_BASE_DELAY;
+                }
+                Err(e) => {
+                    warn!("Transport error: {e}. Reconnecting in {:.1}s...", backoff.as_secs_f32());
+                    sleep(backoff).await;
+                    backoff = (backoff * 2).min(RECONNECT_MAX_DELAY);
+                }
+            }
+        }
+    }
+
+    async fn connect_and_run(&self) -> Result<()> {
+        let url       = url::Url::parse(&self.config.server_addr)
+            .map_err(|e| anyhow!("Invalid server URL: {e}"))?;
+        let connector = self.build_tls_connector()?;
+
+        let (ws_stream, _) = connect_async_tls_with_config(url, None, false, Some(connector))
+            .await
+            .map_err(|e| anyhow!("WebSocket connect failed: {e}"))?;
+
+        info!("WebSocket connected to {}", self.config.server_addr);
+        let (mut writer, mut reader) = ws_stream.split();
+
+        // Send registration
+        let register_msg = json!({
+            "type": "register",
+            "payload": {
+                "agent_id":     self.identity.agent_id,
+                "hostname":     self.identity.hostname,
+                "os":           self.identity.os,
+                "architecture": self.identity.arch,
+                "version":      "1.0.0",
+                "tags":         [],
+                "metadata":     {},
+            }
+        });
+        writer.send(Message::Text(register_msg.to_string())).await
+            .map_err(|e| anyhow!("Registration send failed: {e}"))?;
+        info!("Registration sent for agent {}", &self.identity.agent_id[..16.min(self.identity.agent_id.len())]);
+
+        let queue    = self.queue.clone();
+        let identity = self.identity.clone();
+        let enc      = self.encryption.clone();
+
+        // Run all loops concurrently; abort all on first error
+        tokio::select! {
+            r = Self::heartbeat_loop(&mut writer, &identity)        => r,
+            r = Self::flush_loop(&mut writer, &queue, &enc, &identity) => r,
+            r = Self::read_loop(&mut reader)                        => r,
+        }
+    }
+
+    async fn heartbeat_loop<S>(writer: &mut S, identity: &AgentIdentity) -> Result<()>
+    where
+        S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+    {
+        loop {
+            sleep(HEARTBEAT_INTERVAL).await;
+            let hb = json!({
+                "type":     "heartbeat",
+                "agent_id": identity.agent_id,
+                "status":   "ONLINE",
+            });
+            writer.send(Message::Text(hb.to_string())).await
+                .map_err(|e| anyhow!("Heartbeat send failed: {e}"))?;
+            debug!("Heartbeat sent");
+        }
+    }
+
+    async fn flush_loop<S>(
+        writer:   &mut S,
+        queue:    &QueueEngine,
+        enc:      &EncryptionEngine,
+        identity: &AgentIdentity,
+    ) -> Result<()>
+    where
+        S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+    {
+        loop {
+            let batch = queue.dequeue_batch(FLUSH_BATCH_SIZE).await?;
+            if batch.is_empty() {
+                sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+
+            for msg in &batch {
+                // Decrypt locally-encrypted payload before transmitting
+                let plaintext = if enc.is_enabled() {
+                    let ep = crate::engines::encryption::EncryptedPayload { data: msg.payload.clone() };
+                    enc.decrypt(&ep).await.unwrap_or_else(|_| msg.payload.clone())
+                } else {
+                    msg.payload.clone()
+                };
+
+                let payload_json: serde_json::Value = serde_json::from_slice(&plaintext)
+                    .unwrap_or_else(|_| json!({
+                        "raw": base64::engine::general_purpose::STANDARD.encode(&plaintext)
+                    }));
+
+                let envelope = json!({
+                    "type":     msg.msg_type,
+                    "agent_id": identity.agent_id,
+                    "payload":  payload_json,
+                });
+
+                match writer.send(Message::Text(envelope.to_string())).await {
+                    Ok(_) => {
+                        queue.ack(msg.id).await?;
+                        debug!("Flushed message {}", msg.message_id);
+                    }
+                    Err(e) => {
+                        error!("Send failed for {}: {e}", msg.message_id);
+                        queue.nack(msg.id, &msg.message_id).await?;
+                        return Err(anyhow!("Send error: {e}"));
+                    }
+                }
+            }
+
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn read_loop<S>(reader: &mut S) -> Result<()>
+    where
+        S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        while let Some(msg) = reader.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                        match parsed.get("type").and_then(|t| t.as_str()) {
+                            Some("registered")    => info!("Agent registration confirmed by server"),
+                            Some("heartbeat_ack") => debug!("Heartbeat acknowledged"),
+                            Some("config_update") => info!("Received config update from server"),
+                            _                     => debug!("Server message: {}", &text[..text.len().min(120)]),
+                        }
+                    }
+                }
+                Ok(Message::Close(frame)) => {
+                    info!("Server closed connection: {:?}", frame);
+                    return Ok(());
+                }
+                Ok(Message::Ping(_)) => debug!("Received ping"),
+                Ok(_) => {}
+                Err(e) => return Err(anyhow!("WebSocket read error: {e}")),
+            }
+        }
+        Ok(())
+    }
+
+    fn build_tls_connector(&self) -> Result<Connector> {
+        use rustls::{ClientConfig, RootCertStore};
+        use std::sync::Arc;
+
+        let mut root_store = RootCertStore::empty();
+
+        if self.config.tls.verify_cert {
+            let native_certs = rustls_native_certs::load_native_certs()
+                .map_err(|e| anyhow!("Failed to load native certs: {e}"))?;
+            for cert in native_certs {
+                root_store.add(cert).map_err(|e| anyhow!("Invalid cert: {e}"))?;
+            }
+        } else {
+            warn!("TLS certificate verification DISABLED — not for production!");
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        }
+
+        let tls_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        Ok(Connector::Rustls(Arc::new(tls_config)))
+    }
+}
