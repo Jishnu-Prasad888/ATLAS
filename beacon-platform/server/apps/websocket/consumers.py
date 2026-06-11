@@ -34,10 +34,14 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         await self.accept()
         logger.info(f"Agent WS connection established from {self.scope.get('client')}")
 
+    @property
+    def safe_agent_id(self):
+        return self.agent_id.replace(":", "_").replace("#", "_").replace(" ", "_") if self.agent_id else None
+
     async def disconnect(self, close_code):
         if self.agent_id:
+            await self.channel_layer.group_discard(f"agent_{self.safe_agent_id}", self.channel_name)
             await self.mark_agent_offline(self.agent_id)
-            await self.channel_layer.group_discard(f"agent_{self.agent_id}", self.channel_name)
         logger.info(f"Agent disconnected: {self.agent_id} code={close_code}")
 
     async def receive(self, text_data=None, bytes_data=None):
@@ -79,7 +83,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         self.agent_id   = agent_id
         self.registered = True
 
-        await self.channel_layer.group_add(f"agent_{agent_id}", self.channel_name)
+        await self.channel_layer.group_add(f"agent_{self.safe_agent_id}", self.channel_name)
         await self.send_json({
             "type": "registered",
             "agent_id": agent_id,
@@ -106,7 +110,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         saved = await self.save_metrics(self.agent_id, metrics)
         # Broadcast to subscribers
         await self.channel_layer.group_send(
-            f"metrics_{self.agent_id}",
+            f"metrics_{self.safe_agent_id}",
             {"type": "metric.update", "data": {"agent_id": self.agent_id, "count": saved}},
         )
         await self.send_json({"type": "metrics_ack", "ingested": saved})
@@ -119,7 +123,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
             logs = [logs]
         saved = await self.save_logs(self.agent_id, logs)
         await self.channel_layer.group_send(
-            f"logs_{self.agent_id}",
+            f"logs_{self.safe_agent_id}",
             {"type": "log.entry", "data": {"agent_id": self.agent_id, "count": saved}},
         )
         await self.send_json({"type": "logs_ack", "ingested": saved})
@@ -279,7 +283,8 @@ class ClientSubscribeConsumer(AsyncWebsocketConsumer):
             await self.send_json({"error": "agent_id is required"})
             return
 
-        group_name = f"{channel}_{agent_id}"
+        safe_id = agent_id.replace(":", "_").replace("#", "_").replace(" ", "_")
+        group_name = f"{channel}_{safe_id}"
 
         if action == "subscribe":
             if group_name not in self.subscriptions:

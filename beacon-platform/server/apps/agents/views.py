@@ -123,6 +123,7 @@ class AgentRegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        print(data["agent_id"])
         agent, created = Agent.objects.update_or_create(
             agent_id=data["agent_id"],
             defaults={

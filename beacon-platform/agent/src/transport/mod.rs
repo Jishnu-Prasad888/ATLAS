@@ -65,18 +65,11 @@ impl WebSocketTransport {
     }
 
     async fn connect_and_run(&self) -> Result<()> {
-        // Login to get JWT token
-        let token = crate::auth::login(
-            &self.config.server_addr,
-            &self.config.username,
-            &self.config.password
-        ).await?;
-        
-        // Parse URL and add token as query parameter
-        let mut url = url::Url::parse(&self.config.server_addr)
+        // Connect directly — the WebSocket consumer authenticates agents via the
+        // registration message, not JWT. The middleware gracefully handles the
+        // absence of a token by setting AnonymousUser.
+        let url = url::Url::parse(&self.config.server_addr)
             .map_err(|e| anyhow!("Invalid server URL: {e}"))?;
-        url.query_pairs_mut().append_pair("token", &token);
-        
         let connector = self.build_tls_connector()?;
 
         let (ws_stream, _) = connect_async_tls_with_config(url, None, false, Some(connector))

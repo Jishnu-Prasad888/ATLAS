@@ -11,17 +11,14 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "beacon_server.settings")
 django_asgi_app = get_asgi_application()
 
 from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.security.websocket import AllowedHostsOriginValidator
 from apps.websocket.middleware import JWTAuthMiddlewareStack
 from apps.websocket import routing as ws_routing
 
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": AllowedHostsOriginValidator(
-            JWTAuthMiddlewareStack(
-                URLRouter(ws_routing.websocket_urlpatterns)
-            )
+        "websocket": JWTAuthMiddlewareStack(
+            URLRouter(ws_routing.websocket_urlpatterns)
         ),
     }
 )
