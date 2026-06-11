@@ -495,7 +495,7 @@ fn draw_metrics(f: &mut Frame, state: &AppState, area: Rect) {
         .header(Row::new(["Metric", "Value", "Unit"])
             .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)))
         .block(Block::default().title(" Live Metrics ").borders(Borders::ALL).border_type(BorderType::Rounded))
-        .row_highlight_style(Style::default().bg(Color::DarkGray));
+        .highlight_style(Style::default().bg(Color::DarkGray));
     f.render_widget(table, area);
 }
 

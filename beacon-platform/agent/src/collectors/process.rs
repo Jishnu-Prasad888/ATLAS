@@ -32,7 +32,7 @@ impl Collector for ProcessCollector {
 
     async fn collect(&self) -> Result<Value> {
         let mut sys = self.sys.lock().unwrap();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+        sys.refresh_processes();
         Ok(collect_from(&sys, &self.boot_id, self.max_processes))
     }
 }
@@ -86,7 +86,7 @@ mod tests {
         let mut sys = System::new_with_specifics(
             RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
         );
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+        sys.refresh_processes();
 
         let total = sys.processes().len();
         if total < 2 { return; } // skip if no processes on this host
@@ -102,7 +102,7 @@ mod tests {
         let mut sys = System::new_with_specifics(
             RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
         );
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+        sys.refresh_processes();
         let total = sys.processes().len();
         let v     = collect_from(&sys, "boot", usize::MAX);
         assert_eq!(v["total_processes"].as_u64().unwrap(), total as u64);

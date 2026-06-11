@@ -25,7 +25,7 @@ impl CpuCollector {
         let mut sys = System::new_with_specifics(
             RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
         );
-        sys.refresh_cpu_all();
+        sys.refresh_cpu_specifics(CpuRefreshKind::everything());
         Self { sys: std::sync::Mutex::new(sys) }
     }
 }
@@ -36,7 +36,7 @@ impl Collector for CpuCollector {
 
     async fn collect(&self) -> Result<Value> {
         let mut sys = self.sys.lock().unwrap();
-        sys.refresh_cpu_all();
+        sys.refresh_cpu_specifics(CpuRefreshKind::everything());
         // First call after construction gives a baseline; sleep for accuracy
         // is intentionally omitted here — callers control the interval.
         Ok(collect_from(&sys))

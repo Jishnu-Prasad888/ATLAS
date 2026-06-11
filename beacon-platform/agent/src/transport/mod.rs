@@ -6,7 +6,9 @@ use anyhow::{Result, anyhow};
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tokio_tungstenite::{
     connect_async_tls_with_config,
@@ -95,15 +97,18 @@ impl WebSocketTransport {
         let identity = self.identity.clone();
         let enc      = self.encryption.clone();
 
+        // Wrap writer in Arc<Mutex> so heartbeat and flush loops can share it
+        let writer = Arc::new(Mutex::new(writer));
+
         // Run all loops concurrently; abort all on first error
         tokio::select! {
-            r = Self::heartbeat_loop(&mut writer, &identity)        => r,
-            r = Self::flush_loop(&mut writer, &queue, &enc, &identity) => r,
-            r = Self::read_loop(&mut reader)                        => r,
+            r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())        => r,
+            r = Self::flush_loop(Arc::clone(&writer), queue, enc, identity.clone()) => r,
+            r = Self::read_loop(&mut reader)                                        => r,
         }
     }
 
-    async fn heartbeat_loop<S>(writer: &mut S, identity: &AgentIdentity) -> Result<()>
+    async fn heartbeat_loop<S>(writer: Arc<Mutex<S>>, identity: AgentIdentity) -> Result<()>
     where
         S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
     {
@@ -114,17 +119,17 @@ impl WebSocketTransport {
                 "agent_id": identity.agent_id,
                 "status":   "ONLINE",
             });
-            writer.send(Message::Text(hb.to_string())).await
+            writer.lock().await.send(Message::Text(hb.to_string())).await
                 .map_err(|e| anyhow!("Heartbeat send failed: {e}"))?;
             debug!("Heartbeat sent");
         }
     }
 
     async fn flush_loop<S>(
-        writer:   &mut S,
-        queue:    &QueueEngine,
-        enc:      &EncryptionEngine,
-        identity: &AgentIdentity,
+        writer:   Arc<Mutex<S>>,
+        queue:    QueueEngine,
+        enc:      EncryptionEngine,
+        identity: AgentIdentity,
     ) -> Result<()>
     where
         S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
@@ -156,7 +161,7 @@ impl WebSocketTransport {
                     "payload":  payload_json,
                 });
 
-                match writer.send(Message::Text(envelope.to_string())).await {
+                match writer.lock().await.send(Message::Text(envelope.to_string())).await {
                     Ok(_) => {
                         queue.ack(msg.id).await?;
                         debug!("Flushed message {}", msg.message_id);
