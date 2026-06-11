@@ -19,6 +19,8 @@ pub struct AgentConfig {
     pub server_addr: String,
     /// Username for API authentication
     pub username: String,
+    /// Password for API authentication
+    pub password: String,
     /// Local storage directory
     pub storage_dir: String,
     /// Collection interval in seconds
@@ -72,6 +74,7 @@ impl Default for AgentConfig {
         Self {
             server_addr:      "wss://localhost:8000/ws/ingest/".to_string(),
             username:         "admin".to_string(),
+            password:         String::new(),
             storage_dir:      "/var/lib/beacon/agent".to_string(),
             interval_seconds: 5,
             collectors: CollectorConfig {

@@ -7,6 +7,7 @@ mod collectors;
 mod transport;
 mod storage;
 mod config;
+mod auth;
 // config::validator is a sub-module of config — no explicit declaration needed here
 
 use anyhow::Result;
@@ -406,6 +407,10 @@ async fn run_init(config_path: &str) -> Result<()> {
         if s.is_empty() { "admin".to_string() } else { s }
     };
 
+    print!("Password: ");
+    io::stdout().flush()?;
+    let password = lines.next().unwrap_or(Ok(String::new()))?;
+
     print!("Collection interval in seconds [5]: ");
     io::stdout().flush()?;
     let interval: u64 = lines.next()
@@ -416,6 +421,7 @@ async fn run_init(config_path: &str) -> Result<()> {
     let config = AgentConfig {
         server_addr,
         username,
+        password,
         interval_seconds: interval,
         storage_dir: "/var/lib/beacon/agent".to_string(),
         ..Default::default()
