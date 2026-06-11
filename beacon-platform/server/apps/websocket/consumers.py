@@ -28,6 +28,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
     """
 
     async def connect(self):
+        # Agents don't use JWT auth - they authenticate via registration message
         self.agent_id   = None
         self.registered = False
         await self.accept()
