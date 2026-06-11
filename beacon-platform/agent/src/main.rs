@@ -8,11 +8,12 @@ mod transport;
 mod storage;
 mod config;
 mod auth;
+mod registration;
 // config::validator is a sub-module of config — no explicit declaration needed here
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing::{info, error};
+use tracing::{info, warn, error};
 use tracing_subscriber::{EnvFilter, fmt};
 
 use config::AgentConfig;
@@ -47,7 +48,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize the agent (first-time setup)
+    /// Initialize the agent (first-time setup — prompts for server, credentials, and secret)
     Init,
 
     /// Start the agent daemon
@@ -294,10 +295,10 @@ async fn main() -> Result<()> {
     info!("beacon-agent v1.0.0 starting");
 
     match cli.command.unwrap_or(Commands::Start) {
-        Commands::Init => run_init(&cli.config).await,
+        Commands::Init  => run_init(&cli.config).await,
         Commands::Start => run_daemon(&cli.config).await,
         Commands::Status => run_status(&cli.config).await,
-        Commands::Tui => run_tui(&cli.config).await,
+        Commands::Tui   => run_tui(&cli.config).await,
 
         Commands::Login { username, password } => {
             run_login(&cli.config, &username, password).await
@@ -339,6 +340,60 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     let identity = IdentityEngine::new(&storage).await?;
     info!("Agent identity: {}", identity.agent_id);
 
+    // ── Registration gate ─────────────────────────────────────────────────────
+    // Every daemon start attempts registration so we catch secret changes and
+    // server-side disables promptly.  On a transient network error we fall back
+    // to the locally persisted status so offline restarts still work once an
+    // agent has been registered at least once.
+    info!("Verifying agent registration with server...");
+    match registration::register(&config, &identity, &storage).await {
+        Ok(()) => {
+            info!("✓ Agent registration confirmed.");
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+
+            // Check if this is a secret mismatch — hard stop in this case.
+            if err_str.contains("Secret mismatch")
+                || err_str.contains("secret_mismatch")
+                || err_str.contains("Registration rejected")
+            {
+                error!("✗ Registration failed — secret mismatch.");
+                error!("{}", err_str);
+                eprintln!("\n[beacon-agent] ERROR: Secret mismatch.\n{}\n", err_str);
+                eprintln!("Metrics will NOT be sent until this is resolved.");
+                eprintln!(
+                    "Run 'beacon-agent init' to re-configure, or set BEACON_AGENT_SECRET."
+                );
+                std::process::exit(1);
+            }
+
+            // Transient error — check last known local status.
+            warn!("Registration request failed ({}). Checking local registration cache...", e);
+            let locally_registered = registration::is_registered(&storage).await
+                .unwrap_or(false);
+
+            if locally_registered {
+                warn!(
+                    "Server unreachable but agent was previously registered. \
+                     Continuing in offline-buffering mode."
+                );
+            } else {
+                error!(
+                    "✗ Agent has never been successfully registered and server is unreachable. \
+                     Cannot start."
+                );
+                error!("{}", e);
+                eprintln!(
+                    "\n[beacon-agent] ERROR: Not registered and server is unreachable.\n\
+                     Run 'beacon-agent init' to configure and register the agent."
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Initialise encryption
     let encryption = EncryptionEngine::new(&config, &storage).await?;
 
@@ -350,7 +405,12 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     health.set_status(engines::health::AgentStatus::Initializing);
 
     // Start WebSocket transport
-    let transport = WebSocketTransport::new(config.clone(), identity.clone(), queue.clone(), encryption.clone());
+    let transport = WebSocketTransport::new(
+        config.clone(),
+        identity.clone(),
+        queue.clone(),
+        encryption.clone(),
+    );
 
     // Start all collectors
     let collector_handles = collectors::start_all(
@@ -358,7 +418,8 @@ async fn run_daemon(config_path: &str) -> Result<()> {
         identity.clone(),
         queue.clone(),
         storage.clone(),
-    ).await?;
+    )
+    .await?;
 
     health.set_status(engines::health::AgentStatus::Online);
     info!("All engines online. Agent is running.");
@@ -392,45 +453,128 @@ async fn run_init(config_path: &str) -> Result<()> {
     use std::io::{self, Write, BufRead};
 
     println!("=== Beacon Agent Initialization ===\n");
+    println!("This will configure the agent and register it with the Beacon server.");
+    println!("The secret must match the BEACON_AGENT_SECRET set on your server.\n");
 
-    let stdin  = io::stdin();
+    let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
 
-    print!("Server address (e.g. wss://beacon.example.com): ");
+    // ── Server address ────────────────────────────────────────────────────────
+    print!("Server address (e.g. wss://beacon.example.com/ws/ingest/): ");
     io::stdout().flush()?;
-    let server_addr = lines.next().unwrap_or(Ok(String::new()))?;
+    let server_addr = loop {
+        let s = lines.next().unwrap_or(Ok(String::new()))?;
+        let s = s.trim().to_string();
+        if s.starts_with("ws://") || s.starts_with("wss://") {
+            break s;
+        }
+        eprintln!("  ✗ Must start with ws:// or wss://. Try again.");
+        print!("Server address: ");
+        io::stdout().flush()?;
+    };
 
+    // ── Username ──────────────────────────────────────────────────────────────
     print!("Username [admin]: ");
     io::stdout().flush()?;
     let username = {
-        let s = lines.next().unwrap_or(Ok(String::new()))?;
+        let s = lines.next().unwrap_or(Ok(String::new()))?.trim().to_string();
         if s.is_empty() { "admin".to_string() } else { s }
     };
 
+    // ── Password ──────────────────────────────────────────────────────────────
     print!("Password: ");
     io::stdout().flush()?;
-    let password = lines.next().unwrap_or(Ok(String::new()))?;
+    let password = lines.next().unwrap_or(Ok(String::new()))?.trim().to_string();
+    if password.is_empty() {
+        eprintln!("\n  ⚠ Warning: password is empty.");
+    }
 
-    print!("Collection interval in seconds [5]: ");
+    // ── Secret ───────────────────────────────────────────────────────────────
+    // The secret is required.  We loop until a non-empty value is provided
+    // (or the user sets BEACON_AGENT_SECRET and presses Enter to skip).
+    println!("\nAgent Secret");
+    println!("  The secret must match BEACON_AGENT_SECRET on the Beacon server.");
+    println!("  Press Enter to read from the BEACON_AGENT_SECRET environment variable.");
+    print!("Secret (or Enter to use env var): ");
     io::stdout().flush()?;
-    let interval: u64 = lines.next()
+
+    let secret = loop {
+        let s = lines.next().unwrap_or(Ok(String::new()))?.trim().to_string();
+        if !s.is_empty() {
+            // Inline value provided
+            break s;
+        }
+        // Try environment variable
+        match std::env::var("BEACON_AGENT_SECRET") {
+            Ok(env_s) if !env_s.trim().is_empty() => {
+                println!("  ✓ Using BEACON_AGENT_SECRET from environment.");
+                break String::new(); // stored as empty — env provides it at runtime
+            }
+            _ => {
+                eprintln!(
+                    "  ✗ No secret provided and BEACON_AGENT_SECRET is not set.\n\
+                     Please enter a secret string or set the environment variable."
+                );
+                print!("Secret: ");
+                io::stdout().flush()?;
+            }
+        }
+    };
+
+    // ── Interval ──────────────────────────────────────────────────────────────
+    print!("\nCollection interval in seconds [5]: ");
+    io::stdout().flush()?;
+    let interval: u64 = lines
+        .next()
         .unwrap_or(Ok("5".to_string()))?
+        .trim()
         .parse()
         .unwrap_or(5);
 
+    // ── Build and save config ─────────────────────────────────────────────────
     let config = AgentConfig {
-        server_addr,
-        username,
+        server_addr: server_addr.clone(),
+        username: username.clone(),
         password,
+        secret,
         interval_seconds: interval,
         storage_dir: "/var/lib/beacon/agent".to_string(),
         ..Default::default()
     };
 
     config.save(config_path).await?;
-
     println!("\n✓ Configuration written to {}", config_path);
-    println!("  Run 'beacon-agent start' to begin collecting telemetry.");
+
+    // ── Attempt registration now ──────────────────────────────────────────────
+    println!("\nAttempting to register agent with server...");
+
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    // Clear any stale registration state from a previous init
+    registration::clear_registration(&storage).await?;
+
+    let identity = engines::identity::IdentityEngine::new(&storage).await?;
+
+    match registration::register(&config, &identity, &storage).await {
+        Ok(()) => {
+            println!("✓ Agent registered successfully!");
+            println!(
+                "  Agent ID : {}",
+                identity.agent_id
+            );
+            println!("  Hostname : {}", identity.hostname);
+            println!("\nRun 'beacon-agent start' to begin collecting and sending telemetry.");
+        }
+        Err(e) => {
+            eprintln!("\n✗ Registration failed: {}", e);
+            eprintln!(
+                "\nThe configuration has been saved. Fix the issue and run\n\
+                 'beacon-agent init' again or start the agent once the server\n\
+                 is reachable — it will retry registration automatically.\n"
+            );
+            // Don't abort init — config is saved and user can fix the issue.
+        }
+    }
+
     Ok(())
 }
 
@@ -438,12 +582,31 @@ async fn run_status(config_path: &str) -> Result<()> {
     let config  = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     let identity = IdentityEngine::new(&storage).await?;
+    let reg_status = storage
+        .get_config("registration_status")
+        .await?
+        .unwrap_or_else(|| "unregistered".to_string());
 
-    println!("Agent ID:   {}", identity.agent_id);
-    println!("Hostname:   {}", identity.hostname);
-    println!("Server:     {}", config.server_addr);
-    println!("Storage:    {}", config.storage_dir);
-    println!("Interval:   {}s", config.interval_seconds);
+    println!("Agent ID:     {}", identity.agent_id);
+    println!("Hostname:     {}", identity.hostname);
+    println!("Server:       {}", config.server_addr);
+    println!("Storage:      {}", config.storage_dir);
+    println!("Interval:     {}s", config.interval_seconds);
+    println!("Registration: {}", reg_status);
+
+    // Indicate whether secret is configured
+    let secret_src = if !std::env::var("BEACON_AGENT_SECRET")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        "env:BEACON_AGENT_SECRET"
+    } else if !config.secret.is_empty() {
+        "agent.toml"
+    } else {
+        "NOT SET"
+    };
+    println!("Secret src:   {}", secret_src);
+
     Ok(())
 }
 
@@ -493,24 +656,24 @@ fn handle_collector(name: &str, action: EnableDisable) -> Result<()> {
 
 async fn handle_metrics_cmd(action: MetricsAction, config_path: &str) -> Result<()> {
     match action {
-        MetricsAction::EnableAll         => println!("All collectors enabled."),
-        MetricsAction::DisableAll        => println!("All collectors disabled."),
+        MetricsAction::EnableAll          => println!("All collectors enabled."),
+        MetricsAction::DisableAll         => println!("All collectors disabled."),
         MetricsAction::Interval { value } => println!("Collection interval set to {value}"),
         MetricsAction::Retention { value } => println!("Retention set to {value}"),
-        MetricsAction::Status            => run_status(config_path).await?,
+        MetricsAction::Status             => run_status(config_path).await?,
     }
     Ok(())
 }
 
 async fn handle_agent_cmd(action: AgentAction, _config_path: &str) -> Result<()> {
     match action {
-        AgentAction::List              => println!("Listing agents via server API..."),
-        AgentAction::Show { agent_id } => println!("Showing agent: {agent_id}"),
-        AgentAction::Enable { agent_id } => println!("Enabling: {agent_id}"),
-        AgentAction::Disable { agent_id } => println!("Disabling: {agent_id}"),
-        AgentAction::Remove { agent_id } => println!("Removing: {agent_id}"),
-        AgentAction::Rename { agent_id, name } => println!("Renaming {agent_id} → {name}"),
-        AgentAction::RegenerateId       => println!("Regenerating agent ID..."),
+        AgentAction::List                       => println!("Listing agents via server API..."),
+        AgentAction::Show { agent_id }          => println!("Showing agent: {agent_id}"),
+        AgentAction::Enable { agent_id }        => println!("Enabling: {agent_id}"),
+        AgentAction::Disable { agent_id }       => println!("Disabling: {agent_id}"),
+        AgentAction::Remove { agent_id }        => println!("Removing: {agent_id}"),
+        AgentAction::Rename { agent_id, name }  => println!("Renaming {agent_id} → {name}"),
+        AgentAction::RegenerateId              => println!("Regenerating agent ID..."),
     }
     Ok(())
 }
@@ -554,7 +717,10 @@ async fn handle_db_cmd(action: DbAction, config_path: &str) -> Result<()> {
             storage.restore(&input).await?;
             println!("Restored from {input}");
         }
-        DbAction::Compact | DbAction::Vacuum => { storage.vacuum().await?; println!("Vacuum complete."); }
+        DbAction::Compact | DbAction::Vacuum => {
+            storage.vacuum().await?;
+            println!("Vacuum complete.");
+        }
         DbAction::Verify  => { storage.verify().await?; println!("Integrity OK."); }
         DbAction::Export { output } => println!("Exporting to {output}..."),
         DbAction::Clear   => println!("Cleared databases."),

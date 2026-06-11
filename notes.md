@@ -5,7 +5,7 @@
   
   sudo ./release/beacon-agent init
   
-  When prompted for server address, enter: wss://localhost:8000/ws/ingest/
+  When prompted for server address, enter: ws://localhost:8000/ws/ingest/
   
   Alternatively, if you want to test without reinitializing, edit the config directly:
   

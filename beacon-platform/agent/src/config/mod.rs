@@ -21,6 +21,12 @@ pub struct AgentConfig {
     pub username: String,
     /// Password for API authentication
     pub password: String,
+    /// Shared secret for agent registration.
+    /// Must match BEACON_AGENT_SECRET on the server.
+    /// Can also be provided via the BEACON_AGENT_SECRET environment variable
+    /// (env takes priority over this field).
+    #[serde(default)]
+    pub secret: String,
     /// Local storage directory
     pub storage_dir: String,
     /// Collection interval in seconds
@@ -75,6 +81,7 @@ impl Default for AgentConfig {
             server_addr:      "wss://localhost:8000/ws/ingest/".to_string(),
             username:         "admin".to_string(),
             password:         String::new(),
+            secret:           String::new(),
             storage_dir:      "/var/lib/beacon/agent".to_string(),
             interval_seconds: 5,
             collectors: CollectorConfig {
@@ -138,7 +145,11 @@ mod tests {
 
     #[test]
     fn default_config_is_valid() {
-        ConfigValidator::validate(&AgentConfig::default()).unwrap();
+        // Default has empty secret — that's fine at config level;
+        // the registration step enforces secret presence.
+        let cfg = AgentConfig::default();
+        // validator doesn't require secret to be non-empty (env var may supply it)
+        ConfigValidator::validate(&cfg).unwrap();
     }
 
     #[test]
@@ -160,5 +171,54 @@ mod tests {
         let mut cfg = AgentConfig::default();
         cfg.collectors.kubernetes = true;
         ConfigValidator::validate(&cfg).unwrap();
+    }
+
+    #[test]
+    fn secret_field_is_serialized_and_deserialized() {
+        let mut cfg = AgentConfig::default();
+        cfg.secret = "hunter2".to_string();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(toml_str.contains("secret"));
+        let reloaded: AgentConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(reloaded.secret, "hunter2");
+    }
+
+    #[test]
+    fn missing_secret_field_deserializes_to_empty_string() {
+        // Old config files without a secret field should still load cleanly.
+        let toml_no_secret = r#"
+server_addr = "wss://localhost:8000/ws/ingest/"
+username = "admin"
+password = "pass"
+storage_dir = "/tmp"
+interval_seconds = 5
+
+[collectors]
+cpu = true
+ram = true
+storage = true
+network = true
+process = true
+systemd = true
+docker = false
+kubernetes = false
+temperature = true
+power = false
+max_processes = 512
+
+[tls]
+verify_cert = true
+
+[queue]
+max_retries = 5
+max_queue_size = 100000
+retry_backoff_ms = 1000
+
+[encryption]
+enabled = true
+key_rotation_days = 30
+"#;
+        let cfg: AgentConfig = toml::from_str(toml_no_secret).unwrap();
+        assert_eq!(cfg.secret, "");
     }
 }

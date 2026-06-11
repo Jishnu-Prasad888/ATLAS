@@ -2,6 +2,11 @@
 //
 // Validation rules are isolated here so they can be unit-tested independently
 // of the I/O in `config/mod.rs`.
+//
+// Note: The `secret` field is intentionally NOT required to be non-empty here.
+// The secret may be supplied via the BEACON_AGENT_SECRET environment variable
+// at runtime.  `registration::resolve_secret()` enforces that at least one
+// source provides a non-empty value right before the registration attempt.
 
 use anyhow::{bail, Result};
 use crate::config::AgentConfig;
@@ -103,5 +108,13 @@ mod tests {
         let mut cfg = AgentConfig::default();
         cfg.queue.max_queue_size = 0;
         assert!(ConfigValidator::validate(&cfg).is_err());
+    }
+
+    /// Empty secret is allowed at the config level — env var may supply it.
+    #[test]
+    fn empty_secret_passes_config_validation() {
+        let mut cfg = AgentConfig::default();
+        cfg.secret = String::new();
+        assert!(ConfigValidator::validate(&cfg).is_ok());
     }
 }

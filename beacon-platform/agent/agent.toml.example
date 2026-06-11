@@ -7,6 +7,24 @@ server_addr = "wss://beacon.example.com/ws/ingest/"
 # Username for API authentication
 username = "admin"
 
+# Password for API authentication
+# password = "changeme"
+
+# ─── Agent Registration Secret ────────────────────────────────────────────────
+# Shared secret used to authenticate this agent with the Beacon server.
+# Must match the BEACON_AGENT_SECRET value in the server's .env file.
+#
+# RECOMMENDED: Leave this empty here and set the environment variable instead:
+#
+#   export BEACON_AGENT_SECRET="your-secret-string"
+#
+# If running under systemd, add it to the service's EnvironmentFile:
+#   EnvironmentFile=/etc/beacon/agent.env   (chmod 600, owned by root)
+#
+# The environment variable BEACON_AGENT_SECRET takes precedence over this field.
+#
+# secret = ""
+
 # Local SQLite storage directory
 storage_dir = "/var/lib/beacon/agent"
 
