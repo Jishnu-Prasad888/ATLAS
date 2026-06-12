@@ -31,22 +31,22 @@ const CSS = `
     width: 100%;
     text-align: left;
     padding: 12px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid var(--color-border);
     transition: background 0.1s;
     cursor: pointer;
     background: transparent;
     border-left: 2px solid transparent;
   }
-  .atlas-dash .agent-row:hover { background: rgba(255,255,255,0.03); }
+  .atlas-dash .agent-row:hover { background: color-mix(in srgb, var(--color-text) 3%, transparent); }
   .atlas-dash .agent-row.agent-selected {
-    background: rgba(240,165,0,0.05);
+    background: color-mix(in srgb, #F0A500 6%, transparent);
     border-left-color: #F0A500;
   }
 
   .atlas-dash .fleet-stat {
     flex: 1;
     padding: 14px 16px;
-    border-right: 1px solid rgba(255,255,255,0.06);
+    border-right: 1px solid var(--color-border);
   }
   .atlas-dash .fleet-stat:last-child { border-right: none; }
 
@@ -62,7 +62,7 @@ const CSS = `
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     padding: 14px 16px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--color-border);
   }
 
   .atlas-dash .info-cell {
@@ -76,10 +76,10 @@ const CSS = `
     align-items: baseline;
     gap: 10px;
     padding: 7px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.035);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
     transition: background 0.08s;
   }
-  .atlas-dash .log-entry:hover { background: rgba(255,255,255,0.025); }
+  .atlas-dash .log-entry:hover { background: color-mix(in srgb, var(--color-text) 2.5%, transparent); }
   .atlas-dash .log-entry:last-child { border-bottom: none; }
 
   @keyframes dash-fadein {
@@ -87,8 +87,8 @@ const CSS = `
     to   { opacity: 1; transform: translateY(0); }
   }
   .atlas-dash .panel {
-    background: #0D0F14;
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     overflow: hidden;
   }
@@ -97,14 +97,14 @@ const CSS = `
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--color-border);
   }
   .atlas-dash .panel-label {
     font-size: 11px;
     font-weight: 500;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.35);
+    color: var(--color-text-dim);
   }
 
   @keyframes atlas-pulse-ring {
@@ -171,7 +171,7 @@ const ArcGauge = memo(function ArcGauge({
 
   // Color based on threshold
   const color = value >= 85 ? '#f87171' : value >= 65 ? '#fbbf24' : '#34d399'
-  const trackColor = 'rgba(255,255,255,0.07)'
+  const trackColor = 'var(--color-border)'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
@@ -205,7 +205,7 @@ const ArcGauge = memo(function ArcGauge({
           <span style={{ fontSize: 16, fontWeight: 600, color, fontFamily: "'JetBrains Mono', monospace" }}>
             {Math.round(value)}
           </span>
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginLeft: 2 }}>%</span>
+          <span style={{ fontSize: 10, color: 'var(--color-text-dim)', marginLeft: 2 }}>%</span>
         </div>
       </div>
 
@@ -217,11 +217,11 @@ const ArcGauge = memo(function ArcGauge({
       )}
 
       {/* Label */}
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.36)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+      <span style={{ fontSize: 11, color: 'var(--color-text-dim)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
         {label}
       </span>
       {detail && (
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: -2 }}>
+        <span style={{ fontSize: 11, color: 'var(--color-text-dim)', marginTop: -2 }}>
           {detail}
         </span>
       )}
@@ -240,10 +240,10 @@ const FleetStat = memo(function FleetStat({
 }) {
   return (
     <div className="fleet-stat">
-      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: 4 }}>
+      <div style={{ fontSize: 10, color: 'var(--color-text-dim)', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: 4 }}>
         {label}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 600, color: color ?? 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums' }}>
+      <div style={{ fontSize: 24, fontWeight: 600, color: color ?? 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
         {value}
       </div>
     </div>
@@ -265,13 +265,13 @@ const AgentRow = memo(function AgentRow({
       onClick={onClick}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: selected ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.7)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: selected ? 'var(--color-text)' : 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {agent.hostname}
         </span>
         <AgentStatusBadge status={agent.status} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.05em' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--color-text-dim)', letterSpacing: '0.05em' }}>
           {shortAgentId(agent.agent_id)}
         </span>
         {agent.is_stale && (
@@ -285,7 +285,7 @@ const AgentRow = memo(function AgentRow({
           ))}
         </div>
       )}
-      <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.25)', marginTop: 4 }}>
+      <div style={{ fontSize: 10.5, color: 'var(--color-text-dim)', marginTop: 4 }}>
         {timeAgo(agent.last_seen)}
       </div>
     </button>
@@ -298,10 +298,10 @@ const LogRow = memo(function LogRow({ log }: { log: LogEntry }) {
   return (
     <div className="log-entry">
       <SeverityBadge severity={log.severity} />
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.28)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 11, color: 'var(--color-text-dim)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
         {new Date(log.timestamp).toLocaleTimeString()}
       </span>
-      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+      <span style={{ fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
         {log.message}
       </span>
     </div>
@@ -313,12 +313,12 @@ const LogRow = memo(function LogRow({ log }: { log: LogEntry }) {
 function InfoCell({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="info-cell">
-      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+      <span style={{ fontSize: 10, color: 'var(--color-text-dim)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
         {label}
       </span>
       <span style={{
         fontSize: 12,
-        color: 'rgba(255,255,255,0.8)',
+        color: 'var(--color-text)',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
@@ -369,7 +369,7 @@ const MetricPanel = memo(function MetricPanel({
       {/* Header */}
       <div className="panel-header">
         <span className="panel-label">Metrics</span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.7)' }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-muted)' }}>
           {hostname ?? '—'}
         </span>
       </div>
@@ -418,7 +418,7 @@ const MetricPanel = memo(function MetricPanel({
       {cpu && (
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
-          borderTop: '1px solid rgba(255,255,255,0.06)',
+          borderTop: '1px solid var(--color-border)',
           padding: '12px 18px',
           gap: 12,
         }}>
@@ -470,14 +470,14 @@ const LogPanel = memo(function LogPanel({
       <div className="panel" style={{ display: 'flex', flexDirection: 'column', height: 260 }}>
       <div className="panel-header">
         <span className="panel-label">Live Logs</span>
-        <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.2)' }}>
-          {logs.length > 0 ? `${logs.length} entries${logs.length >= LOG_BUFFER_MAX ? ' (capped)' : ''}` : ''}
-        </span>
-      </div>
-      <div
-        ref={containerRef}
-        onScroll={onScroll}
-        style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
+          <span style={{ fontSize: 9.5, color: 'var(--color-text-dim)' }}>
+            {logs.length > 0 ? `${logs.length} entries${logs.length >= LOG_BUFFER_MAX ? ' (capped)' : ''}` : ''}
+          </span>
+        </div>
+        <div
+          ref={containerRef}
+          onScroll={onScroll}
+          style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
       >
         {logs.length === 0 ? (
           <div style={{ paddingTop: 20 }}>
@@ -527,7 +527,7 @@ export function DashboardPage() {
   return (
     <div
       className="atlas-dash"
-      style={{ display: 'flex', flexDirection: 'column', gap: 18, height: '100%', color: 'rgba(255,255,255,0.78)' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 18, height: '100%', color: 'var(--color-text)' }}
     >
       <style>{CSS}</style>
 
@@ -540,12 +540,12 @@ export function DashboardPage() {
               <span
                 style={{
                   position: 'absolute', inset: 0, borderRadius: '50%',
-                  background: wsConnected ? '#34d399' : 'rgba(255,255,255,0.2)',
+                  background: wsConnected ? '#34d399' : 'var(--color-text-dim)',
                 }}
                 className={wsConnected ? 'ws-live' : ''}
               />
             </span>
-            <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.12em' }}>
+            <span style={{ fontSize: 12, color: 'var(--color-text-dim)', letterSpacing: '0.12em' }}>
               {wsConnected ? 'live' : 'polling'}
             </span>
           </div>
@@ -570,7 +570,7 @@ export function DashboardPage() {
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div className="panel-header">
             <span className="panel-label">Agents</span>
-            <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.2)' }}>
+            <span style={{ fontSize: 9.5, color: 'var(--color-text-dim)' }}>
               {agents?.length ?? 0}
             </span>
           </div>

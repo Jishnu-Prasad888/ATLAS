@@ -191,7 +191,7 @@ export function Sidebar() {
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(90deg, transparent 0%, rgba(240,165,0,0.5) 50%, transparent 100%);
+          background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, #F0A500 50%, transparent) 50%, transparent 100%);
           animation: atlas-scan 3s ease-in-out infinite;
         }
 
@@ -206,15 +206,15 @@ export function Sidebar() {
           sidebarCollapsed ? 'w-[52px]' : 'w-[192px]',
         )}
         style={{
-          background: '#0D0F14',
-          borderRight: '1px solid rgba(255,255,255,0.06)',
+          background: 'var(--color-surface)',
+          borderRight: '1px solid var(--color-border)',
         }}
       >
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div
           className="flex h-12 shrink-0 items-center justify-between overflow-hidden"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '0 14px' }}
+          style={{ borderBottom: '1px solid var(--color-border)', padding: '0 14px' }}
         >
           {!sidebarCollapsed && (
             <div className="flex flex-col gap-px overflow-hidden">
@@ -226,7 +226,7 @@ export function Sidebar() {
               </span>
               <span
                 className="text-[9px] font-light tracking-[0.3em] uppercase select-none truncate"
-                style={{ color: 'rgba(255,255,255,0.25)' }}
+                style={{ color: 'var(--color-text-dim)' }}
               >
                 central server
               </span>
@@ -246,9 +246,9 @@ export function Sidebar() {
             <button
               onClick={toggleSidebar}
               className="shrink-0 rounded transition-colors p-1"
-              style={{ color: 'rgba(255,255,255,0.3)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.7)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.3)')}
+              style={{ color: 'var(--color-text-dim)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-dim)')}
               aria-label="Collapse sidebar"
             >
               <Icon.ChevronLeft />
@@ -258,7 +258,7 @@ export function Sidebar() {
             <button
               onClick={toggleSidebar}
               className="absolute bottom-0 left-0 right-0 flex justify-center py-1 opacity-0 hover:opacity-100 transition-opacity"
-              style={{ color: 'rgba(255,255,255,0.4)' }}
+              style={{ color: 'var(--color-text-dim)' }}
               aria-label="Expand sidebar"
             >
               <Icon.ChevronLeft rotated />
@@ -271,7 +271,7 @@ export function Sidebar() {
           <div
             className="shrink-0 overflow-hidden"
             style={{
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              borderBottom: '1px solid var(--color-border)',
               padding: sidebarCollapsed ? '10px 14px' : '10px 14px 12px',
             }}
           >
@@ -290,13 +290,13 @@ export function Sidebar() {
                 <div className="flex items-baseline justify-between mb-[7px]">
                   <span
                     className="text-[9px] font-medium tracking-[0.25em] uppercase"
-                    style={{ color: 'rgba(255,255,255,0.25)' }}
+                    style={{ color: 'var(--color-text-dim)' }}
                   >
                     Fleet
                   </span>
                   <span className={clsx('text-[11px] font-medium tabular-nums', statusColor)}>
                     {onlineAgents}
-                    <span style={{ color: 'rgba(255,255,255,0.2)' }}>/</span>
+                    <span style={{ color: 'var(--color-text-dim)' }}>/</span>
                     {totalAgents}
                   </span>
                 </div>
@@ -304,7 +304,7 @@ export function Sidebar() {
                 {/* Bar */}
                 <div
                   className="relative h-[3px] rounded-full overflow-hidden atlas-scan"
-                  style={{ background: 'rgba(255,255,255,0.07)' }}
+                  style={{ background: 'var(--color-border)' }}
                 >
                   <div
                     className={clsx('absolute left-0 top-0 h-full rounded-full transition-[width] duration-700', barColor)}
@@ -314,7 +314,7 @@ export function Sidebar() {
 
                 {degraded > 0 && (
                   <div className="flex items-center justify-between mt-[6px]">
-                    <span className="text-[9px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                    <span className="text-[9px]" style={{ color: 'var(--color-text-dim)' }}>
                       degraded
                     </span>
                     <span className="text-[10px] font-medium text-amber-400 tabular-nums">
@@ -377,7 +377,7 @@ export function Sidebar() {
         {/* ── Footer ───────────────────────────────────────────────────── */}
         <div
           className="shrink-0"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+          style={{ borderTop: '1px solid var(--color-border)' }}
         >
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-3 py-3">
@@ -392,9 +392,9 @@ export function Sidebar() {
               <button
                 onClick={handleLogout}
                 className="transition-colors"
-                style={{ color: 'rgba(255,255,255,0.25)' }}
+                style={{ color: 'var(--color-text-dim)' }}
                 onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.25)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-dim)')}
                 aria-label="Sign out"
               >
                 <Icon.SignOut />
@@ -412,7 +412,7 @@ export function Sidebar() {
                 />
                 <span
                   className="text-[10px] font-light"
-                  style={{ color: 'rgba(255,255,255,0.28)' }}
+                  style={{ color: 'var(--color-text-dim)' }}
                 >
                   {wsConnected ? 'connected' : 'disconnected'}
                 </span>
@@ -423,7 +423,7 @@ export function Sidebar() {
                 {user && (
                   <span
                     className="text-[11px] font-light truncate max-w-[100px]"
-                    style={{ color: 'rgba(255,255,255,0.4)' }}
+                    style={{ color: 'var(--color-text-muted)' }}
                     title={user.username}
                   >
                     {user.username}
@@ -432,9 +432,9 @@ export function Sidebar() {
                 <button
                   onClick={handleLogout}
                   className="flex items-center gap-1.5 text-[10px] font-light transition-colors"
-                  style={{ color: 'rgba(255,255,255,0.25)' }}
+                  style={{ color: 'var(--color-text-dim)' }}
                   onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.25)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-dim)')}
                 >
                   <Icon.SignOut />
                   sign out
@@ -459,22 +459,22 @@ function SectionDivider({ label, collapsed }: { label?: string; collapsed: boole
   if (collapsed) {
     return (
       <div className="flex justify-center my-2">
-        <div className="w-4 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+        <div className="w-4 h-px" style={{ background: 'var(--color-border)' }} />
       </div>
     )
   }
   if (!label) {
-    return <div className="mx-3.5 my-2 h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
+    return <div className="mx-3.5 my-2 h-px" style={{ background: 'var(--color-border)' }} />
   }
   return (
     <div className="flex items-center gap-2.5 px-3.5 my-2">
       <span
         className="text-[8px] font-medium tracking-[0.3em] uppercase shrink-0"
-        style={{ color: 'rgba(255,255,255,0.2)' }}
+        style={{ color: 'var(--color-text-dim)' }}
       >
         {label}
       </span>
-      <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
+      <div className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
     </div>
   )
 }
@@ -502,19 +502,19 @@ function NavRow({
       )}
       style={({ isActive: _ }) => ({
         color: active
-          ? 'rgba(255,255,255,0.9)'
-          : 'rgba(255,255,255,0.32)',
-        background: active ? 'rgba(240,165,0,0.07)' : 'transparent',
+          ? 'var(--color-text)'
+          : 'var(--color-text-dim)',
+        background: active ? 'color-mix(in srgb, #F0A500 7%, transparent)' : 'transparent',
       })}
       onMouseEnter={e => {
         if (!active) {
-          (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.7)'
-          ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'
+          (e.currentTarget as HTMLElement).style.color = 'var(--color-text-muted)'
+          ;(e.currentTarget as HTMLElement).style.background = 'color-mix(in srgb, var(--color-text) 4%, transparent)'
         }
       }}
       onMouseLeave={e => {
         if (!active) {
-          (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.32)'
+          (e.currentTarget as HTMLElement).style.color = 'var(--color-text-dim)'
           ;(e.currentTarget as HTMLElement).style.background = 'transparent'
         }
       }}

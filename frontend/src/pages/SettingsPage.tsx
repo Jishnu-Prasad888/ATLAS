@@ -18,6 +18,8 @@ import { env } from '@/config/env'
 export function SettingsPage() {
   const { user } = useAuthStore()
   const addNotification = useUiStore((s) => s.addNotification)
+  const theme = useUiStore((s) => s.theme)
+  const setTheme = useUiStore((s) => s.setTheme)
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null)
   const [generatingKey, setGeneratingKey] = useState(false)
   const { copied, copy } = useCopyToClipboard()
@@ -56,6 +58,30 @@ export function SettingsPage() {
           <p className="text-xs text-[--color-text-dim] font-mono mt-3">
             To change server connection settings, update environment variables and rebuild.
           </p>
+        </Card>
+
+        {/* Theme */}
+        <Card>
+          <SectionHeader title="Theme" />
+          <p className="text-xs text-[--color-text-muted] font-mono mb-4 leading-relaxed">
+            Switch between dark and light mode.
+          </p>
+          <div className="flex items-center gap-3">
+            <Button
+              variant={theme === 'dark' ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => setTheme('dark')}
+            >
+              Dark
+            </Button>
+            <Button
+              variant={theme === 'light' ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => setTheme('light')}
+            >
+              Light
+            </Button>
+          </div>
         </Card>
 
         {/* Password change */}

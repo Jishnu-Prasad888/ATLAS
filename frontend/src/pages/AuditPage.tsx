@@ -54,10 +54,10 @@ const CSS = `
   .atlas-audit * { font-family: 'JetBrains Mono', monospace; }
 
   .atlas-audit .filter-input {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
     border-radius: 4px;
-    color: rgba(255,255,255,0.75);
+    color: var(--color-text);
     font-size: 11px;
     padding: 5px 10px;
     outline: none;
@@ -68,11 +68,11 @@ const CSS = `
     border-color: rgba(240,165,0,0.5);
   }
   .atlas-audit .filter-input::placeholder {
-    color: rgba(255,255,255,0.2);
+    color: var(--color-text-dim);
   }
   .atlas-audit .filter-input option {
-    background: #151821;
-    color: rgba(255,255,255,0.75);
+    background: var(--color-surface);
+    color: var(--color-text);
   }
 
   .atlas-audit .row-base {
@@ -81,18 +81,18 @@ const CSS = `
     align-items: center;
     height: ${ROW_HEIGHT}px;
     cursor: pointer;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
     transition: background 0.1s;
   }
   .atlas-audit .row-base:hover {
-    background: rgba(255,255,255,0.03);
+    background: color-mix(in srgb, var(--color-text) 3%, transparent);
   }
   .atlas-audit .row-base.row-active {
-    background: rgba(240,165,0,0.05);
-    border-bottom-color: rgba(240,165,0,0.15);
+    background: color-mix(in srgb, #F0A500 6%, transparent);
+    border-bottom-color: color-mix(in srgb, #F0A500 20%, transparent);
   }
   .atlas-audit .row-base.row-fail {
-    border-left: 2px solid rgba(248,113,113,0.6);
+    border-left: 2px solid color-mix(in srgb, #f87171 60%, transparent);
   }
 
   .atlas-audit .cell {
@@ -104,8 +104,8 @@ const CSS = `
   }
 
   .atlas-audit .detail-panel {
-    background: #0a0c10;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: var(--color-surface-2);
+    border-bottom: 1px solid var(--color-border);
     padding: 12px 14px;
     animation: audit-slide-in 0.12s ease;
   }
@@ -129,11 +129,11 @@ const CSS = `
     grid-template-columns: 140px 96px 1fr 80px 100px 110px 44px;
     height: 28px;
     align-items: center;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    border-bottom: 1px solid var(--color-border);
     position: sticky;
     top: 0;
     z-index: 2;
-    background: #0D0F14;
+    background: var(--color-surface);
   }
   .atlas-audit .thead-cell {
     padding: 0 10px;
@@ -141,7 +141,7 @@ const CSS = `
     font-weight: 500;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.22);
+    color: var(--color-text-dim);
   }
 
   .atlas-audit .stat-badge {
@@ -151,8 +151,8 @@ const CSS = `
     padding: 3px 8px;
     border-radius: 4px;
     font-size: 10px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
   }
 
   .atlas-audit .btn {
@@ -166,33 +166,33 @@ const CSS = `
   }
   .atlas-audit .btn-ghost {
     background: transparent;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.45);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-dim);
   }
   .atlas-audit .btn-ghost:hover {
-    border-color: rgba(255,255,255,0.25);
-    color: rgba(255,255,255,0.75);
+    border-color: var(--color-border-strong);
+    color: var(--color-text-muted);
   }
   .atlas-audit .btn-amber {
-    background: rgba(240,165,0,0.12);
-    border: 1px solid rgba(240,165,0,0.3);
+    background: color-mix(in srgb, #F0A500 12%, transparent);
+    border: 1px solid color-mix(in srgb, #F0A500 30%, transparent);
     color: #F0A500;
   }
   .atlas-audit .btn-amber:hover {
-    background: rgba(240,165,0,0.2);
+    background: color-mix(in srgb, #F0A500 20%, transparent);
   }
 
   .atlas-audit .clear-btn {
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
-    color: rgba(255,255,255,0.25);
+    color: var(--color-text-dim);
     cursor: pointer;
     background: none;
     border: none;
     padding: 0 4px;
     transition: color 0.12s;
   }
-  .atlas-audit .clear-btn:hover { color: rgba(255,255,255,0.6); }
+  .atlas-audit .clear-btn:hover { color: var(--color-text-muted); }
 `
 
 // ─── Virtual scroll hook ──────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ export function AuditPage() {
   const hasFilters = userFilter || actionFilter || resourceFilter || failOnly
 
   return (
-    <div className="atlas-audit flex flex-col h-full" style={{ color: 'rgba(255,255,255,0.75)' }}>
+    <div className="atlas-audit flex flex-col h-full" style={{ color: 'var(--color-text)' }}>
       <style>{CSS}</style>
 
       <PageHeader
@@ -353,8 +353,8 @@ export function AuditPage() {
 
         {/* Spacer + count */}
         <div className="flex-1" />
-        <span className="stat-badge" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500 }}>
+        <span className="stat-badge" style={{ color: 'var(--color-text-dim)' }}>
+          <span style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>
             {filtered.length.toLocaleString()}
           </span>
           {hasFilters ? ` / ${(logs?.length ?? 0).toLocaleString()} entries` : ' entries'}
@@ -365,8 +365,8 @@ export function AuditPage() {
       <div
         className="flex-1 flex flex-col rounded overflow-hidden"
         style={{
-          background: '#0D0F14',
-          border: '1px solid rgba(255,255,255,0.07)',
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
           minHeight: 0,
         }}
       >
@@ -480,12 +480,12 @@ function AuditRow({
       onClick={onToggle}
     >
       {/* Time */}
-      <div className="cell" style={{ color: 'rgba(255,255,255,0.28)', fontSize: 10 }}>
+      <div className="cell" style={{ color: 'var(--color-text-dim)', fontSize: 10 }}>
         {formatTimestamp(log.timestamp)}
       </div>
 
       {/* User */}
-      <div className="cell" style={{ color: 'rgba(255,255,255,0.65)', fontWeight: 500 }}>
+      <div className="cell" style={{ color: 'var(--color-text)', fontWeight: 500 }}>
         {log.user}
       </div>
 
@@ -494,8 +494,8 @@ function AuditRow({
         <span
           className="action-chip"
           style={{
-            color: meta?.color ?? 'rgba(255,255,255,0.5)',
-            background: meta?.bg ?? 'rgba(255,255,255,0.06)',
+            color: meta?.color ?? 'var(--color-text-dim)',
+            background: meta?.bg ?? 'color-mix(in srgb, var(--color-text) 6%, transparent)',
           }}
         >
           {log.action.toLowerCase()}
@@ -503,21 +503,21 @@ function AuditRow({
       </div>
 
       {/* Resource */}
-      <div className="cell" style={{ color: 'rgba(255,255,255,0.35)' }}>
+      <div className="cell" style={{ color: 'var(--color-text-muted)' }}>
         {log.resource}
       </div>
 
       {/* Target ID */}
       <div
         className="cell"
-        style={{ color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', fontSize: 10 }}
+        style={{ color: 'var(--color-text-dim)', fontFamily: 'monospace', fontSize: 10 }}
         title={log.resource_id}
       >
         {log.resource_id ? `…${log.resource_id.slice(-8)}` : '—'}
       </div>
 
       {/* IP */}
-      <div className="cell" style={{ color: 'rgba(255,255,255,0.28)', fontSize: 10 }}>
+      <div className="cell" style={{ color: 'var(--color-text-dim)', fontSize: 10 }}>
         {log.ip_address ?? '—'}
       </div>
 
@@ -566,14 +566,14 @@ function ExpandedDetail({ log, top }: { log: AuditLog; top: number }) {
         <>
           <div
             className="text-[9px] font-medium tracking-[0.2em] uppercase mb-1.5"
-            style={{ color: 'rgba(255,255,255,0.2)' }}
+            style={{ color: 'var(--color-text-dim)' }}
           >
             Details
           </div>
           <pre
             style={{
               fontSize: 10.5,
-              color: 'rgba(255,255,255,0.45)',
+              color: 'var(--color-text-muted)',
               lineHeight: '1.65',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
@@ -600,10 +600,10 @@ function DetailField({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', textTransform: 'uppercase' }}>
+      <span style={{ fontSize: 9, color: 'var(--color-text-dim)', letterSpacing: '0.2em', textTransform: 'uppercase' }}>
         {label}
       </span>
-      <span style={{ fontSize: 11, color: color ?? 'rgba(255,255,255,0.6)', fontFamily: "'JetBrains Mono', monospace" }}>
+      <span style={{ fontSize: 11, color: color ?? 'var(--color-text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>
         {value}
       </span>
     </div>
