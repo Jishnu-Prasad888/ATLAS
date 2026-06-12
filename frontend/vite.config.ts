@@ -12,16 +12,16 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': {
-        target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
+      '/api/v1/': {
+        target:'http://localhost:8000',
         changeOrigin: true,
       },
-      '/health': {
-        target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
+      '/health/v1': {
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      '/ws': {
-        target: process.env.VITE_WS_BASE_URL || 'ws://localhost:8000',
+      '/ws/v1/': {
+        target: 'ws://localhost:8000',
         ws: true,
         changeOrigin: true,
       },

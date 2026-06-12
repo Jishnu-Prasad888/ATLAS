@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useAudit } from '@/hooks'
+import { useAudit, usePersistedState } from '@/hooks'
 import { buildAuditExportUrl } from '@/api/telemetry'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
@@ -29,9 +28,9 @@ export function AuditPage() {
   const { accessToken } = useAuthStore()
   const addNotification = useUiStore((s) => s.addNotification)
 
-  const [userFilter, setUserFilter] = useState('')
-  const [actionFilter, setActionFilter] = useState('')
-  const [resourceFilter, setResourceFilter] = useState('')
+  const [userFilter, setUserFilter] = usePersistedState('audit_user', '')
+  const [actionFilter, setActionFilter] = usePersistedState('audit_action', '')
+  const [resourceFilter, setResourceFilter] = usePersistedState('audit_resource', '')
 
   const { data: logs, isLoading, error, refetch } = useAudit({
     user: userFilter || undefined,

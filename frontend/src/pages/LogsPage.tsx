@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useAgents, useLogs, useLiveLogs, useDebounce } from '@/hooks'
+import { useAgents, useLogs, useLiveLogs, useDebounce, usePersistedState } from '@/hooks'
 import { logsApi } from '@/api'
 import { buildLogsExportUrl } from '@/api/telemetry'
 import { useAuthStore } from '@/store/authStore'
@@ -34,11 +34,11 @@ export function LogsPage() {
   const addNotification = useUiStore((s) => s.addNotification)
   const { data: agents } = useAgents()
 
-  const [agentId, setAgentId] = useState<string>('')
-  const [severity, setSeverity] = useState<string>('')
-  const [source, setSource] = useState<string>('')
-  const [searchInput, setSearchInput] = useState('')
-  const [liveMode, setLiveMode] = useState(false)
+  const [agentId, setAgentId] = usePersistedState<string>('logs_agent', '')
+  const [severity, setSeverity] = usePersistedState<string>('logs_severity', '')
+  const [source, setSource] = usePersistedState<string>('logs_source', '')
+  const [searchInput, setSearchInput] = usePersistedState('logs_search', '')
+  const [liveMode, setLiveMode] = usePersistedState('logs_live', false)
   const [showClear, setShowClear] = useState(false)
   const [clearing, setClearing] = useState(false)
 

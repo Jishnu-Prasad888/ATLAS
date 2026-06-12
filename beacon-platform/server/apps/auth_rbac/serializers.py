@@ -1,8 +1,12 @@
 """
 Beacon Auth RBAC Serializers
 """
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import update_last_login
 from rest_framework import serializers
+from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.settings import api_settings
 from .models import BeaconUser, RecoveryKey, Role
 
 
@@ -24,17 +28,34 @@ class BeaconTokenObtainPairSerializer(TokenObtainPairSerializer):
             pass  # Let default handling produce generic error
 
         try:
-            data = super().validate(attrs)
-            # Reset failed logins on success
+            # Pass Django HttpRequest positionally to avoid Django 5.0 bind() conflict
+            # SimpleJWT's default serializer forwards request inside **kwargs, triggering
+            # a multiple-values error. We unwrap DRF's Request to the underlying HttpRequest.
+            drf_request = self.context.get("request")
+            django_request = getattr(drf_request, "_request", drf_request)
+            self.user = authenticate(
+                django_request,
+                **{self.username_field: attrs[self.username_field], "password": attrs["password"]},
+            )
+            if self.user is None or not api_settings.USER_AUTHENTICATION_RULE(self.user):
+                raise AuthenticationFailed(
+                    self.error_messages["no_active_account"],
+                    "no_active_account",
+                )
             self.user.reset_failed_logins()
-            return data
-        except Exception:
+        except AuthenticationFailed:
             try:
                 user = BeaconUser.objects.get(username=username)
                 user.record_failed_login()
             except BeaconUser.DoesNotExist:
                 pass
             raise
+
+        refresh = self.get_token(self.user)
+        data = {"refresh": str(refresh), "access": str(refresh.access_token)}
+        if api_settings.UPDATE_LAST_LOGIN:
+            update_last_login(None, self.user)
+        return data
 
 
 class BeaconUserSerializer(serializers.ModelSerializer):

@@ -28,21 +28,23 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
     """
 
     async def connect(self):
-        # Agents don't use JWT auth - they authenticate via registration message
         self.agent_id   = None
         self.registered = False
         await self.accept()
-        logger.info(f"Agent WS connection established from {self.scope.get('client')}")
+        client = self.scope.get('client')
+        logger.info(f"AgentIngestConsumer connect — client={client}")
+        logger.debug("AgentIngestConsumer awaiting registration from %s", client)
 
     @property
     def safe_agent_id(self):
         return self.agent_id.replace(":", "_").replace("#", "_").replace(" ", "_") if self.agent_id else None
 
     async def disconnect(self, close_code):
+        logger.debug("AgentIngestConsumer disconnect — agent_id=%s code=%s", self.agent_id, close_code)
         if self.agent_id:
             await self.channel_layer.group_discard(f"agent_{self.safe_agent_id}", self.channel_name)
             await self.mark_agent_offline(self.agent_id)
-        logger.info(f"Agent disconnected: {self.agent_id} code={close_code}")
+            logger.debug("AgentIngestConsumer agent %s marked offline", self.agent_id)
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
@@ -52,10 +54,12 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
             else:
                 data = json.loads(text_data or "{}")
         except Exception as e:
+            logger.debug("AgentIngestConsumer receive — parse error: %s", e)
             await self.send_json({"error": f"Invalid message format: {e}"})
             return
 
         msg_type = data.get("type")
+        logger.debug("AgentIngestConsumer receive — agent_id=%s type=%s", self.agent_id, msg_type)
         handlers = {
             "register":           self.handle_register,
             "heartbeat":          self.handle_heartbeat,
@@ -68,6 +72,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         if handler:
             await handler(data)
         else:
+            logger.debug("AgentIngestConsumer unknown message type: %s", msg_type)
             await self.send_json({"error": f"Unknown message type: {msg_type}"})
 
     # ─── Handlers ─────────────────────────────────────────────────────────────
@@ -76,9 +81,11 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         payload = data.get("payload", {})
         agent_id = payload.get("agent_id")
         if not agent_id:
+            logger.debug("AgentIngestConsumer register — missing agent_id")
             await self.send_json({"error": "agent_id is required"})
             return
 
+        logger.debug("AgentIngestConsumer register — agent_id=%s hostname=%s", agent_id, payload.get("hostname"))
         agent = await self.register_agent(payload)
         self.agent_id   = agent_id
         self.registered = True
@@ -92,7 +99,9 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         logger.info(f"Agent registered: {agent_id} ({payload.get('hostname')})")
 
     async def handle_heartbeat(self, data):
+        logger.debug("AgentIngestConsumer heartbeat — agent_id=%s", self.agent_id)
         if not self.registered:
+            logger.debug("AgentIngestConsumer heartbeat — not registered")
             await self.send_json({"error": "Not registered"})
             return
         await self.touch_agent(self.agent_id, data.get("status", "ONLINE"))
@@ -102,13 +111,15 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         })
 
     async def handle_metrics(self, data):
+        logger.debug("AgentIngestConsumer metrics — agent_id=%s", self.agent_id)
         if not self.registered:
+            logger.debug("AgentIngestConsumer metrics — not registered")
             return
         metrics = data.get("payload", [])
         if not isinstance(metrics, list):
             metrics = [metrics]
         saved = await self.save_metrics(self.agent_id, metrics)
-        # Broadcast to subscribers
+        logger.debug("AgentIngestConsumer metrics — saved %d metrics for agent %s", saved, self.agent_id)
         await self.channel_layer.group_send(
             f"metrics_{self.safe_agent_id}",
             {"type": "metric.update", "data": {"agent_id": self.agent_id, "count": saved}},
@@ -116,12 +127,15 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         await self.send_json({"type": "metrics_ack", "ingested": saved})
 
     async def handle_logs(self, data):
+        logger.debug("AgentIngestConsumer logs — agent_id=%s", self.agent_id)
         if not self.registered:
+            logger.debug("AgentIngestConsumer logs — not registered")
             return
         logs = data.get("payload", [])
         if not isinstance(logs, list):
             logs = [logs]
         saved = await self.save_logs(self.agent_id, logs)
+        logger.debug("AgentIngestConsumer logs — saved %d logs for agent %s", saved, self.agent_id)
         await self.channel_layer.group_send(
             f"logs_{self.safe_agent_id}",
             {"type": "log.entry", "data": {"agent_id": self.agent_id, "count": saved}},
@@ -129,17 +143,23 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         await self.send_json({"type": "logs_ack", "ingested": saved})
 
     async def handle_collector_health(self, data):
+        logger.debug("AgentIngestConsumer collector_health — agent_id=%s", self.agent_id)
         if not self.registered:
+            logger.debug("AgentIngestConsumer collector_health — not registered")
             return
         payload = data.get("payload", {})
         await self.update_collector_health(self.agent_id, payload)
+        logger.debug("AgentIngestConsumer collector_health updated for %s", self.agent_id)
         await self.send_json({"type": "collector_health_ack"})
 
     async def handle_status_update(self, data):
+        logger.debug("AgentIngestConsumer status_update — agent_id=%s status=%s", self.agent_id, data.get("status"))
         if not self.registered:
+            logger.debug("AgentIngestConsumer status_update — not registered")
             return
         new_status = data.get("status", "ONLINE")
         await self.update_agent_status(self.agent_id, new_status)
+        logger.debug("AgentIngestConsumer status_update — %s status set to %s", self.agent_id, new_status)
         await self.send_json({"type": "status_ack", "status": new_status})
 
     # ─── Channel layer message handlers ───────────────────────────────────────
@@ -255,13 +275,16 @@ class ClientSubscribeConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         self.subscriptions = []
-        # Auth is enforced via JWTAuthMiddlewareStack
         if not self.scope.get("user") or not self.scope["user"].is_authenticated:
+            logger.debug("ClientSubscribeConsumer connect — auth failed, closing 4001")
             await self.close(code=4001)
             return
         await self.accept()
+        user = self.scope["user"]
+        logger.debug("ClientSubscribeConsumer connect — user=%s", user)
 
     async def disconnect(self, close_code):
+        logger.debug("ClientSubscribeConsumer disconnect — subscriptions=%s code=%s", self.subscriptions, close_code)
         for group in self.subscriptions:
             await self.channel_layer.group_discard(group, self.channel_name)
 
@@ -269,14 +292,18 @@ class ClientSubscribeConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data or "{}")
         except json.JSONDecodeError:
+            logger.debug("ClientSubscribeConsumer receive — invalid JSON")
             await self.send_json({"error": "Invalid JSON"})
             return
 
         action   = data.get("action", "subscribe")
         channel  = data.get("channel")
         agent_id = data.get("agent_id")
+        user = self.scope.get("user")
+        logger.debug("ClientSubscribeConsumer receive — user=%s action=%s channel=%s agent_id=%s", user, action, channel, agent_id)
 
         if channel not in VALID_CHANNELS:
+            logger.debug("ClientSubscribeConsumer invalid channel: %s", channel)
             await self.send_json({"error": f"Unknown channel. Valid: {list(VALID_CHANNELS)}"})
             return
         if not agent_id:
@@ -290,12 +317,14 @@ class ClientSubscribeConsumer(AsyncWebsocketConsumer):
             if group_name not in self.subscriptions:
                 await self.channel_layer.group_add(group_name, self.channel_name)
                 self.subscriptions.append(group_name)
+                logger.debug("ClientSubscribeConsumer subscribed to %s", group_name)
             await self.send_json({"subscribed": channel, "agent_id": agent_id})
 
         elif action == "unsubscribe":
             if group_name in self.subscriptions:
                 await self.channel_layer.group_discard(group_name, self.channel_name)
                 self.subscriptions.remove(group_name)
+                logger.debug("ClientSubscribeConsumer unsubscribed from %s", group_name)
             await self.send_json({"unsubscribed": channel, "agent_id": agent_id})
 
     # ─── Group message handlers ────────────────────────────────────────────────

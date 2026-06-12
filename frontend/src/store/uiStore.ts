@@ -26,21 +26,38 @@ interface UiActions {
 
 let notifCounter = 0
 
+function loadUi<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem('beacon_ui_' + key)
+    return raw !== null ? JSON.parse(raw) : fallback
+  } catch { return fallback }
+}
+
+function saveUi(key: string, value: unknown) {
+  try { localStorage.setItem('beacon_ui_' + key, JSON.stringify(value)) } catch { /* quota */ }
+}
+
 export const useUiStore = create<UiState & UiActions>((set, get) => ({
-  sidebarCollapsed: false,
-  selectedAgentId: null,
+  sidebarCollapsed: loadUi('sidebar', false),
+  selectedAgentId: loadUi('selected_agent', null),
   wsConnected: false,
   notifications: [],
 
   toggleSidebar() {
-    set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed }))
+    set((s) => {
+      const v = !s.sidebarCollapsed
+      saveUi('sidebar', v)
+      return { sidebarCollapsed: v }
+    })
   },
 
   setSidebarCollapsed(v) {
+    saveUi('sidebar', v)
     set({ sidebarCollapsed: v })
   },
 
   selectAgent(id) {
+    saveUi('selected_agent', id)
     set({ selectedAgentId: id })
   },
 

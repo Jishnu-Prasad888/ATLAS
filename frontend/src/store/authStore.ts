@@ -12,6 +12,7 @@ interface AuthUser {
 interface AuthState {
   user: AuthUser | null
   isAuthenticated: boolean
+  isHydrating: boolean
   isAdmin: boolean
   refreshToken: string | null
   accessToken: string | null
@@ -21,6 +22,7 @@ interface AuthState {
 interface AuthActions {
   login: (access: string, refresh: string) => void
   logout: () => void
+  setHydrated: () => void
   scheduleRefresh: (exp: number) => void
   clearRefreshTimer: () => void
 }
@@ -30,6 +32,7 @@ export type AuthStore = AuthState & AuthActions
 export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   isAuthenticated: false,
+  isHydrating: true,
   isAdmin: false,
   refreshToken: null,
   accessToken: null,
@@ -85,6 +88,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }, msUntilRefresh)
 
     set({ refreshTimer: timer })
+  },
+
+  setHydrated() {
+    set({ isHydrating: false })
   },
 
   clearRefreshTimer() {

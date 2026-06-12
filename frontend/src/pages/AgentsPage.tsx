@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAgents, useAgentHealth, useAgentMutations, useMetricConfig } from '@/hooks'
+import { useAgents, useAgentHealth, useAgentMutations, useMetricConfig, usePersistedState } from '@/hooks'
 import { telemetryApi } from '@/api'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
@@ -31,7 +31,7 @@ export function AgentsPage() {
   const { isAdmin } = useAuthStore()
   const { data: agents, isLoading, error, refetch } = useAgents()
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = usePersistedState('agents_search', '')
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null)
   const { enableAgent, disableAgent, deleteAgent, renameAgent, regenerateId } = useAgentMutations()
   const addNotification = useUiStore((s) => s.addNotification)

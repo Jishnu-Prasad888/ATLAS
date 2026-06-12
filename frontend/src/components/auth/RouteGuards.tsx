@@ -2,16 +2,21 @@ import { type ReactNode, useEffect } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/api'
-import { getRefreshToken, setTokens } from '@/api'
+import { getRefreshToken } from '@/api'
 import { wsClient } from '@/ws/client'
 import { useUiStore } from '@/store/uiStore'
+import { LoadingState } from '@/components/common'
 
 /**
  * Requires authentication. Redirects to /login if not authenticated.
  */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, isHydrating } = useAuthStore()
   const location = useLocation()
+
+  if (isHydrating) {
+    return <LoadingState label="Restoring session..." />
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
@@ -24,8 +29,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
  * Requires administrator role. Redirects to / if authenticated but not admin.
  */
 export function RequireAdmin({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isAdmin } = useAuthStore()
+  const { isAuthenticated, isAdmin, isHydrating } = useAuthStore()
   const location = useLocation()
+
+  if (isHydrating) {
+    return <LoadingState label="Restoring session..." />
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
@@ -57,8 +66,30 @@ export function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
  * Mount once at app root.
  */
 export function AuthEventHandler() {
-  const { refreshToken, login, logout } = useAuthStore()
+  const { login, logout, setHydrated } = useAuthStore()
   const { setWsConnected } = useUiStore()
+
+  // Restore session from persisted refresh token on mount
+  useEffect(() => {
+    const rt = getRefreshToken()
+    if (!rt) {
+      setHydrated()
+      return
+    }
+
+    authApi.refresh(rt)
+      .then((tokens) => {
+        login(tokens.access, tokens.refresh)
+        wsClient.connect(tokens.access)
+      })
+      .catch(() => {
+        logout()
+      })
+      .finally(() => {
+        setHydrated()
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     // Silent refresh triggered by the scheduled timer in authStore

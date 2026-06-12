@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useFleetHealth, useAgents, useAgentHealth } from '@/hooks'
+import { useFleetHealth, useAgents, useAgentHealth, usePersistedState } from '@/hooks'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
   Card,
@@ -16,7 +15,7 @@ import { timeAgo, formatTimestamp, formatBytes } from '@/utils'
 export function HealthPage() {
   const { data: health, isLoading: healthLoading, error: healthError, refetch } = useFleetHealth()
   const { data: agents } = useAgents()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = usePersistedState<string | null>('health_agent', null)
 
   const selectedAgent = agents?.find((a) => a.agent_id === selectedId) ?? null
 

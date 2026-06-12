@@ -47,6 +47,7 @@ class MetricIngestView(APIView):
         data     = serializer.validated_data
         agent_id = data["agent_id"]
         metrics  = data["metrics"]
+        logger.debug("MetricIngestView POST — agent_id=%s metric_count=%s", agent_id, len(metrics))
 
         objects = [
             Metric(
@@ -60,8 +61,8 @@ class MetricIngestView(APIView):
             for m in metrics
         ]
         Metric.objects.bulk_create(objects, batch_size=500)
+        logger.debug("MetricIngestView ingested %d metrics for agent %s", len(objects), agent_id)
 
-        # Broadcast latest metrics to WebSocket subscribers
         if objects:
             broadcast_metric(agent_id, MetricSerializer(objects[-1]).data)
 
@@ -79,6 +80,7 @@ class MetricListView(APIView):
         qs_serializer = MetricQuerySerializer(data=request.query_params)
         qs_serializer.is_valid(raise_exception=True)
         params = qs_serializer.validated_data
+        logger.debug("MetricListView GET — params=%s user=%s", params, request.user)
 
         qs = Metric.objects.all()
         if params.get("agent_id"):
@@ -93,6 +95,7 @@ class MetricListView(APIView):
             qs = qs.filter(timestamp__lte=params["end"])
 
         qs = qs.order_by("-timestamp")[: params.get("limit", 1000)]
+        logger.debug("MetricListView returning %d metrics", len(qs))
         return Response(MetricSerializer(qs, many=True).data)
 
 
@@ -104,6 +107,7 @@ class MetricLatestView(APIView):
     permission_classes = [IsViewer]
 
     def get(self, request, agent_id):
+        logger.debug("MetricLatestView GET — agent_id=%s user=%s", agent_id, request.user)
         from django.db.models import Max
         types = Metric.objects.filter(agent_id=agent_id).values_list("metric_type", flat=True).distinct()
         result = {}
@@ -111,6 +115,7 @@ class MetricLatestView(APIView):
             latest = Metric.objects.filter(agent_id=agent_id, metric_type=mtype).order_by("-timestamp").first()
             if latest:
                 result[mtype] = MetricSerializer(latest).data
+        logger.debug("MetricLatestView returning %d metric types for agent %s", len(result), agent_id)
         return Response(result)
 
 
@@ -122,17 +127,16 @@ class MetricPruneView(APIView):
     permission_classes = [IsAdministrator]
 
     def post(self, request):
+        logger.debug("MetricPruneView POST — user=%s", request.user)
         from datetime import timedelta
         now = timezone.now()
-        # Raw: 24h
         raw_cutoff = now - timedelta(hours=24)
         raw_deleted, _ = Metric.objects.filter(resolution=MetricResolution.RAW, timestamp__lt=raw_cutoff).delete()
-        # 1min rollup: 30 days
         min_cutoff = now - timedelta(days=30)
         min_deleted, _ = Metric.objects.filter(resolution=MetricResolution.MIN1, timestamp__lt=min_cutoff).delete()
-        # 1hour rollup: 365 days
         hr_cutoff = now - timedelta(days=365)
         hr_deleted, _ = Metric.objects.filter(resolution=MetricResolution.HOUR1, timestamp__lt=hr_cutoff).delete()
+        logger.debug("MetricPruneView pruned raw=%d min=%d hr=%d", raw_deleted, min_deleted, hr_deleted)
         return Response({
             "pruned": {
                 "raw_1s_24h":    raw_deleted,
@@ -148,12 +152,15 @@ class MetricConfigView(APIView):
     permission_classes = [IsAdminOrReadOnly]
 
     def get(self, request, agent_id):
+        logger.debug("MetricConfigView GET — agent_id=%s user=%s", agent_id, request.user)
         config, _ = MetricConfig.objects.get_or_create(agent_id=agent_id)
         return Response(MetricConfigSerializer(config).data)
 
     def patch(self, request, agent_id):
+        logger.debug("MetricConfigView PATCH — agent_id=%s data=%s user=%s", agent_id, request.data, request.user)
         config, _ = MetricConfig.objects.get_or_create(agent_id=agent_id)
         serializer = MetricConfigSerializer(config, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        logger.debug("MetricConfigView config updated for agent %s", agent_id)
         return Response(serializer.data)

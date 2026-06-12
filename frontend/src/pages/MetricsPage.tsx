@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { useAgents, useTelemetry, useLiveMetrics } from '@/hooks'
+import { useMemo } from 'react'
+import { useAgents, useTelemetry, useLiveMetrics, usePersistedState } from '@/hooks'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
   Card,
@@ -43,24 +43,27 @@ function isoAgo(hours: number): string {
 
 export function MetricsPage() {
   const { data: agents } = useAgents()
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('')
-  const [metricType, setMetricType] = useState<MetricType>('cpu')
-  const [timeRange, setTimeRange] = useState(TIME_RANGES[1])
+  const [selectedAgentId, setSelectedAgentId] = usePersistedState<string>('metrics_agent', '')
+  const [metricType, setMetricType] = usePersistedState<MetricType>('metrics_type', 'cpu')
+  const [timeRangeIdx, setTimeRangeIdx] = usePersistedState<number>('metrics_range', 1)
+  const timeRange = TIME_RANGES[timeRangeIdx]
 
   const agentId = selectedAgentId || agents?.[0]?.agent_id || ''
 
   const { latest, history } = useLiveMetrics(agentId || null)
 
-  const { data: timeSeries, isLoading: tsLoading } = useTelemetry(
-    {
+  const queryParams = useMemo(
+    () => ({
       agent_id: agentId,
       metric_type: metricType,
       resolution: timeRange.resolution,
       start: isoAgo(timeRange.hours),
       limit: 1000,
-    },
-    !!agentId,
+    }),
+    [agentId, metricType, timeRange],
   )
+
+  const { data: timeSeries, isLoading: tsLoading } = useTelemetry(queryParams, !!agentId)
 
   const chartData = useMemo(() => {
     if (!timeSeries) return []
@@ -125,8 +128,8 @@ export function MetricsPage() {
             <Button
               key={r.label}
               size="sm"
-              variant={r === timeRange ? 'primary' : 'ghost'}
-              onClick={() => setTimeRange(r)}
+                  variant={TIME_RANGES.indexOf(r) === timeRangeIdx ? 'primary' : 'ghost'}
+              onClick={() => setTimeRangeIdx(TIME_RANGES.indexOf(r))}
             >
               {r.label}
             </Button>

@@ -7,6 +7,9 @@ import axios, {
 import { env } from '@/config/env'
 import type { ApiErrorBody } from '@/types'
 
+const log = console.log
+const LOG_PREFIX = '[API]'
+
 // ─── Custom error class ───────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -20,7 +23,9 @@ export class ApiError extends Error {
   }
 }
 
-// ─── Token store (in-memory only — never localStorage) ───────────────────────
+// ─── Token store (in-memory + localStorage for persistence) ─────────────────
+
+const STORAGE_KEY = 'beacon_auth'
 
 let _accessToken: string | null = null
 let _refreshToken: string | null = null
@@ -29,19 +34,38 @@ let _refreshPromise: Promise<boolean> | null = null
 export function setTokens(access: string, refresh: string): void {
   _accessToken = access
   _refreshToken = refresh
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ access, refresh }))
+  } catch { /* quota */ }
 }
 
 export function clearTokens(): void {
   _accessToken = null
   _refreshToken = null
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch { /* quota */ }
 }
 
 export function getAccessToken(): string | null {
-  return _accessToken
+  if (_accessToken) return _accessToken
+  const stored = loadStoredTokens()
+  return stored?.access ?? null
 }
 
 export function getRefreshToken(): string | null {
-  return _refreshToken
+  if (_refreshToken) return _refreshToken
+  const stored = loadStoredTokens()
+  return stored?.refresh ?? null
+}
+
+function loadStoredTokens(): { access: string; refresh: string } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as { access: string; refresh: string }) : null
+  } catch {
+    return null
+  }
 }
 
 export function parseJwt<T = unknown>(token: string): T {
@@ -68,6 +92,8 @@ export const apiClient: AxiosInstance = axios.create({
 
 // Attach access token to every request
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const { method, url, params, data } = config
+  log(`${LOG_PREFIX} REQUEST  ${method?.toUpperCase()} ${url}`, params ? { params } : '', data ? { body: data } : '')
   if (_accessToken) {
     config.headers.Authorization = `Bearer ${_accessToken}`
   }
@@ -76,7 +102,11 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 // Handle 401 with silent refresh
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const { method, url } = response.config
+    log(`${LOG_PREFIX} RESPONSE ${method?.toUpperCase()} ${url} → ${response.status}`, response.data)
+    return response
+  },
   async (error: AxiosError<ApiErrorBody>) => {
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
@@ -87,14 +117,17 @@ apiClient.interceptors.response.use(
       if (!_refreshPromise) {
         _refreshPromise = (async () => {
           try {
+            log(`${LOG_PREFIX} REFRESH  Attempting silent token refresh...`)
             const res = await axios.post<{ access: string; refresh: string }>(
               `${env.restBase}/auth/refresh/`,
               { refresh: _refreshToken },
               { headers: { 'Content-Type': 'application/json' } },
             )
             setTokens(res.data.access, res.data.refresh)
+            log(`${LOG_PREFIX} REFRESH  Token refreshed successfully`)
             return true
           } catch {
+            log(`${LOG_PREFIX} REFRESH  Token refresh failed`)
             clearTokens()
             return false
           } finally {
@@ -123,6 +156,10 @@ apiClient.interceptors.response.use(
       error.message ??
       `HTTP ${status}`
 
+    const reqUrl = error.config?.url ?? '?'
+    const reqMethod = error.config?.method?.toUpperCase() ?? '?'
+    log(`${LOG_PREFIX} ERROR    ${reqMethod} ${reqUrl} → ${status}`, { message, body })
+
     return Promise.reject(new ApiError(status, message, body as ApiErrorBody | null))
   },
 )
@@ -130,6 +167,7 @@ apiClient.interceptors.response.use(
 // ─── Generic request helper ───────────────────────────────────────────────────
 
 export async function request<T>(config: AxiosRequestConfig): Promise<T> {
+  log(`${LOG_PREFIX} CALL     ${config.method?.toUpperCase()} ${config.url}`, config.params ? { params: config.params } : '', config.data ? { data: config.data } : '')
   const response = await apiClient.request<T>(config)
   return response.data
 }
