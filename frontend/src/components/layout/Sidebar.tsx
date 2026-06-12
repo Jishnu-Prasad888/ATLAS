@@ -1,8 +1,10 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
 import { useFleetHealth } from '@/hooks'
+import { authApi } from '@/api'
+import { wsClient } from '@/ws/client'
 
 interface NavItem {
   path: string
@@ -24,10 +26,20 @@ const NAV_ITEMS: NavItem[] = [
 ]
 
 export function Sidebar() {
-  const { isAdmin, user } = useAuthStore()
+  const { isAdmin, user, refreshToken, logout } = useAuthStore()
   const { sidebarCollapsed, toggleSidebar, wsConnected } = useUiStore()
   const { data: health } = useFleetHealth()
   const location = useLocation()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    try {
+      if (refreshToken) await authApi.logout(refreshToken)
+    } catch { /* best-effort */ }
+    wsClient.destroy()
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
 
@@ -111,6 +123,15 @@ export function Sidebar() {
                 {user.username}
               </p>
             )}
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 text-xs font-mono text-[--color-text-muted] hover:text-red-400 transition-colors"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M14 8H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Logout
+            </button>
           </>
         )}
         {sidebarCollapsed && (
