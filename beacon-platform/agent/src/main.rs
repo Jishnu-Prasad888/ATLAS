@@ -341,20 +341,35 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     let identity = IdentityEngine::new(&storage).await?;
     info!("Agent identity: {}", identity.agent_id);
 
+    // Initialise encryption
+    let encryption = EncryptionEngine::new(&config, &storage).await?;
+
+    // Initialise queue
+    let mut queue = QueueEngine::new(storage.clone()).await?;
+
+    // Initialise logging engine
+    let log_engine = LogEngine::new(&identity, queue.clone(), storage.clone());
+    log_engine.info("service_engine", "Beacon Agent starting").await?;
+    log_engine.info("service_engine", &format!("Agent identity: {}", identity.agent_id)).await?;
+    log_engine.info("service_engine", "Configuration loaded").await?;
+
+    // Inject log engine into queue for dead-letter/retry logs
+    queue.set_log_engine(log_engine.clone());
+
+    // Initialise health engine
+    let mut health = HealthEngine::new();
+    health.set_log_engine(log_engine.clone());
+    health.set_status(engines::health::AgentStatus::Initializing);
+
     // ── Registration gate ─────────────────────────────────────────────────────
-    // Every daemon start attempts registration so we catch secret changes and
-    // server-side disables promptly.  On a transient network error we fall back
-    // to the locally persisted status so offline restarts still work once an
-    // agent has been registered at least once.
     info!("Verifying agent registration with server...");
-    match registration::register(&config, &identity, &storage).await {
+    match registration::register(&config, &identity, &storage, &log_engine).await {
         Ok(()) => {
             info!("✓ Agent registration confirmed.");
         }
         Err(e) => {
             let err_str = e.to_string();
 
-            // Check if this is a secret mismatch — hard stop in this case.
             if err_str.contains("Secret mismatch")
                 || err_str.contains("secret_mismatch")
                 || err_str.contains("Registration rejected")
@@ -369,7 +384,6 @@ async fn run_daemon(config_path: &str) -> Result<()> {
                 std::process::exit(1);
             }
 
-            // Transient error — check last known local status.
             warn!("Registration request failed ({}). Checking local registration cache...", e);
             let locally_registered = registration::is_registered(&storage).await
                 .unwrap_or(false);
@@ -395,28 +409,13 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Initialise encryption
-    let encryption = EncryptionEngine::new(&config, &storage).await?;
-
-    // Initialise queue
-    let queue = QueueEngine::new(storage.clone()).await?;
-
-    // Initialise logging engine
-    let log_engine = LogEngine::new(&identity, queue.clone(), storage.clone());
-    log_engine.info("service_engine", "Beacon Agent starting").await?;
-    log_engine.info("service_engine", &format!("Agent identity: {}", identity.agent_id)).await?;
-    log_engine.info("service_engine", "Configuration loaded").await?;
-
-    // Initialise health engine
-    let mut health = HealthEngine::new();
-    health.set_status(engines::health::AgentStatus::Initializing);
-
     // Start WebSocket transport
     let transport = WebSocketTransport::new(
         config.clone(),
         identity.clone(),
         queue.clone(),
         encryption.clone(),
+        log_engine.clone(),
     );
 
     // Start all collectors
@@ -425,10 +424,12 @@ async fn run_daemon(config_path: &str) -> Result<()> {
         identity.clone(),
         queue.clone(),
         storage.clone(),
+        &log_engine,
     )
     .await?;
 
     health.set_status(engines::health::AgentStatus::Online);
+    let _ = log_engine.info("service_engine", "All engines online. Agent is running.").await;
     info!("All engines online. Agent is running.");
 
     // Run transport (reconnects automatically on disconnect)
@@ -563,8 +564,10 @@ async fn run_init(config_path: &str) -> Result<()> {
     registration::clear_registration(&storage).await?;
 
     let identity = engines::identity::IdentityEngine::new(&storage).await?;
+    let queue = engines::queue::QueueEngine::new(storage.clone()).await?;
+    let log_engine = LogEngine::new(&identity, queue, storage.clone());
 
-    match registration::register(&config, &identity, &storage).await {
+    match registration::register(&config, &identity, &storage, &log_engine).await {
         Ok(()) => {
             println!("✓ Agent registered successfully!");
             println!(

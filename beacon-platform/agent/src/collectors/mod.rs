@@ -24,10 +24,11 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{info, error};
 
 use crate::config::AgentConfig;
 use crate::engines::identity::AgentIdentity;
+use crate::engines::logging::LogEngine;
 use crate::engines::queue::QueueEngine;
 use crate::storage::StorageManager;
 
@@ -78,10 +79,11 @@ pub fn build_collectors(
 /// Each collector gets its own `Arc<dyn MetricsEnqueuer>` so failure in one
 /// collector's enqueue path cannot cascade to others.
 pub async fn start_all(
-    config:   AgentConfig,
-    identity: AgentIdentity,
-    queue:    QueueEngine,
-    storage:  StorageManager,
+    config:    AgentConfig,
+    identity:  AgentIdentity,
+    queue:     QueueEngine,
+    storage:   StorageManager,
+    log_engine: &LogEngine,
 ) -> Result<Vec<JoinHandle<()>>> {
     let interval   = Duration::from_secs(config.interval_seconds);
     let agent_id   = identity.agent_id.clone();
@@ -90,15 +92,42 @@ pub async fn start_all(
 
     for (name, collector) in collectors {
         info!("Starting {} collector (interval={}s)", name, config.interval_seconds);
+        let _ = log_engine.info("metrics_engine", &format!(
+            "{} collector started",
+            name,
+        )).await;
 
         // Each collector gets its own enqueuer — isolation between collectors
         let enqueuer: Arc<dyn MetricsEnqueuer> = Arc::new(
             EnqueueAdapter::new(queue.clone(), storage.clone())
         );
         let agent_id = agent_id.clone();
+        let log = log_engine.clone();
 
         handles.push(tokio::spawn(async move {
-            collector.run(enqueuer.as_ref(), interval, &agent_id).await;
+            // Wrap the collector run with error logging
+            loop {
+                match collector.collect().await {
+                    Ok(data) => {
+                        let payload = TelemetryPayload::new(&agent_id, collector.name(), data);
+                        if let Err(e) = enqueuer.enqueue(&payload).await {
+                            let _ = log.error("metrics_engine", &format!(
+                                "{} collector enqueue error: {}",
+                                collector.name(), e,
+                            )).await;
+                            error!("{} collector enqueue error: {e}", collector.name());
+                        }
+                    }
+                    Err(e) => {
+                        let _ = log.error("metrics_engine", &format!(
+                            "{} collector error: {}",
+                            collector.name(), e,
+                        )).await;
+                        error!("{} collector error: {e}", collector.name());
+                    }
+                }
+                tokio::time::sleep(interval).await;
+            }
         }));
     }
 

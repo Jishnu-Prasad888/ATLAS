@@ -13,6 +13,7 @@ use chrono::Utc;
 use tracing::{info, warn, error};
 use uuid::Uuid;
 
+use crate::engines::logging::LogEngine;
 use crate::storage::StorageManager;
 
 const MAX_RETRIES: u32 = 5;
@@ -64,8 +65,9 @@ pub struct QueueStatus {
 
 #[derive(Clone)]
 pub struct QueueEngine {
-    storage: StorageManager,
-    paused:  Arc<RwLock<bool>>,
+    storage:    StorageManager,
+    paused:     Arc<RwLock<bool>>,
+    log_engine: Option<Arc<LogEngine>>,
 }
 
 impl QueueEngine {
@@ -73,7 +75,12 @@ impl QueueEngine {
         Ok(Self {
             storage,
             paused: Arc::new(RwLock::new(false)),
+            log_engine: None,
         })
+    }
+
+    pub fn set_log_engine(&mut self, log_engine: LogEngine) {
+        self.log_engine = Some(Arc::new(log_engine));
     }
 
     // ─── Enqueue ──────────────────────────────────────────────────────────────
@@ -188,12 +195,26 @@ impl QueueEngine {
         if retries as u32 >= MAX_RETRIES {
             warn!("Message {} exceeded max retries, moving to dead letter", message_id);
             self.move_to_dead_letter_locked(&db, id, message_id, &payload, &msg_type, "max_retries_exceeded")?;
+            drop(db);
+            if let Some(ref log) = self.log_engine {
+                let _ = log.warn("queue_engine", &format!(
+                    "Message moved to dead letter after {} retries: id={} type={}",
+                    MAX_RETRIES, message_id, msg_type,
+                )).await;
+            }
         } else {
             // Re-queue as Pending
             db.execute(
                 "UPDATE queue SET state = 'Pending', updated_at = ?1 WHERE id = ?2",
                 params![now, id],
             )?;
+            drop(db);
+            if let Some(ref log) = self.log_engine {
+                let _ = log.warn("queue_engine", &format!(
+                    "Message send failed, retrying (attempt {}/{}): id={}",
+                    retries + 1, MAX_RETRIES, message_id,
+                )).await;
+            }
         }
         Ok(())
     }
@@ -256,7 +277,16 @@ impl QueueEngine {
             "UPDATE queue SET state = 'Pending', updated_at = ?1 WHERE state = 'Failed'",
             params![now],
         )? as usize;
+        drop(db);
         info!("Retrying {} failed messages", n);
+        if n > 0 {
+            if let Some(ref log) = self.log_engine {
+                let _ = log.info("queue_engine", &format!(
+                    "Recovered connection, replaying {} queued messages",
+                    n,
+                )).await;
+            }
+        }
         Ok(n)
     }
 

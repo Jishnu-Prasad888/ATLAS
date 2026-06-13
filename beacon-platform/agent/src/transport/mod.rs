@@ -21,6 +21,7 @@ use crate::config::AgentConfig;
 use crate::engines::identity::AgentIdentity;
 use crate::engines::queue::QueueEngine;
 use crate::engines::encryption::EncryptionEngine;
+use crate::engines::logging::LogEngine;
 
 const HEARTBEAT_INTERVAL:   Duration = Duration::from_secs(15);
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -33,6 +34,7 @@ pub struct WebSocketTransport {
     identity:   AgentIdentity,
     queue:      QueueEngine,
     encryption: EncryptionEngine,
+    log_engine: LogEngine,
 }
 
 impl WebSocketTransport {
@@ -41,24 +43,33 @@ impl WebSocketTransport {
         identity:   AgentIdentity,
         queue:      QueueEngine,
         encryption: EncryptionEngine,
+        log_engine: LogEngine,
     ) -> Self {
-        Self { config, identity, queue, encryption }
+        Self { config, identity, queue, encryption, log_engine }
     }
 
     /// Run forever — reconnects automatically with exponential backoff.
     pub async fn run(&self) -> Result<()> {
         let mut backoff = RECONNECT_BASE_DELAY;
+        let mut first_connect = true;
         loop {
             info!("Connecting to {}", self.config.server_addr);
             match self.connect_and_run().await {
                 Ok(()) => {
                     info!("Transport disconnected cleanly — reconnecting...");
                     backoff = RECONNECT_BASE_DELAY;
+                    first_connect = false;
                 }
                 Err(e) => {
                     warn!("Transport error: {e}. Reconnecting in {:.1}s...", backoff.as_secs_f32());
+                    if !first_connect {
+                        let _ = self.log_engine.warn("queue_engine", &format!(
+                            "Network unavailable, buffering messages"
+                        )).await;
+                    }
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(RECONNECT_MAX_DELAY);
+                    first_connect = false;
                 }
             }
         }
@@ -77,6 +88,20 @@ impl WebSocketTransport {
             .map_err(|e| anyhow!("WebSocket connect failed: {e}"))?;
 
         info!("WebSocket connected to {}", self.config.server_addr);
+
+        // Log connection recovery and replay count
+        let queue_count = self.queue.status().await
+            .map(|s| s.pending + s.failed)
+            .unwrap_or(0);
+        if queue_count > 0 {
+            let _ = self.log_engine.info("queue_engine", &format!(
+                "Recovered connection, replaying {} queued messages",
+                queue_count,
+            )).await;
+        } else {
+            let _ = self.log_engine.info("service_engine", "Connection established with server").await;
+        }
+
         let (mut writer, mut reader) = ws_stream.split();
 
         // Send registration
@@ -199,6 +224,8 @@ impl WebSocketTransport {
                 }
                 Ok(Message::Close(frame)) => {
                     info!("Server closed connection: {:?}", frame);
+                    // read_loop is static; we return Ok and the outer run() reconnects.
+                    // The queue_engine buffering log will be emitted on reconnect attempt.
                     return Ok(());
                 }
                 Ok(Message::Ping(_)) => debug!("Received ping"),

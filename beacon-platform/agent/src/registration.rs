@@ -17,6 +17,7 @@ use tracing::{error, info, warn};
 
 use crate::config::AgentConfig;
 use crate::engines::identity::AgentIdentity;
+use crate::engines::logging::LogEngine;
 use crate::storage::StorageManager;
 
 // ─── Wire types ───────────────────────────────────────────────────────────────
@@ -82,6 +83,7 @@ pub async fn register(
     config:   &AgentConfig,
     identity: &AgentIdentity,
     storage:  &StorageManager,
+    log_engine: &LogEngine,
 ) -> Result<()> {
     // ── Validate secret is present ────────────────────────────────────────────
     let secret = resolve_secret(config)?;
@@ -130,6 +132,12 @@ pub async fn register(
                 resp.status
             );
 
+            log_engine.info("auth_engine", &format!(
+                "Agent {} registered with server (hostname={})",
+                &resp.agent_id[..16.min(resp.agent_id.len())],
+                identity.hostname,
+            )).await?;
+
             storage
                 .set_config("registration_status", RegistrationStatus::Registered.as_str())
                 .await?;
@@ -148,6 +156,8 @@ pub async fn register(
             );
             error!("{}", msg);
 
+            log_engine.warn("auth_engine", "Registration rejected — secret mismatch").await?;
+
             storage
                 .set_config("registration_status", RegistrationStatus::SecretMismatch.as_str())
                 .await?;
@@ -162,13 +172,17 @@ pub async fn register(
 
         // ── Agent disabled ────────────────────────────────────────────────────
         404 => {
-            // 404 from register means the agent was explicitly removed / not allowed.
             let msg = format!(
                 "Server returned 404 during registration. The agent may have been disabled \
                  or removed on the server side. Body: {}",
                 body_text
             );
             warn!("{}", msg);
+
+            log_engine.warn("auth_engine", &format!(
+                "Registration rejected — agent disabled or removed on server"
+            )).await?;
+
             storage
                 .set_config("registration_status", RegistrationStatus::Unregistered.as_str())
                 .await?;
@@ -182,8 +196,11 @@ pub async fn register(
                 other, body_text
             );
             error!("{}", msg);
-            // Don't overwrite a previous "registered" status on transient errors.
-            // Only mark unregistered if we've never successfully registered.
+
+            log_engine.warn("auth_engine", &format!(
+                "Registration failed (HTTP {})", other,
+            )).await?;
+
             let current = storage.get_config("registration_status").await?;
             if current.as_deref() != Some("registered") {
                 storage
