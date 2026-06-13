@@ -22,6 +22,7 @@ use engines::{
     health::HealthEngine,
     queue::QueueEngine,
     encryption::EncryptionEngine,
+    logging::LogEngine,
 };
 use storage::StorageManager;
 use transport::WebSocketTransport;
@@ -400,6 +401,12 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     // Initialise queue
     let queue = QueueEngine::new(storage.clone()).await?;
 
+    // Initialise logging engine
+    let log_engine = LogEngine::new(&identity, queue.clone(), storage.clone());
+    log_engine.info("service_engine", "Beacon Agent starting").await?;
+    log_engine.info("service_engine", &format!("Agent identity: {}", identity.agent_id)).await?;
+    log_engine.info("service_engine", "Configuration loaded").await?;
+
     // Initialise health engine
     let mut health = HealthEngine::new();
     health.set_status(engines::health::AgentStatus::Initializing);
@@ -434,6 +441,9 @@ async fn run_daemon(config_path: &str) -> Result<()> {
             health.set_status(engines::health::AgentStatus::ShuttingDown);
         }
     }
+
+    // Log shutdown
+    log_engine.info("service_engine", "Beacon Agent shutting down").await?;
 
     // Flush queue before exit
     info!("Flushing queue before shutdown...");
@@ -682,13 +692,40 @@ async fn handle_logs_cmd(action: LogsAction, config_path: &str) -> Result<()> {
     let config  = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     match action {
-        LogsAction::View        => storage.print_recent_logs(20).await?,
-        LogsAction::Follow      => println!("Streaming logs... (Ctrl+C to stop)"),
-        LogsAction::Export { output } => println!("Exporting logs to {output}..."),
-        LogsAction::Search { query }  => println!("Searching logs for: {query}"),
-        LogsAction::Clear       => { storage.clear_logs().await?; println!("Logs cleared."); }
-        LogsAction::ClearErrors   => println!("Error logs cleared."),
-        LogsAction::ClearWarnings => println!("Warning logs cleared."),
+        LogsAction::View => {
+            storage.print_recent_logs(50).await?;
+        }
+        LogsAction::Follow => {
+            println!("Streaming logs... (Ctrl+C to stop)");
+            // TODO: implement live log streaming via WebSocket
+        }
+        LogsAction::Export { output } => {
+            println!("Exporting logs to {output}...");
+            // TODO: implement log export
+        }
+        LogsAction::Search { query } => {
+            let results = storage.search_logs(&query, 50).await?;
+            if results.is_empty() {
+                println!("No logs matching '{}'", query);
+            } else {
+                for row in &results {
+                    println!("[{}] [{}] ({}) {}", row.timestamp, row.severity, row.source, row.message);
+                }
+                println!("--- {} result(s) ---", results.len());
+            }
+        }
+        LogsAction::Clear => {
+            storage.clear_logs().await?;
+            println!("All logs cleared.");
+        }
+        LogsAction::ClearErrors => {
+            let n = storage.delete_logs_by_severity("Error").await?;
+            println!("Deleted {} error log(s).", n);
+        }
+        LogsAction::ClearWarnings => {
+            let n = storage.delete_logs_by_severity("Warning").await?;
+            println!("Deleted {} warning log(s).", n);
+        }
     }
     Ok(())
 }

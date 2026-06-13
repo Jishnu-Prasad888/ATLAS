@@ -66,3 +66,11 @@ retry_backoff_ms = 1000
 enabled           = true
 # Key rotation interval in days (0 = manual only)
 key_rotation_days = 30
+
+[logging]
+# Maximum log entries per second (excess is dropped with counter)
+max_log_rate = 1000
+# Enable file-based log output (in addition to queue)
+log_to_file  = false
+# Log file path (used if log_to_file is true)
+log_file_path = "/var/log/beacon/agent.log"

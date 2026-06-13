@@ -35,6 +35,8 @@ pub struct AgentConfig {
     pub tls:        TlsConfig,
     pub queue:      QueueConfig,
     pub encryption: EncryptionConfig,
+    #[serde(default)]
+    pub logging:    LoggingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +73,26 @@ pub struct QueueConfig {
 pub struct EncryptionConfig {
     pub enabled:           bool,
     pub key_rotation_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /// Maximum log entries per second before dropping
+    pub max_log_rate: u64,
+    /// Enable file-based log export
+    pub log_to_file: bool,
+    /// Log file path (if log_to_file is true)
+    pub log_file_path: String,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            max_log_rate: 1000,
+            log_to_file: false,
+            log_file_path: "/var/log/beacon/agent.log".to_string(),
+        }
+    }
 }
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -110,6 +132,7 @@ impl Default for AgentConfig {
                 enabled:           true,
                 key_rotation_days: 30,
             },
+            logging: LoggingConfig::default(),
         }
     }
 }
