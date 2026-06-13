@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use chrono::Utc;
+use serde_json;
 use tracing::{info, warn};
 
 #[derive(Clone)]
@@ -76,14 +77,20 @@ impl StorageManager {
             db.execute_batch(r#"
                 CREATE TABLE IF NOT EXISTS logs (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    log_id          TEXT NOT NULL UNIQUE,
                     agent_id        TEXT NOT NULL,
+                    hostname        TEXT NOT NULL DEFAULT '',
                     source          TEXT NOT NULL,
                     severity        TEXT NOT NULL,
                     message         TEXT NOT NULL,
                     timestamp       TEXT NOT NULL,
-                    schema_version  TEXT NOT NULL DEFAULT '1.0',
+                    execution_id    TEXT,
+                    namespace       TEXT,
+                    event_type      TEXT,
+                    tags            TEXT NOT NULL DEFAULT '[]',
+                    schema_version  INTEGER NOT NULL DEFAULT 1,
+                    sequence_number INTEGER NOT NULL DEFAULT 0,
                     extra           TEXT NOT NULL DEFAULT '{}',
-                    sequence_number INTEGER,
                     synced          INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_logs_agent_severity_ts
@@ -98,6 +105,27 @@ impl StorageManager {
                     details   TEXT NOT NULL DEFAULT '{}'
                 );
             "#)?;
+
+            // Migration: add new columns to existing logs tables (safe no-op if present)
+            let add_column = |col: &str, def: &str| -> Result<()> {
+                let sql = format!("ALTER TABLE logs ADD COLUMN {} {}", col, def);
+                let _ = db.execute_batch(&sql);
+                Ok(())
+            };
+            let _ = add_column("log_id", "TEXT");
+            let _ = add_column("hostname", "TEXT NOT NULL DEFAULT ''");
+            let _ = add_column("execution_id", "TEXT");
+            let _ = add_column("namespace", "TEXT");
+            let _ = add_column("event_type", "TEXT");
+            let _ = add_column("tags", "TEXT NOT NULL DEFAULT '[]'");
+
+            // Create indexes for new columns — must run AFTER migration
+            let create_idx = |sql: &str| -> Result<()> {
+                let _ = db.execute_batch(sql);
+                Ok(())
+            };
+            let _ = create_idx("CREATE INDEX IF NOT EXISTS idx_logs_log_id ON logs(log_id)");
+            let _ = create_idx("CREATE INDEX IF NOT EXISTS idx_logs_execution ON logs(execution_id) WHERE execution_id IS NOT NULL");
         }
 
         // ── Queue ─────────────────────────────────────────────────────────────
@@ -216,8 +244,33 @@ impl StorageManager {
         let db = self.logs_db.lock().await;
         let ts = Utc::now().to_rfc3339();
         db.execute(
-            "INSERT INTO logs (agent_id, source, severity, message, timestamp, extra) VALUES (?1,?2,?3,?4,?5,?6)",
-            params![agent_id, source, severity, message, ts, extra],
+            "INSERT INTO logs (log_id, agent_id, hostname, source, severity, message, timestamp, extra) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![uuid::Uuid::new_v4().to_string(), agent_id, "", source, severity, message, ts, extra],
+        )?;
+        Ok(())
+    }
+
+    pub async fn store_log_entry(&self, entry: &crate::engines::logging::LogEntry) -> Result<()> {
+        let db = self.logs_db.lock().await;
+        let tags_json = serde_json::to_string(&entry.tags).unwrap_or_else(|_| "[]".to_string());
+        db.execute(
+            "INSERT INTO logs (log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            params![
+                entry.log_id,
+                entry.agent_id,
+                entry.hostname,
+                entry.source,
+                entry.severity,
+                entry.message,
+                entry.timestamp,
+                entry.execution_id,
+                entry.namespace,
+                entry.event_type,
+                tags_json,
+                entry.schema_version,
+                entry.sequence_number,
+            ],
         )?;
         Ok(())
     }
@@ -225,20 +278,26 @@ impl StorageManager {
     pub async fn get_unsynced_logs(&self, limit: usize) -> Result<Vec<LogRow>> {
         let db = self.logs_db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT id, agent_id, source, severity, message, timestamp, schema_version, extra, sequence_number
+            "SELECT id, log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number, extra
              FROM logs WHERE synced = 0 ORDER BY timestamp ASC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |r| {
             Ok(LogRow {
                 id:              r.get(0)?,
-                agent_id:        r.get(1)?,
-                source:          r.get(2)?,
-                severity:        r.get(3)?,
-                message:         r.get(4)?,
-                timestamp:       r.get(5)?,
-                schema_version:  r.get(6)?,
-                extra:           r.get(7)?,
-                sequence_number: r.get(8)?,
+                log_id:          r.get(1)?,
+                agent_id:        r.get(2)?,
+                hostname:        r.get(3)?,
+                source:          r.get(4)?,
+                severity:        r.get(5)?,
+                message:         r.get(6)?,
+                timestamp:       r.get(7)?,
+                execution_id:    r.get(8)?,
+                namespace:       r.get(9)?,
+                event_type:      r.get(10)?,
+                tags:            r.get(11)?,
+                schema_version:  r.get::<_, Option<i64>>(12)?.map(|v| v as u32).unwrap_or(0),
+                sequence_number: r.get::<_, Option<i64>>(13)?.map(|v| v as u64).unwrap_or(0),
+                extra:           r.get(14)?,
             })
         })?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
@@ -272,6 +331,42 @@ impl StorageManager {
         let db = self.logs_db.lock().await;
         db.execute("DELETE FROM logs", [])?;
         Ok(())
+    }
+
+    pub async fn search_logs(&self, query: &str, limit: usize) -> Result<Vec<LogRow>> {
+        let db = self.logs_db.lock().await;
+        let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+        let mut stmt = db.prepare(
+            "SELECT id, log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number, extra
+             FROM logs WHERE message LIKE ?1 ESCAPE '\\' OR source LIKE ?1 ESCAPE '\\'
+             ORDER BY timestamp DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit as i64], |r| {
+            Ok(LogRow {
+                id:              r.get(0)?,
+                log_id:          r.get(1)?,
+                agent_id:        r.get(2)?,
+                hostname:        r.get(3)?,
+                source:          r.get(4)?,
+                severity:        r.get(5)?,
+                message:         r.get(6)?,
+                timestamp:       r.get(7)?,
+                execution_id:    r.get(8)?,
+                namespace:       r.get(9)?,
+                event_type:      r.get(10)?,
+                tags:            r.get(11)?,
+                schema_version:  r.get::<_, Option<i64>>(12)?.map(|v| v as u32).unwrap_or(0),
+                sequence_number: r.get::<_, Option<i64>>(13)?.map(|v| v as u64).unwrap_or(0),
+                extra:           r.get(14)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub async fn delete_logs_by_severity(&self, severity: &str) -> Result<usize> {
+        let db = self.logs_db.lock().await;
+        let n = db.execute("DELETE FROM logs WHERE severity = ?1", params![severity])?;
+        Ok(n as usize)
     }
 
     // ── Audit ─────────────────────────────────────────────────────────────────
@@ -447,12 +542,18 @@ pub struct MetricRow {
 #[derive(Debug, Clone)]
 pub struct LogRow {
     pub id:              i64,
+    pub log_id:          String,
     pub agent_id:        String,
+    pub hostname:        String,
     pub source:          String,
     pub severity:        String,
     pub message:         String,
     pub timestamp:       String,
-    pub schema_version:  String,
+    pub execution_id:    Option<String>,
+    pub namespace:       Option<String>,
+    pub event_type:      Option<String>,
+    pub tags:            String,
+    pub schema_version:  u32,
+    pub sequence_number: u64,
     pub extra:           String,
-    pub sequence_number: Option<i64>,
 }

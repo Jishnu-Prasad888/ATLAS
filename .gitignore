@@ -13,3 +13,35 @@ __pycache__/
 dist/
 build/
 bak_outputs/
+
+
+# deps
+node_modules/
+.pnp
+.pnp.js
+
+# build
+dist/
+dist-ssr/
+*.local
+
+# env — never commit real env files
+.env.local
+.env.*.local
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# test coverage
+coverage/

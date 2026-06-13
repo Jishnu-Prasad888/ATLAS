@@ -8,6 +8,8 @@ use tokio::sync::RwLock;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::engines::logging::LogEngine;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentStatus {
     Booting,
@@ -122,6 +124,7 @@ pub struct HealthEngine {
     status:     Arc<RwLock<AgentStatus>>,
     collectors: Arc<RwLock<HashMap<String, CollectorHealthRecord>>>,
     started_at: DateTime<Utc>,
+    log_engine: Option<LogEngine>,
 }
 
 impl HealthEngine {
@@ -130,14 +133,54 @@ impl HealthEngine {
             status:     Arc::new(RwLock::new(AgentStatus::Booting)),
             collectors: Arc::new(RwLock::new(HashMap::new())),
             started_at: Utc::now(),
+            log_engine: None,
+        }
+    }
+
+    pub fn set_log_engine(&mut self, log_engine: LogEngine) {
+        self.log_engine = Some(log_engine);
+    }
+
+    fn log_status_change(&self, _from: &AgentStatus, to: &AgentStatus) {
+        if let Some(ref log) = self.log_engine {
+            let log = log.clone();
+            let to_s = to.to_string();
+            let severity = match to {
+                AgentStatus::Failed | AgentStatus::Degraded => "Warning",
+                _ => "Info",
+            };
+            tokio::spawn(async move {
+                let _ = log.log(
+                    log.new_entry(severity, "health_engine", &format!(
+                        "System state changed to {}", to_s,
+                    )).with_tags(&["health", "state"]),
+                ).await;
+            });
         }
     }
 
     pub fn set_status(&self, status: AgentStatus) {
-        // Synchronous wrapper — only used during startup
         let status_clone = self.status.clone();
+        let old_status = self.status.clone();
+        let log = self.log_engine.clone();
         tokio::spawn(async move {
-            *status_clone.write().await = status;
+            let old = old_status.read().await.clone();
+            *status_clone.write().await = status.clone();
+            if let Some(ref l) = log {
+                let old_s = old.to_string();
+                let new_s = status.to_string();
+                if old_s != new_s {
+                    let severity = match &status {
+                        AgentStatus::Failed | AgentStatus::Degraded => "Warning",
+                        _ => "Info",
+                    };
+                    let _ = l.log(
+                        l.new_entry(severity, "health_engine", &format!(
+                            "System state changed to {}", new_s,
+                        )).with_tags(&["health", "state"]),
+                    ).await;
+                }
+            }
         });
     }
 
@@ -146,6 +189,8 @@ impl HealthEngine {
     }
 
     pub async fn set_status_async(&self, status: AgentStatus) {
+        let old = self.status.read().await.clone();
+        self.log_status_change(&old, &status);
         *self.status.write().await = status;
     }
 
@@ -162,10 +207,21 @@ impl HealthEngine {
         let record = collectors
             .entry(name.to_string())
             .or_insert_with(|| CollectorHealthRecord::new(name));
+        let old_status = record.status.clone();
         record.record_failure(error);
+        let new_status = record.status.clone();
+        drop(collectors);
+
+        if old_status != new_status {
+            if let Some(ref log) = self.log_engine {
+                let _ = log.error("metrics_engine", &format!(
+                    "{} collector status changed to {}: {}",
+                    name, new_status, error,
+                )).await;
+            }
+        }
 
         // Escalate agent status if any collector has failed
-        drop(collectors);
         let collectors = self.collectors.read().await;
         let any_failed = collectors.values().any(|c| c.status == CollectorStatus::Failed);
         let any_degraded = collectors.values().any(|c| c.status == CollectorStatus::Degraded);
@@ -174,8 +230,24 @@ impl HealthEngine {
         let mut status = self.status.write().await;
         if any_failed && *status == AgentStatus::Online {
             *status = AgentStatus::Degraded;
+            drop(status);
+            if let Some(ref log) = self.log_engine {
+                let _ = log.log(
+                    log.new_entry("Warning", "health_engine", &format!(
+                        "System state changed to {}", AgentStatus::Degraded,
+                    )).with_tags(&["health", "state"]),
+                ).await;
+            }
         } else if !any_failed && !any_degraded && *status == AgentStatus::Degraded {
             *status = AgentStatus::Online;
+            drop(status);
+            if let Some(ref log) = self.log_engine {
+                let _ = log.log(
+                    log.new_entry("Info", "health_engine", &format!(
+                        "System state changed to {}", AgentStatus::Online,
+                    )).with_tags(&["health", "state"]),
+                ).await;
+            }
         }
     }
 
