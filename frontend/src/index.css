@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+  --font-display: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-bg: #0b0d0f;
+  --color-surface: #111418;
+  --color-surface-2: #181c22;
+  --color-border: #1e252e;
+  --color-border-strong: #2a3340;
+
+  --color-text: #d4dae3;
+  --color-text-muted: #5a6878;
+  --color-text-dim: #3a4555;
+
+  --color-accent: #3b82f6;
+  --color-accent-dim: #1e3a5f;
+
+  --color-green: #22c55e;
+  --color-green-dim: #0f2e1a;
+  --color-yellow: #eab308;
+  --color-yellow-dim: #2a2200;
+  --color-red: #ef4444;
+  --color-red-dim: #2a0f0f;
+  --color-orange: #f97316;
+  --color-purple: #a855f7;
+  --color-blue: #3b82f6;
+  --color-blue-dim: #1e2e42;
+  --color-gray: #6b7280;
+}
+
+/* ── Light mode ─────────────────────────────────────────────────────── */
+
+[data-theme="light"] {
+  --color-bg: #f3f1eb;
+  --color-surface: #fdfcf8;
+  --color-surface-2: #ece6d9;
+  --color-border: #cac1ad;
+  --color-border-strong: #a1947c;
+
+  --color-text: #1f2933;
+  --color-text-muted: #5d6674;
+  --color-text-dim: #7f8898;
+
+  --color-accent: #1e5ed7;
+  --color-accent-dim: #d7e4ff;
+
+  --color-green-dim: #d7f3e3;
+  --color-yellow-dim: #fff1c2;
+  --color-red-dim: #ffe1dd;
+  --color-blue-dim: #d7e4ff;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}
+
+.font-mono {
+  font-family: var(--font-sans);
+}

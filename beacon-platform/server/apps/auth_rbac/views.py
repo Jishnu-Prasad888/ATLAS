@@ -37,10 +37,12 @@ class BeaconLoginView(TokenObtainPairView):
     throttle_classes = [LoginThrottle]
 
     def post(self, request, *args, **kwargs):
+        username = request.data.get("username", "")
+        logger.debug("BeaconLoginView POST — username=%s", username)
         response = super().post(request, *args, **kwargs)
         if response.status_code == 200:
-            username = request.data.get("username", "")
             ip = request.META.get("REMOTE_ADDR", "")
+            logger.debug("BeaconLoginView login successful for %s from %s", username, ip)
             try:
                 user = BeaconUser.objects.get(username=username)
                 user.last_login_ip = ip
@@ -48,6 +50,8 @@ class BeaconLoginView(TokenObtainPairView):
             except BeaconUser.DoesNotExist:
                 pass
             audit_log(request, action="LOGIN", resource="auth", details={"username": username})
+        else:
+            logger.debug("BeaconLoginView login failed for %s status=%s", username, response.status_code)
         return response
 
 
@@ -55,14 +59,17 @@ class BeaconLogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        logger.debug("BeaconLogoutView POST — user=%s", request.user)
         try:
             refresh_token = request.data.get("refresh")
             if refresh_token:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
+                logger.debug("BeaconLogoutView token blacklisted")
             audit_log(request, action="LOGOUT", resource="auth")
             return Response({"detail": "Logged out successfully."}, status=status.HTTP_200_OK)
         except Exception as e:
+            logger.debug("BeaconLogoutView error: %s", e)
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -70,6 +77,7 @@ class WhoAmIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        logger.debug("WhoAmIView GET — user=%s", request.user)
         return Response(BeaconUserSerializer(request.user).data)
 
 
@@ -77,10 +85,12 @@ class PasswordChangeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        logger.debug("PasswordChangeView POST — user=%s", request.user)
         serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         request.user.set_password(serializer.validated_data["new_password"])
         request.user.save()
+        logger.debug("PasswordChangeView password changed for user %s", request.user)
         audit_log(request, action="PASSWORD_CHANGE", resource="auth")
         return Response({"detail": "Password changed successfully."})
 
@@ -90,6 +100,7 @@ class PasswordRecoveryView(APIView):
     throttle_classes = [LoginThrottle]
 
     def post(self, request):
+        logger.debug("PasswordRecoveryView POST")
         serializer = PasswordRecoverySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -101,11 +112,11 @@ class PasswordRecoveryView(APIView):
         user.save()
         rk.consume()
 
-        # Issue new recovery key
         new_key = RecoveryKey.generate()
         RecoveryKey.objects.filter(user=user).delete()
         RecoveryKey.objects.create(user=user, key_hash=RecoveryKey.hash_key(new_key))
 
+        logger.debug("PasswordRecoveryView password recovered for user %s", user.username)
         audit_log(request, action="PASSWORD_RECOVERY", resource="auth", details={"username": user.username})
         return Response({
             "detail": "Password reset successful. Save your new recovery key.",
@@ -117,12 +128,14 @@ class GenerateRecoveryKeyView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        logger.debug("GenerateRecoveryKeyView POST — user=%s", request.user)
         raw_key = RecoveryKey.generate()
         RecoveryKey.objects.filter(user=request.user).delete()
         RecoveryKey.objects.create(
             user     = request.user,
             key_hash = RecoveryKey.hash_key(raw_key),
         )
+        logger.debug("GenerateRecoveryKeyView new key generated for user %s", request.user)
         audit_log(request, action="RECOVERY_KEY_GENERATED", resource="auth")
         return Response({
             "recovery_key": raw_key,
@@ -136,13 +149,17 @@ class UserListCreateView(APIView):
     permission_classes = [IsAdministrator]
 
     def get(self, request):
+        logger.debug("UserListCreateView GET — user=%s", request.user)
         users = BeaconUser.objects.all().order_by("username")
+        logger.debug("UserListCreateView returning %d users", users.count())
         return Response(BeaconUserSerializer(users, many=True).data)
 
     def post(self, request):
+        logger.debug("UserListCreateView POST — user=%s data=%s", request.user, request.data)
         serializer = BeaconUserCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        logger.debug("UserListCreateView user created id=%s username=%s", user.id, user.username)
         audit_log(request, action="USER_CREATE", resource="users", resource_id=str(user.id))
         return Response(BeaconUserSerializer(user).data, status=status.HTTP_201_CREATED)
 
@@ -154,32 +171,39 @@ class UserDetailView(APIView):
         try:
             return BeaconUser.objects.get(pk=pk)
         except BeaconUser.DoesNotExist:
+            logger.debug("UserDetailView user not found pk=%s", pk)
             return None
 
     def get(self, request, pk):
+        logger.debug("UserDetailView GET — pk=%s user=%s", pk, request.user)
         user = self.get_object(pk)
         if not user:
             return Response({"detail": "Not found."}, status=404)
         return Response(BeaconUserSerializer(user).data)
 
     def patch(self, request, pk):
+        logger.debug("UserDetailView PATCH — pk=%s user=%s data=%s", pk, request.user, request.data)
         user = self.get_object(pk)
         if not user:
             return Response({"detail": "Not found."}, status=404)
         serializer = BeaconUserSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        logger.debug("UserDetailView user %s updated", pk)
         audit_log(request, action="USER_UPDATE", resource="users", resource_id=str(user.id))
         return Response(serializer.data)
 
     def delete(self, request, pk):
+        logger.debug("UserDetailView DELETE — pk=%s user=%s", pk, request.user)
         user = self.get_object(pk)
         if not user:
             return Response({"detail": "Not found."}, status=404)
         if user == request.user:
+            logger.debug("UserDetailView cannot delete own account")
             return Response({"detail": "Cannot delete own account."}, status=400)
         user_id = str(user.id)
         user.delete()
+        logger.debug("UserDetailView user %s deleted", pk)
         audit_log(request, action="USER_DELETE", resource="users", resource_id=user_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -188,15 +212,19 @@ class UserRoleAssignView(APIView):
     permission_classes = [IsAdministrator]
 
     def post(self, request, pk):
+        logger.debug("UserRoleAssignView POST — pk=%s user=%s role=%s", pk, request.user, request.data.get("role"))
         try:
             user = BeaconUser.objects.get(pk=pk)
         except BeaconUser.DoesNotExist:
+            logger.debug("UserRoleAssignView user not found pk=%s", pk)
             return Response({"detail": "Not found."}, status=404)
         role = request.data.get("role")
         if role not in dict(Role.choices):
+            logger.debug("UserRoleAssignView invalid role: %s", role)
             return Response({"detail": f"Invalid role. Choices: {list(dict(Role.choices).keys())}"}, status=400)
         user.role = role
         user.save(update_fields=["role"])
+        logger.debug("UserRoleAssignView user %s role set to %s", pk, role)
         audit_log(request, action="USER_ROLE_ASSIGN", resource="users", resource_id=str(user.id), details={"role": role})
         return Response(BeaconUserSerializer(user).data)
 
@@ -205,18 +233,23 @@ class UserEnableDisableView(APIView):
     permission_classes = [IsAdministrator]
 
     def post(self, request, pk, action):
+        logger.debug("UserEnableDisableView POST — pk=%s action=%s user=%s", pk, action, request.user)
         try:
             user = BeaconUser.objects.get(pk=pk)
         except BeaconUser.DoesNotExist:
+            logger.debug("UserEnableDisableView user not found pk=%s", pk)
             return Response({"detail": "Not found."}, status=404)
         if action == "enable":
             user.is_active = True
         elif action == "disable":
             if user == request.user:
+                logger.debug("UserEnableDisableView cannot disable own account")
                 return Response({"detail": "Cannot disable own account."}, status=400)
             user.is_active = False
         else:
+            logger.debug("UserEnableDisableView invalid action: %s", action)
             return Response({"detail": "Action must be enable or disable."}, status=400)
         user.save(update_fields=["is_active"])
+        logger.debug("UserEnableDisableView user %s is_active=%s", pk, user.is_active)
         audit_log(request, action=f"USER_{action.upper()}", resource="users", resource_id=str(user.id))
         return Response(BeaconUserSerializer(user).data)

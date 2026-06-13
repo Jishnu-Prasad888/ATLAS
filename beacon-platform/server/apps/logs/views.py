@@ -40,8 +40,9 @@ class LogIngestView(APIView):
         serializer.is_valid(raise_exception=True)
         data     = serializer.validated_data
         agent_id = data["agent_id"]
+        log_count = len(data.get("logs", []))
+        logger.debug("LogIngestView POST — agent_id=%s log_count=%s", agent_id, log_count)
 
-        # Sanitize messages (prevent log injection)
         objects = []
         for log in data["logs"]:
             msg = log["message"].replace("\x00", "").replace("\r", "")[:8192]
@@ -57,8 +58,8 @@ class LogIngestView(APIView):
             ))
 
         LogEntry.objects.bulk_create(objects, batch_size=500)
+        logger.debug("LogIngestView ingested %d logs for agent %s", len(objects), agent_id)
 
-        # Broadcast last log to WebSocket subscribers
         if objects:
             broadcast_log(agent_id, LogEntrySerializer(objects[-1]).data)
 
@@ -73,6 +74,7 @@ class LogListView(APIView):
         qs_s = LogQuerySerializer(data=request.query_params)
         qs_s.is_valid(raise_exception=True)
         p = qs_s.validated_data
+        logger.debug("LogListView GET — params=%s user=%s", p, request.user)
 
         qs = LogEntry.objects.all()
         if p.get("agent_id"):
@@ -89,6 +91,7 @@ class LogListView(APIView):
             qs = qs.filter(timestamp__lte=p["end"])
 
         qs = qs.order_by("-timestamp")[: p.get("limit", 500)]
+        logger.debug("LogListView returning %d logs", len(qs))
         return Response(LogEntrySerializer(qs, many=True).data)
 
 
@@ -102,12 +105,14 @@ class LogExportView(APIView):
         qs_s = LogQuerySerializer(data=request.query_params)
         qs_s.is_valid(raise_exception=True)
         p  = qs_s.validated_data
+        logger.debug("LogExportView GET — params=%s user=%s", p, request.user)
         qs = LogEntry.objects.all()
         if p.get("agent_id"):
             qs = qs.filter(agent_id=p["agent_id"])
         if p.get("severity"):
             qs = qs.filter(severity=p["severity"])
         data = LogEntrySerializer(qs.order_by("-timestamp")[:10000], many=True).data
+        logger.debug("LogExportView exporting %d logs", len(data))
         response = JsonResponse({"logs": data, "count": len(data)})
         response["Content-Disposition"] = 'attachment; filename="beacon_logs_export.json"'
         return response
@@ -120,13 +125,16 @@ class LogClearView(APIView):
     def post(self, request):
         agent_id = request.data.get("agent_id")
         severity = request.data.get("severity")
+        logger.debug("LogClearView POST — agent_id=%s severity=%s user=%s", agent_id, severity, request.user)
         qs = LogEntry.objects.all()
         if agent_id:
             qs = qs.filter(agent_id=agent_id)
         if severity:
             if severity not in dict(LogSeverity.choices):
+                logger.debug("LogClearView invalid severity: %s", severity)
                 return Response({"detail": "Invalid severity."}, status=400)
             qs = qs.filter(severity=severity)
         deleted, _ = qs.delete()
+        logger.debug("LogClearView deleted %d logs", deleted)
         audit_log(request, action="LOG_CLEAR", resource="logs", details={"deleted": deleted})
         return Response({"deleted": deleted})
