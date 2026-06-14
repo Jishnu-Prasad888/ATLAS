@@ -265,69 +265,339 @@ export interface AuditLog {
 
 // ─── Docker Metrics ───────────────────────────────────────────────────────────
 
-export interface DockerContainer {
-  id: string
-  name: string
-  state: string
-  status: string
-  health: string
-  restart_count: number
-  exit_code: number
-  image: string
-  command: string
-  ports: string
-  mounts: string
-  networks: string
-  platform: string
-  labels: string
-  cpu_percent: number | null
-  memory_usage_bytes: number | null
-  memory_limit_bytes: number | null
-  memory_percent: number | null
-  network_rx_bytes: number | null
-  network_tx_bytes: number | null
-  block_read_bytes: number | null
-  block_write_bytes: number | null
-  pids: number | null
-}
+export type DockerStateCounts = Record<string, number>
 
 export interface DockerResourceTotals {
   containers_reporting: number
   cpu_percent_sum: number
   cpu_percent_avg: number
+  cpu_system_usage_sum: number
+  cpu_throttled_periods_sum: number
+  cpu_throttled_time_sum: number
   memory_usage_bytes_sum: number
   memory_limit_bytes_sum: number
   memory_percent_avg: number
+  memory_failcnt_sum: number
   network_rx_bytes_sum: number
   network_tx_bytes_sum: number
   block_read_bytes_sum: number
   block_write_bytes_sum: number
+  block_read_ops_sum: number
+  block_write_ops_sum: number
   pids_sum: number
 }
 
-export interface DockerImage {
-  repository: string
-  tag: string
-  digest: string
-  size: string
+export interface DockerSummary {
+  total_containers: number
+  state_counts: DockerStateCounts
+  running: number
+  stopped: number
+  paused: number
+  restarting: number
+  failures: number
+  last_event: string | null
+  resource_totals: DockerResourceTotals | null
+}
+
+export interface ContainerInventoryItem {
+  container_id: string
+  name: string
+  image: string
+  image_id: string
+  created_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  state: string
+  status: string
+  restart_count: number
+  labels: Record<string, string>
+  env: string[]
+  hostname: string | null
+  platform: string | null
+  runtime: string | null
+  pid: number | null
+}
+
+export interface DockerInventory {
+  refresh_interval_seconds: number
+  last_collected: string | null
+  containers: ContainerInventoryItem[]
+}
+
+export interface ContainerLifecycleEvent {
+  timestamp: string
+  container_id: string
+  event: string
+  actor: string
+  attributes: Record<string, string>
+}
+
+export interface DockerLifecycle {
+  window_seconds: number
+  last_collected: string | null
+  events: ContainerLifecycleEvent[]
+}
+
+export interface ContainerCpuSample {
+  container_id: string
+  cpu_total_usage: number
+  cpu_system_usage: number
+  cpu_online_cores: number
+  cpu_percent: number
+  cpu_user_time: number
+  cpu_kernel_time: number
+  cpu_throttled_periods: number
+  cpu_throttled_time: number
+}
+
+export interface DockerCpuMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerCpuSample[]
+}
+
+export interface ContainerMemorySample {
+  container_id: string
+  memory_usage: number
+  memory_limit: number
+  memory_percent: number
+  memory_cache: number
+  memory_rss: number
+  memory_swap: number
+  memory_failcnt: number
+  oom_events: number
+}
+
+export interface DockerMemoryMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerMemorySample[]
+}
+
+export interface ContainerDiskSample {
+  container_id: string
+  read_bytes: number
+  write_bytes: number
+  read_ops: number
+  write_ops: number
+}
+
+export interface DockerDiskMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerDiskSample[]
+}
+
+export interface ContainerNetworkInterfaceSample {
+  name: string
+  rx_bytes: number
+  tx_bytes: number
+  rx_packets: number
+  tx_packets: number
+  rx_errors: number
+  tx_errors: number
+  rx_dropped: number
+  tx_dropped: number
+}
+
+export interface ContainerNetworkSample {
+  container_id: string
+  interfaces: ContainerNetworkInterfaceSample[]
+}
+
+export interface DockerNetworkMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerNetworkSample[]
+}
+
+export interface ContainerVolumeUsage {
+  name: string
+  destination: string
+  source: string | null
+  total_bytes: number | null
+  used_bytes: number | null
+  inode_usage: number | null
+}
+
+export interface ContainerFilesystemSample {
+  container_id: string
+  writable_layer_size: number | null
+  total_volume_usage: number | null
+  inode_usage: number | null
+  volumes: ContainerVolumeUsage[]
+}
+
+export interface DockerFilesystemUsage {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerFilesystemSample[]
+}
+
+export interface ContainerProcessEntry {
+  pid: number
+  ppid: number
+  command: string
+  cpu_percent: number
+  memory_bytes: number
+  state: string
+}
+
+export interface ContainerProcessSample {
+  container_id: string
+  processes: ContainerProcessEntry[]
+  capped: boolean
+}
+
+export interface DockerProcessMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerProcessSample[]
+}
+
+export interface ContainerLogEntry {
+  timestamp: string
+  stream: 'stdout' | 'stderr'
+  message: string
+}
+
+export interface ContainerLogSample {
+  container_id: string
+  tail_limit: number
+  entries: ContainerLogEntry[]
+}
+
+export interface DockerLogMetrics {
+  last_collected: string | null
+  streaming: boolean
+  samples: ContainerLogSample[]
+}
+
+export interface ContainerHealthStatus {
+  container_id: string
+  health_status: string
+  failing_streak: number
+  last_check: string | null
+  last_output: string | null
+}
+
+export interface DockerHealthMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  statuses: ContainerHealthStatus[]
+}
+
+export interface ContainerPortMapping {
+  ip?: string | null
+  private_port: number
+  public_port?: number | null
+  protocol: string
+}
+
+export interface ContainerNetworkAttachment {
+  network_name: string
+  ip_address: string
+  gateway: string
+  aliases: string[]
+  ports: ContainerPortMapping[]
+}
+
+export interface ContainerTopologySample {
+  container_id: string
+  networks: ContainerNetworkAttachment[]
+}
+
+export interface DockerTopologyMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  samples: ContainerTopologySample[]
+}
+
+export interface ContainerSecurityProfile {
+  container_id: string
+  privileged: boolean
+  readonly_rootfs: boolean
+  user: string
+  capabilities: string[]
+  seccomp_profile: string
+  apparmor_profile: string
+  host_network: boolean
+  host_pid: boolean
+  docker_socket_mounted: boolean
+}
+
+export interface DockerSecurityMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  profiles: ContainerSecurityProfile[]
+}
+
+export interface DockerImageMetadata {
+  image_id: string
+  repo_tags: string[]
+  repo_digests: string[]
+  size: number
   created: string
+  architecture: string
+  os: string
+}
+
+export interface DockerImageMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  images: DockerImageMetadata[]
+}
+
+export interface DockerHostMetricsPayload {
+  hostname: string
+  cpu_percent: number
+  memory_total: number
+  memory_used: number
+  disk_total: number
+  disk_used: number
+  load_1: number
+  load_5: number
+  load_15: number
+  uptime: number
+}
+
+export interface DockerHostMetrics {
+  interval_seconds: number
+  last_collected: string | null
+  metrics: DockerHostMetricsPayload | null
+}
+
+export interface ContainerCgroupMapping {
+  container_id: string
+  cgroup_path: string | null
+}
+
+export interface DockerCgroupMappings {
+  last_collected: string | null
+  mappings: ContainerCgroupMapping[]
 }
 
 export interface DockerData {
-  total_containers: number
-  state_counts: Record<string, number>
-  running_containers: number
-  stopped_containers: number
-  paused_containers: number
-  restarting_containers: number
-  created_containers: number
-  dead_containers: number
-  removing_containers: number
-  unknown_containers: number
-  containers: DockerContainer[]
-  resource_totals: DockerResourceTotals | null
-  images?: DockerImage[]
+  generated_at: string
   collector_disabled?: boolean
+  summary: DockerSummary
+  inventory: DockerInventory
+  lifecycle: DockerLifecycle
+  metrics: {
+    cpu: DockerCpuMetrics
+    memory: DockerMemoryMetrics
+    disk: DockerDiskMetrics
+    network: DockerNetworkMetrics
+  }
+  filesystem: DockerFilesystemUsage
+  processes: DockerProcessMetrics
+  logs: DockerLogMetrics
+  health: DockerHealthMetrics
+  topology: DockerTopologyMetrics
+  security: DockerSecurityMetrics
+  images: DockerImageMetrics
+  host: DockerHostMetrics
+  cgroups: DockerCgroupMappings
 }
 
 // ─── Kubernetes Metrics ──────────────────────────────────────────────────────
