@@ -1,4 +1,4 @@
-import { Card, SectionHeader, GaugeBar, Tag, CollectorStatusBadge } from '@/components/common'
+import { Card, SectionHeader, GaugeBar, Tag } from '@/components/common'
 import { formatBytes } from '@/utils'
 import type { KubernetesData, KubeNode, KubePod, KubeDeployment, KubePVC, KubeEvent } from '@/types'
 
@@ -237,12 +237,12 @@ export function KubernetesMetricsCard({ data, loading }: { data: KubernetesData 
       {/* Workload Health */}
       {workloads && workloads.deployments && workloads.deployments.length > 0 && (
         <Card>
-          <SectionHeader title="Workloads">
+          <SectionHeader title="Workloads" action={
             <div className="flex gap-1.5">
               {workloads.daemonsets?.length > 0 && <Tag>{workloads.daemonsets.length} DS</Tag>}
               {workloads.statefulsets?.length > 0 && <Tag>{workloads.statefulsets.length} STS</Tag>}
             </div>
-          </SectionHeader>
+          } />
           <WorkloadSummary deployments={workloads.deployments} />
           {workloads.services && workloads.services.length > 0 && (
             <div className="mt-3 pt-3 border-t border-[--color-border]">

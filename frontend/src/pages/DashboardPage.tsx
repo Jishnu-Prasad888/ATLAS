@@ -1,26 +1,22 @@
 import {
-  useState, useMemo, useEffect, useRef,
+  useState, useMemo,
   memo, useCallback,
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
 import {
-  useFleetHealth, useAgents, useLiveMetrics, useLiveLogs,
+  useFleetHealth, useAgents, useLiveMetrics,
 } from '@/hooks'
 import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
-  AgentStatusBadge, SeverityBadge, Sparkline, LoadingState, EmptyState, Tag, Button,
+  AgentStatusBadge, Sparkline, LoadingState, EmptyState, Tag, Button,
 } from '@/components/common'
 import {
   formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId
 } from '@/utils'
-import type { Agent, CpuData, RamData, StorageData, NetworkData, KernelData, LogEntry } from '@/types'
-
-// ─── Config ───────────────────────────────────────────────────────────────────
-
-const LOG_BUFFER_MAX = 200 // hard cap on live log entries kept in memory
+import type { Agent, CpuData, RamData, StorageData, NetworkData, KernelData } from '@/types'
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -128,32 +124,6 @@ const CSS = `
   }
   .atlas-spin { animation: atlas-spin 0.6s linear; }
 `
-
-// ─── Log buffer hook ──────────────────────────────────────────────────────────
-// Caps the live log list at LOG_BUFFER_MAX entries so the DOM never grows unbounded.
-
-function useCappedLogs(liveLogs: LogEntry[]): LogEntry[] {
-  const bufferRef = useRef<LogEntry[]>([])
-  const prevLenRef = useRef(0)
-
-  return useMemo(() => {
-    // Only process genuinely new entries
-    if (liveLogs.length === prevLenRef.current) return bufferRef.current
-
-    const newEntries = liveLogs.length > prevLenRef.current
-      ? liveLogs.slice(prevLenRef.current)
-      : liveLogs // reset
-
-    prevLenRef.current = liveLogs.length
-
-    const combined = [...bufferRef.current, ...newEntries]
-    bufferRef.current = combined.length > LOG_BUFFER_MAX
-      ? combined.slice(combined.length - LOG_BUFFER_MAX)
-      : combined
-
-    return bufferRef.current
-  }, [liveLogs])
-}
 
 // ─── Arc gauge ────────────────────────────────────────────────────────────────
 // Signature element: a thin SVG arc that sweeps to the percentage.
@@ -300,22 +270,6 @@ const AgentRow = memo(function AgentRow({
   )
 })
 
-// ─── Log entry row ────────────────────────────────────────────────────────────
-
-const LogRow = memo(function LogRow({ log }: { log: LogEntry }) {
-  return (
-    <div className="log-entry">
-      <SeverityBadge severity={log.severity} />
-      <span style={{ fontSize: 11, color: 'var(--color-text-dim)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-        {new Date(log.timestamp).toLocaleTimeString()}
-      </span>
-      <span style={{ fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-        {log.message}
-      </span>
-    </div>
-  )
-})
-
 // ─── Info cell ────────────────────────────────────────────────────────────────
 
 function InfoCell({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
@@ -349,11 +303,11 @@ const MetricPanel = memo(function MetricPanel({
 }) {
   const { latest, history } = useLiveMetrics(agentId)
 
-  const cpu     = latest.cpu?.data     as CpuData     | undefined
-  const ram     = latest.ram?.data     as RamData     | undefined
-  const storage = latest.storage?.data as StorageData | undefined
-  const network = latest.network?.data as NetworkData | undefined
-  const kernel  = latest.kernel?.data  as KernelData  | undefined
+  const cpu     = latest.cpu?.data     as unknown as CpuData     | undefined
+  const ram     = latest.ram?.data     as unknown as RamData     | undefined
+  const storage = latest.storage?.data as unknown as StorageData | undefined
+  const network = latest.network?.data as unknown as NetworkData | undefined
+  const kernel  = latest.kernel?.data  as unknown as KernelData  | undefined
 
   const rootDisk         = storage?.filesystems.find((f) => f.mount_point === '/') ?? storage?.filesystems[0]
   const primaryInterface = network?.interfaces.find((i) => i.name !== 'lo') ?? network?.interfaces[0]
