@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{warn, debug};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::engines::identity::AgentIdentity;
@@ -160,14 +160,38 @@ impl LogSanitizer {
     fn new() -> Self {
         let mut patterns = Vec::new();
 
-        patterns.push((Regex::new(r"(?i)(password\s*[=:]\s*)\S+").unwrap(), "${1}[REDACTED]"));
-        patterns.push((Regex::new(r"(?i)(passwd\s*[=:]\s*)\S+").unwrap(), "${1}[REDACTED]"));
-        patterns.push((Regex::new(r"(?i)(secret\s*[=:]\s*)\S+").unwrap(), "${1}[REDACTED]"));
-        patterns.push((Regex::new(r"(?i)(api[_-]?key\s*[=:]\s*)\S+").unwrap(), "${1}[REDACTED]"));
-        patterns.push((Regex::new(r"(?i)(token\s*[=:]\s*)\S+").unwrap(), "${1}[REDACTED]"));
-        patterns.push((Regex::new(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----").unwrap(), "[REDACTED PRIVATE KEY]"));
-        patterns.push((Regex::new(r"(?i)(jwt\s*[=:]\s*)\S+").unwrap(), "${1}[REDACTED]"));
-        patterns.push((Regex::new(r"(?i)(authorization:\s*Bearer\s+)\S+").unwrap(), "${1}[REDACTED]"));
+        patterns.push((
+            Regex::new(r"(?i)(password\s*[=:]\s*)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
+        patterns.push((
+            Regex::new(r"(?i)(passwd\s*[=:]\s*)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
+        patterns.push((
+            Regex::new(r"(?i)(secret\s*[=:]\s*)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
+        patterns.push((
+            Regex::new(r"(?i)(api[_-]?key\s*[=:]\s*)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
+        patterns.push((
+            Regex::new(r"(?i)(token\s*[=:]\s*)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
+        patterns.push((
+            Regex::new(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----").unwrap(),
+            "[REDACTED PRIVATE KEY]",
+        ));
+        patterns.push((
+            Regex::new(r"(?i)(jwt\s*[=:]\s*)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
+        patterns.push((
+            Regex::new(r"(?i)(authorization:\s*Bearer\s+)\S+").unwrap(),
+            "${1}[REDACTED]",
+        ));
 
         Self { patterns }
     }
@@ -190,7 +214,10 @@ impl LogSanitizer {
     fn sanitize_entry(&self, entry: &mut LogEntry) {
         let sanitized = self.sanitize(&entry.message);
         if sanitized.len() != entry.message.len() {
-            debug!("Log message sanitized (source={}, severity={})", entry.source, entry.severity);
+            debug!(
+                "Log message sanitized (source={}, severity={})",
+                entry.source, entry.severity
+            );
         }
         entry.message = sanitized;
     }
@@ -208,11 +235,7 @@ pub struct LogEngine {
 }
 
 impl LogEngine {
-    pub fn new(
-        identity: &AgentIdentity,
-        queue: QueueEngine,
-        storage: StorageManager,
-    ) -> Self {
+    pub fn new(identity: &AgentIdentity, queue: QueueEngine, storage: StorageManager) -> Self {
         Self {
             agent_id: identity.agent_id.clone(),
             hostname: identity.hostname.clone(),
@@ -244,71 +267,120 @@ impl LogEngine {
             }
         }
 
-        self.storage
-            .store_log_entry(&entry)
-            .await
-            .map_err(|e| {
-                warn!("Failed to persist log entry: {}", e);
-                e
-            })?;
+        self.storage.store_log_entry(&entry).await.map_err(|e| {
+            warn!("Failed to persist log entry: {}", e);
+            e
+        })?;
 
         let json_bytes = entry.to_json_bytes();
         if !json_bytes.is_empty() {
-            self.queue
-                .enqueue(json_bytes, "logs")
-                .await
-                .map_err(|e| {
-                    warn!("Failed to enqueue log entry: {}", e);
-                    e
-                })?;
+            self.queue.enqueue(json_bytes, "logs").await.map_err(|e| {
+                warn!("Failed to enqueue log entry: {}", e);
+                e
+            })?;
         }
 
         Ok(())
     }
 
     pub async fn trace(&self, source: &str, message: &str) -> Result<()> {
-        let entry = LogEntry::new(&self.agent_id, &self.hostname, Severity::Trace.as_str(), source, message);
+        let entry = LogEntry::new(
+            &self.agent_id,
+            &self.hostname,
+            Severity::Trace.as_str(),
+            source,
+            message,
+        );
         self.log(entry).await
     }
 
     pub async fn debug(&self, source: &str, message: &str) -> Result<()> {
-        let entry = LogEntry::new(&self.agent_id, &self.hostname, Severity::Debug.as_str(), source, message);
+        let entry = LogEntry::new(
+            &self.agent_id,
+            &self.hostname,
+            Severity::Debug.as_str(),
+            source,
+            message,
+        );
         self.log(entry).await
     }
 
     pub async fn info(&self, source: &str, message: &str) -> Result<()> {
-        let entry = LogEntry::new(&self.agent_id, &self.hostname, Severity::Info.as_str(), source, message);
+        let entry = LogEntry::new(
+            &self.agent_id,
+            &self.hostname,
+            Severity::Info.as_str(),
+            source,
+            message,
+        );
         self.log(entry).await
     }
 
     pub async fn warn(&self, source: &str, message: &str) -> Result<()> {
-        let entry = LogEntry::new(&self.agent_id, &self.hostname, Severity::Warning.as_str(), source, message);
+        let entry = LogEntry::new(
+            &self.agent_id,
+            &self.hostname,
+            Severity::Warning.as_str(),
+            source,
+            message,
+        );
         self.log(entry).await
     }
 
     pub async fn error(&self, source: &str, message: &str) -> Result<()> {
-        let entry = LogEntry::new(&self.agent_id, &self.hostname, Severity::Error.as_str(), source, message);
+        let entry = LogEntry::new(
+            &self.agent_id,
+            &self.hostname,
+            Severity::Error.as_str(),
+            source,
+            message,
+        );
         self.log(entry).await
     }
 
     pub async fn critical(&self, source: &str, message: &str) -> Result<()> {
-        let entry = LogEntry::new(&self.agent_id, &self.hostname, Severity::Critical.as_str(), source, message);
+        let entry = LogEntry::new(
+            &self.agent_id,
+            &self.hostname,
+            Severity::Critical.as_str(),
+            source,
+            message,
+        );
         self.log(entry).await
     }
 
-    pub async fn log_execution(&self, source: &str, severity: &str, message: &str, execution_id: &str, namespace: &str) -> Result<()> {
+    pub async fn log_execution(
+        &self,
+        source: &str,
+        severity: &str,
+        message: &str,
+        execution_id: &str,
+        namespace: &str,
+    ) -> Result<()> {
         let entry = LogEntry::new(&self.agent_id, &self.hostname, severity, source, message)
             .with_execution(execution_id, namespace);
         self.log(entry).await
     }
 
-    pub async fn log_event(&self, source: &str, severity: &str, event_type: &str, message: &str) -> Result<()> {
+    pub async fn log_event(
+        &self,
+        source: &str,
+        severity: &str,
+        event_type: &str,
+        message: &str,
+    ) -> Result<()> {
         let entry = LogEntry::new(&self.agent_id, &self.hostname, severity, source, message)
             .with_event_type(event_type);
         self.log(entry).await
     }
 
-    pub async fn log_with_tags(&self, source: &str, severity: &str, message: &str, tags: &[&str]) -> Result<()> {
+    pub async fn log_with_tags(
+        &self,
+        source: &str,
+        severity: &str,
+        message: &str,
+        tags: &[&str],
+    ) -> Result<()> {
         let entry = LogEntry::new(&self.agent_id, &self.hostname, severity, source, message)
             .with_tags(tags);
         self.log(entry).await
@@ -343,7 +415,13 @@ mod tests {
 
     #[test]
     fn log_entry_creation() {
-        let entry = LogEntry::new("agent-1", "host-1", "Info", "execution_engine", "Test message");
+        let entry = LogEntry::new(
+            "agent-1",
+            "host-1",
+            "Info",
+            "execution_engine",
+            "Test message",
+        );
         assert_eq!(entry.agent_id, "agent-1");
         assert_eq!(entry.hostname, "host-1");
         assert_eq!(entry.severity, "Info");
@@ -371,9 +449,15 @@ mod tests {
 
     #[test]
     fn log_entry_roundtrips_through_json() {
-        let original = LogEntry::new("agent-1", "host-1", "Info", "execution_engine", "Test message")
-            .with_execution("exec-123", "restart_nginx")
-            .with_tags(&["production"]);
+        let original = LogEntry::new(
+            "agent-1",
+            "host-1",
+            "Info",
+            "execution_engine",
+            "Test message",
+        )
+        .with_execution("exec-123", "restart_nginx")
+        .with_tags(&["production"]);
         let json = original.to_json_string();
         let parsed: LogEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.log_id, original.log_id);

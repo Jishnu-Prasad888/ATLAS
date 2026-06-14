@@ -49,6 +49,15 @@ const Icon = {
       <path d="M1 8h2.5L5 5l2.5 6L9 7l1.5 2H15" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   ),
+  Operations: () => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="1.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.25"/>
+      <rect x="9.5" y="1.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.25"/>
+      <rect x="1.5" y="9.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.25"/>
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.25"/>
+      <path d="M12 7v2M11 8h2" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
+    </svg>
+  ),
   Audit: () => (
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
       <path d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.25"/>
@@ -98,11 +107,12 @@ const Icon = {
 // ─── Nav structure ────────────────────────────────────────────────────────────
 
 const CORE_NAV: NavItem[] = [
-  { path: '/',        label: 'Dashboard', icon: <Icon.Dashboard /> },
-  { path: '/agents',  label: 'Agents',    icon: <Icon.Agents />   },
-  { path: '/metrics', label: 'Metrics',   icon: <Icon.Metrics />  },
-  { path: '/logs',    label: 'Logs',      icon: <Icon.Logs />     },
-  { path: '/health',  label: 'Health',    icon: <Icon.Health />   },
+  { path: '/',          label: 'Dashboard',  icon: <Icon.Dashboard /> },
+  { path: '/agents',    label: 'Agents',     icon: <Icon.Agents />   },
+  { path: '/operations', label: 'Operations', icon: <Icon.Operations /> },
+  { path: '/metrics',   label: 'Metrics',    icon: <Icon.Metrics />  },
+  { path: '/logs',      label: 'Logs',       icon: <Icon.Logs />     },
+  { path: '/health',    label: 'Health',     icon: <Icon.Health />   },
 ]
 
 const ADMIN_NAV: NavItem[] = [

@@ -15,7 +15,7 @@ use crate::engines::queue::QueueEngine;
 use crate::storage::StorageManager;
 
 pub struct EnqueueAdapter {
-    queue:   QueueEngine,
+    queue: QueueEngine,
     storage: StorageManager,
 }
 
@@ -29,14 +29,18 @@ impl EnqueueAdapter {
 impl MetricsEnqueuer for EnqueueAdapter {
     async fn enqueue(&self, payload: &TelemetryPayload) -> Result<()> {
         // Always persist locally first (offline-first guarantee)
-        self.storage.store_metric(
-            &payload.agent_id,
-            &payload.metric_type,
-            &serde_json::to_string(&payload.data).unwrap_or_default(),
-        ).await?;
+        self.storage
+            .store_metric(
+                &payload.agent_id,
+                &payload.metric_type,
+                &serde_json::to_string(&payload.data).unwrap_or_default(),
+            )
+            .await?;
 
         // Then queue for transmission
-        self.queue.enqueue(payload.to_json_bytes(), "metrics").await?;
+        self.queue
+            .enqueue(payload.to_json_bytes(), "metrics")
+            .await?;
         Ok(())
     }
 }

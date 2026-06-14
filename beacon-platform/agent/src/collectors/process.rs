@@ -3,14 +3,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use std::{fs, sync::Mutex};
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
 use super::trait_collector::Collector;
 
 pub struct ProcessCollector {
-    sys:          Mutex<System>,
-    boot_id:      String,
+    sys: Mutex<System>,
+    boot_id: String,
     max_processes: usize,
 }
 
@@ -28,7 +28,9 @@ impl ProcessCollector {
 
 #[async_trait]
 impl Collector for ProcessCollector {
-    fn name(&self) -> &'static str { "process" }
+    fn name(&self) -> &'static str {
+        "process"
+    }
 
     async fn collect(&self) -> Result<Value> {
         let mut sys = self.sys.lock().unwrap();
@@ -40,26 +42,30 @@ impl Collector for ProcessCollector {
 pub fn collect_from(sys: &System, boot_id: &str, max_processes: usize) -> Value {
     let mut procs: Vec<_> = sys.processes().values().collect();
     procs.sort_by(|a, b| {
-        b.cpu_usage().partial_cmp(&a.cpu_usage())
-         .unwrap_or(std::cmp::Ordering::Equal)
+        b.cpu_usage()
+            .partial_cmp(&a.cpu_usage())
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     procs.truncate(max_processes);
 
-    let process_list: Vec<Value> = procs.iter().map(|p| {
-        json!({
-            "pid":         p.pid().as_u32(),
-            "boot_id":     boot_id,
-            "start_time":  p.start_time(),
-            "name":        p.name(),
-            "exe":         p.exe().map(|e| e.display().to_string()),
-            "cpu_pct":     p.cpu_usage(),
-            "mem_bytes":   p.memory(),
-            "virtual_mem": p.virtual_memory(),
-            "status":      format!("{:?}", p.status()),
-            "parent_pid":  p.parent().map(|pp| pp.as_u32()),
-            "threads":     p.tasks().map(|t| t.len()),
+    let process_list: Vec<Value> = procs
+        .iter()
+        .map(|p| {
+            json!({
+                "pid":         p.pid().as_u32(),
+                "boot_id":     boot_id,
+                "start_time":  p.start_time(),
+                "name":        p.name(),
+                "exe":         p.exe().map(|e| e.display().to_string()),
+                "cpu_pct":     p.cpu_usage(),
+                "mem_bytes":   p.memory(),
+                "virtual_mem": p.virtual_memory(),
+                "status":      format!("{:?}", p.status()),
+                "parent_pid":  p.parent().map(|pp| pp.as_u32()),
+                "threads":     p.tasks().map(|t| t.len()),
+            })
         })
-    }).collect();
+        .collect();
 
     let total = sys.processes().len();
     json!({
@@ -89,10 +95,12 @@ mod tests {
         sys.refresh_processes();
 
         let total = sys.processes().len();
-        if total < 2 { return; } // skip if no processes on this host
+        if total < 2 {
+            return;
+        } // skip if no processes on this host
 
         let cap = 1;
-        let v   = collect_from(&sys, "test-boot-id", cap);
+        let v = collect_from(&sys, "test-boot-id", cap);
         assert_eq!(v["collected"].as_u64().unwrap(), cap as u64);
         assert_eq!(v["capped"].as_bool().unwrap(), total > cap);
     }
@@ -104,7 +112,7 @@ mod tests {
         );
         sys.refresh_processes();
         let total = sys.processes().len();
-        let v     = collect_from(&sys, "boot", usize::MAX);
+        let v = collect_from(&sys, "boot", usize::MAX);
         assert_eq!(v["total_processes"].as_u64().unwrap(), total as u64);
         assert_eq!(v["capped"].as_bool().unwrap(), false);
     }

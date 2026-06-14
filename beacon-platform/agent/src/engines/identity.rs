@@ -3,7 +3,7 @@
 // Persists in config.db so it survives reboots.
 
 use anyhow::Result;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::process::Command;
 use tracing::info;
@@ -13,9 +13,9 @@ use crate::storage::StorageManager;
 #[derive(Debug, Clone)]
 pub struct AgentIdentity {
     pub agent_id: String,
-    pub hostname:  String,
-    pub os:        String,
-    pub arch:      String,
+    pub hostname: String,
+    pub os: String,
+    pub arch: String,
 }
 
 pub struct IdentityEngine;
@@ -24,26 +24,32 @@ impl IdentityEngine {
     pub async fn new(storage: &StorageManager) -> Result<AgentIdentity> {
         // Check if identity is already persisted
         if let Some((agent_id, hostname)) = storage.get_agent_identity().await? {
-            info!("Loaded existing agent identity: {}", &agent_id[..agent_id.len().min(20)]);
+            info!(
+                "Loaded existing agent identity: {}",
+                &agent_id[..agent_id.len().min(20)]
+            );
             return Ok(AgentIdentity {
                 agent_id,
                 hostname,
-                os:   "linux".to_string(),
+                os: "linux".to_string(),
                 arch: std::env::consts::ARCH.to_string(),
             });
         }
 
         // Derive new identity from hardware fingerprints
         let agent_id = Self::derive_agent_id()?;
-        let hostname  = Self::get_hostname();
+        let hostname = Self::get_hostname();
 
         storage.store_agent_identity(&agent_id, &hostname).await?;
-        info!("Generated new agent identity: {}", &agent_id[..agent_id.len().min(20)]);
+        info!(
+            "Generated new agent identity: {}",
+            &agent_id[..agent_id.len().min(20)]
+        );
 
         Ok(AgentIdentity {
             agent_id,
             hostname,
-            os:   "linux".to_string(),
+            os: "linux".to_string(),
             arch: std::env::consts::ARCH.to_string(),
         })
     }
@@ -54,7 +60,7 @@ impl IdentityEngine {
         // /etc/machine-id — stable across reboots
         match fs::read_to_string("/etc/machine-id") {
             Ok(mid) => hasher.update(mid.trim().as_bytes()),
-            Err(_)  => hasher.update(b"no-machine-id"),
+            Err(_) => hasher.update(b"no-machine-id"),
         }
 
         // Hostname

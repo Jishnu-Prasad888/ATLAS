@@ -193,26 +193,26 @@ function ConfigKeyRow({ config, onDelete }: { config: ServerConfig; onDelete: (k
 
   return (
     <div className="border border-[--color-border] rounded">
-      <button
-        className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-[--color-surface-2] transition-colors"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <div className="min-w-0">
-          <span className="text-xs font-mono text-[--color-text] font-medium">{config.key}</span>
-          {config.encrypted && (
-            <span className="ml-2 text-xs font-mono text-[--color-text-dim]">encrypted</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs font-mono text-[--color-text-dim]">{config.updated_by}</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(config.key) }}
-            className="text-xs font-mono text-red-500 hover:text-red-400 transition-colors"
-          >
-            delete
-          </button>
-        </div>
-      </button>
+      <div className="flex items-stretch">
+        <button
+          className="flex-1 text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-[--color-surface-2] transition-colors"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <div className="min-w-0">
+            <span className="text-xs font-mono text-[--color-text] font-medium">{config.key}</span>
+            {config.encrypted && (
+              <span className="ml-2 text-xs font-mono text-[--color-text-dim]">encrypted</span>
+            )}
+          </div>
+          <span className="text-xs font-mono text-[--color-text-dim] shrink-0">{config.updated_by}</span>
+        </button>
+        <span
+          onClick={(e) => { e.stopPropagation(); onDelete(config.key) }}
+          className="flex items-center px-2.5 text-xs font-mono text-red-500 hover:text-red-400 hover:bg-red-950/30 transition-colors border-l border-[--color-border] cursor-pointer"
+        >
+          delete
+        </span>
+      </div>
       {expanded && (
         <div className="px-3 py-2 border-t border-[--color-border] bg-[--color-surface-2]">
           <pre className="text-xs font-mono text-[--color-text-muted] whitespace-pre-wrap break-all">

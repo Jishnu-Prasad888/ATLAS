@@ -3,8 +3,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use sysinfo::{MemoryRefreshKind, RefreshKind, System};
 use std::{collections::HashMap, fs};
+use sysinfo::{MemoryRefreshKind, RefreshKind, System};
 
 use super::trait_collector::Collector;
 
@@ -24,7 +24,9 @@ impl RamCollector {
 
 #[async_trait]
 impl Collector for RamCollector {
-    fn name(&self) -> &'static str { "ram" }
+    fn name(&self) -> &'static str {
+        "ram"
+    }
 
     async fn collect(&self) -> Result<Value> {
         let mut sys = self.sys.lock().unwrap();
@@ -36,15 +38,23 @@ impl Collector for RamCollector {
 /// Pure function — pass any `System` snapshot for unit testing.
 pub fn collect_from(sys: &System) -> Value {
     let total = sys.total_memory();
-    let used  = sys.used_memory();
-    let free  = sys.free_memory();
+    let used = sys.used_memory();
+    let free = sys.free_memory();
     let avail = sys.available_memory();
 
     let swap_total = sys.total_swap();
-    let swap_used  = sys.used_swap();
+    let swap_used = sys.used_swap();
 
-    let usage_pct = if total > 0 { used as f64 / total as f64 * 100.0 } else { 0.0 };
-    let swap_pct  = if swap_total > 0 { swap_used as f64 / swap_total as f64 * 100.0 } else { 0.0 };
+    let usage_pct = if total > 0 {
+        used as f64 / total as f64 * 100.0
+    } else {
+        0.0
+    };
+    let swap_pct = if swap_total > 0 {
+        swap_used as f64 / swap_total as f64 * 100.0
+    } else {
+        0.0
+    };
 
     let meminfo = read_meminfo();
     let kb = |k: &str| meminfo.get(k).copied().unwrap_or(0) * 1024;
@@ -79,8 +89,11 @@ fn read_meminfo() -> HashMap<String, u64> {
     if let Ok(content) = fs::read_to_string("/proc/meminfo") {
         for line in content.lines() {
             if let Some((key, rest)) = line.split_once(':') {
-                let val = rest.split_whitespace().next()
-                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                let val = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
                 map.insert(key.trim().to_string(), val);
             }
         }
@@ -110,7 +123,7 @@ mod tests {
             RefreshKind::new().with_memory(MemoryRefreshKind::everything()),
         );
         sys.refresh_memory();
-        let v   = collect_from(&sys);
+        let v = collect_from(&sys);
         let pct = v["usage_pct"].as_f64().unwrap();
         assert!((0.0..=100.0).contains(&pct));
     }

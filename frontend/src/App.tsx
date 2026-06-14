@@ -9,6 +9,7 @@ import { RecoverPage } from '@/pages/RecoverPage'
 
 const DashboardPage = lazy(() => import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const AgentsPage = lazy(() => import('@/pages/AgentsPage').then((m) => ({ default: m.AgentsPage })))
+const OperationsPage = lazy(() => import('@/pages/OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const MetricsPage = lazy(() => import('@/pages/MetricsPage').then((m) => ({ default: m.MetricsPage })))
 const LogsPage = lazy(() => import('@/pages/LogsPage').then((m) => ({ default: m.LogsPage })))
 const HealthPage = lazy(() => import('@/pages/HealthPage').then((m) => ({ default: m.HealthPage })))
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="/recover" element={<RedirectIfAuthenticated><RecoverPage /></RedirectIfAuthenticated>} />
           <Route path="/" element={<AuthedPage><DashboardPage /></AuthedPage>} />
           <Route path="/agents" element={<AuthedPage><AgentsPage /></AuthedPage>} />
+          <Route path="/operations" element={<AuthedPage><OperationsPage /></AuthedPage>} />
           <Route path="/metrics" element={<AuthedPage><MetricsPage /></AuthedPage>} />
           <Route path="/logs" element={<AuthedPage><LogsPage /></AuthedPage>} />
           <Route path="/health" element={<AuthedPage><HealthPage /></AuthedPage>} />

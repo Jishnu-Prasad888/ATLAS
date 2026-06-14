@@ -2,7 +2,7 @@
 // TLS 1.3 WebSocket. Auto-reconnects with exponential backoff.
 // Agent protocol: register → heartbeat loop + telemetry flush.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -10,42 +10,47 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
-use tokio_tungstenite::{
-    connect_async_tls_with_config,
-    tungstenite::Message,
-    Connector,
-};
-use tracing::{info, warn, error, debug};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
+use tracing::{debug, error, info, warn};
 
-use crate::config::AgentConfig;
-use crate::engines::identity::AgentIdentity;
-use crate::engines::queue::QueueEngine;
+use crate::config::{AgentConfig, CollectorFlags};
 use crate::engines::encryption::EncryptionEngine;
+use crate::engines::identity::AgentIdentity;
 use crate::engines::logging::LogEngine;
+use crate::engines::queue::QueueEngine;
 
-const HEARTBEAT_INTERVAL:   Duration = Duration::from_secs(15);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
-const RECONNECT_MAX_DELAY:  Duration = Duration::from_secs(60);
-const FLUSH_BATCH_SIZE:     usize    = 50;
+const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
+const FLUSH_BATCH_SIZE: usize = 50;
 
 #[derive(Clone)]
 pub struct WebSocketTransport {
-    config:     AgentConfig,
-    identity:   AgentIdentity,
-    queue:      QueueEngine,
+    config: AgentConfig,
+    identity: AgentIdentity,
+    queue: QueueEngine,
     encryption: EncryptionEngine,
     log_engine: LogEngine,
+    collector_flags: CollectorFlags,
 }
 
 impl WebSocketTransport {
     pub fn new(
-        config:     AgentConfig,
-        identity:   AgentIdentity,
-        queue:      QueueEngine,
+        config: AgentConfig,
+        identity: AgentIdentity,
+        queue: QueueEngine,
         encryption: EncryptionEngine,
         log_engine: LogEngine,
+        collector_flags: CollectorFlags,
     ) -> Self {
-        Self { config, identity, queue, encryption, log_engine }
+        Self {
+            config,
+            identity,
+            queue,
+            encryption,
+            log_engine,
+            collector_flags,
+        }
     }
 
     /// Run forever — reconnects automatically with exponential backoff.
@@ -61,11 +66,18 @@ impl WebSocketTransport {
                     first_connect = false;
                 }
                 Err(e) => {
-                    warn!("Transport error: {e}. Reconnecting in {:.1}s...", backoff.as_secs_f32());
+                    warn!(
+                        "Transport error: {e}. Reconnecting in {:.1}s...",
+                        backoff.as_secs_f32()
+                    );
                     if !first_connect {
-                        let _ = self.log_engine.warn("queue_engine", &format!(
-                            "Network unavailable, buffering messages"
-                        )).await;
+                        let _ = self
+                            .log_engine
+                            .warn(
+                                "queue_engine",
+                                &format!("Network unavailable, buffering messages"),
+                            )
+                            .await;
                     }
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(RECONNECT_MAX_DELAY);
@@ -90,16 +102,28 @@ impl WebSocketTransport {
         info!("WebSocket connected to {}", self.config.server_addr);
 
         // Log connection recovery and replay count
-        let queue_count = self.queue.status().await
+        let queue_count = self
+            .queue
+            .status()
+            .await
             .map(|s| s.pending + s.failed)
             .unwrap_or(0);
         if queue_count > 0 {
-            let _ = self.log_engine.info("queue_engine", &format!(
-                "Recovered connection, replaying {} queued messages",
-                queue_count,
-            )).await;
+            let _ = self
+                .log_engine
+                .info(
+                    "queue_engine",
+                    &format!(
+                        "Recovered connection, replaying {} queued messages",
+                        queue_count,
+                    ),
+                )
+                .await;
         } else {
-            let _ = self.log_engine.info("service_engine", "Connection established with server").await;
+            let _ = self
+                .log_engine
+                .info("service_engine", "Connection established with server")
+                .await;
         }
 
         let (mut writer, mut reader) = ws_stream.split();
@@ -117,22 +141,36 @@ impl WebSocketTransport {
                 "metadata":     {},
             }
         });
-        writer.send(Message::Text(register_msg.to_string())).await
+        writer
+            .send(Message::Text(register_msg.to_string()))
+            .await
             .map_err(|e| anyhow!("Registration send failed: {e}"))?;
-        info!("Registration sent for agent {}", &self.identity.agent_id[..16.min(self.identity.agent_id.len())]);
+        info!(
+            "Registration sent for agent {}",
+            &self.identity.agent_id[..16.min(self.identity.agent_id.len())]
+        );
 
-        let queue    = self.queue.clone();
+        // Send config request to sync collector flags from server
+        let config_req = json!({
+            "type": "config_request",
+            "agent_id": self.identity.agent_id,
+        });
+        let _ = writer.send(Message::Text(config_req.to_string())).await;
+        debug!("Config request sent");
+
+        let queue = self.queue.clone();
         let identity = self.identity.clone();
-        let enc      = self.encryption.clone();
+        let enc = self.encryption.clone();
+        let flags = self.collector_flags.clone();
 
         // Wrap writer in Arc<Mutex> so heartbeat and flush loops can share it
         let writer = Arc::new(Mutex::new(writer));
 
         // Run all loops concurrently; abort all on first error
         tokio::select! {
-            r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())        => r,
-            r = Self::flush_loop(Arc::clone(&writer), queue, enc, identity.clone()) => r,
-            r = Self::read_loop(&mut reader)                                        => r,
+            r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())            => r,
+            r = Self::flush_loop(Arc::clone(&writer), queue, enc, identity.clone())     => r,
+            r = Self::read_loop(&mut reader, flags)                                     => r,
         }
     }
 
@@ -147,16 +185,20 @@ impl WebSocketTransport {
                 "agent_id": identity.agent_id,
                 "status":   "ONLINE",
             });
-            writer.lock().await.send(Message::Text(hb.to_string())).await
+            writer
+                .lock()
+                .await
+                .send(Message::Text(hb.to_string()))
+                .await
                 .map_err(|e| anyhow!("Heartbeat send failed: {e}"))?;
             debug!("Heartbeat sent");
         }
     }
 
     async fn flush_loop<S>(
-        writer:   Arc<Mutex<S>>,
-        queue:    QueueEngine,
-        enc:      EncryptionEngine,
+        writer: Arc<Mutex<S>>,
+        queue: QueueEngine,
+        enc: EncryptionEngine,
         identity: AgentIdentity,
     ) -> Result<()>
     where
@@ -172,16 +214,22 @@ impl WebSocketTransport {
             for msg in &batch {
                 // Decrypt locally-encrypted payload before transmitting
                 let plaintext = if enc.is_enabled() {
-                    let ep = crate::engines::encryption::EncryptedPayload { data: msg.payload.clone() };
-                    enc.decrypt(&ep).await.unwrap_or_else(|_| msg.payload.clone())
+                    let ep = crate::engines::encryption::EncryptedPayload {
+                        data: msg.payload.clone(),
+                    };
+                    enc.decrypt(&ep)
+                        .await
+                        .unwrap_or_else(|_| msg.payload.clone())
                 } else {
                     msg.payload.clone()
                 };
 
                 let payload_json: serde_json::Value = serde_json::from_slice(&plaintext)
-                    .unwrap_or_else(|_| json!({
-                        "raw": base64::engine::general_purpose::STANDARD.encode(&plaintext)
-                    }));
+                    .unwrap_or_else(|_| {
+                        json!({
+                            "raw": base64::engine::general_purpose::STANDARD.encode(&plaintext)
+                        })
+                    });
 
                 let envelope = json!({
                     "type":     msg.msg_type,
@@ -189,7 +237,12 @@ impl WebSocketTransport {
                     "payload":  payload_json,
                 });
 
-                match writer.lock().await.send(Message::Text(envelope.to_string())).await {
+                match writer
+                    .lock()
+                    .await
+                    .send(Message::Text(envelope.to_string()))
+                    .await
+                {
                     Ok(_) => {
                         queue.ack(msg.id).await?;
                         debug!("Flushed message {}", msg.message_id);
@@ -206,7 +259,7 @@ impl WebSocketTransport {
         }
     }
 
-    async fn read_loop<S>(reader: &mut S) -> Result<()>
+    async fn read_loop<S>(reader: &mut S, collector_flags: CollectorFlags) -> Result<()>
     where
         S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
     {
@@ -215,17 +268,20 @@ impl WebSocketTransport {
                 Ok(Message::Text(text)) => {
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
                         match parsed.get("type").and_then(|t| t.as_str()) {
-                            Some("registered")    => info!("Agent registration confirmed by server"),
+                            Some("registered") => info!("Agent registration confirmed by server"),
                             Some("heartbeat_ack") => debug!("Heartbeat acknowledged"),
-                            Some("config_update") => info!("Received config update from server"),
-                            _                     => debug!("Server message: {}", &text[..text.len().min(120)]),
+                            Some("config_update") => {
+                                info!("Received config update from server");
+                                if let Some(payload) = parsed.get("payload") {
+                                    Self::apply_config_update(&collector_flags, payload).await;
+                                }
+                            }
+                            _ => debug!("Server message: {}", &text[..text.len().min(120)]),
                         }
                     }
                 }
                 Ok(Message::Close(frame)) => {
                     info!("Server closed connection: {:?}", frame);
-                    // read_loop is static; we return Ok and the outer run() reconnects.
-                    // The queue_engine buffering log will be emitted on reconnect attempt.
                     return Ok(());
                 }
                 Ok(Message::Ping(_)) => debug!("Received ping"),
@@ -234,6 +290,23 @@ impl WebSocketTransport {
             }
         }
         Ok(())
+    }
+
+    /// Apply a config_update payload to the shared collector flags.
+    /// The payload is expected to contain boolean fields like "docker_enabled".
+    async fn apply_config_update(flags: &CollectorFlags, payload: &serde_json::Value) {
+        let mut map = flags.write().await;
+        // Map server field names (snake_case with _enabled) to collector keys
+        let mappings = [
+            ("docker_enabled", "docker"),
+            ("kubernetes_enabled", "kubernetes"),
+        ];
+        for (field, key) in &mappings {
+            if let Some(val) = payload.get(*field).and_then(|v| v.as_bool()) {
+                info!("Config update: {} = {}", key, val);
+                map.insert(key.to_string(), val);
+            }
+        }
     }
 
     fn build_tls_connector(&self) -> Result<Connector> {
@@ -246,7 +319,9 @@ impl WebSocketTransport {
             let native_certs = rustls_native_certs::load_native_certs()
                 .map_err(|e| anyhow!("Failed to load native certs: {e}"))?;
             for cert in native_certs {
-                root_store.add(cert).map_err(|e| anyhow!("Invalid cert: {e}"))?;
+                root_store
+                    .add(cert)
+                    .map_err(|e| anyhow!("Invalid cert: {e}"))?;
             }
         } else {
             warn!("TLS certificate verification DISABLED — not for production!");

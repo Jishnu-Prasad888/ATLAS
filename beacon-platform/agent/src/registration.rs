@@ -24,21 +24,21 @@ use crate::storage::StorageManager;
 
 #[derive(Serialize)]
 struct RegisterRequest<'a> {
-    agent_id:     &'a str,
-    hostname:     &'a str,
-    os:           &'a str,
+    agent_id: &'a str,
+    hostname: &'a str,
+    os: &'a str,
     architecture: &'a str,
-    version:      &'static str,
-    tags:         Vec<String>,
-    metadata:     serde_json::Value,
-    secret:       &'a str,
+    version: &'static str,
+    tags: Vec<String>,
+    metadata: serde_json::Value,
+    secret: &'a str,
 }
 
 /// Minimal fields we care about from the register response.
 #[derive(Deserialize, Debug)]
 struct RegisterResponse {
     agent_id: String,
-    status:   Option<String>,
+    status: Option<String>,
 }
 
 // ─── Registration state stored locally ────────────────────────────────────────
@@ -56,17 +56,17 @@ pub enum RegistrationStatus {
 impl RegistrationStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            RegistrationStatus::Registered    => "registered",
+            RegistrationStatus::Registered => "registered",
             RegistrationStatus::SecretMismatch => "secret_mismatch",
-            RegistrationStatus::Unregistered  => "unregistered",
+            RegistrationStatus::Unregistered => "unregistered",
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s {
-            "registered"     => RegistrationStatus::Registered,
+            "registered" => RegistrationStatus::Registered,
             "secret_mismatch" => RegistrationStatus::SecretMismatch,
-            _                => RegistrationStatus::Unregistered,
+            _ => RegistrationStatus::Unregistered,
         }
     }
 }
@@ -80,9 +80,9 @@ impl RegistrationStatus {
 /// Always persists the final status to local storage so `is_registered()` is
 /// consistent with the last server response.
 pub async fn register(
-    config:   &AgentConfig,
+    config: &AgentConfig,
     identity: &AgentIdentity,
-    storage:  &StorageManager,
+    storage: &StorageManager,
     log_engine: &LogEngine,
 ) -> Result<()> {
     // ── Validate secret is present ────────────────────────────────────────────
@@ -99,14 +99,14 @@ pub async fn register(
 
     // ── Build and send request ────────────────────────────────────────────────
     let body = RegisterRequest {
-        agent_id:     &identity.agent_id,
-        hostname:     &identity.hostname,
-        os:           &identity.os,
+        agent_id: &identity.agent_id,
+        hostname: &identity.hostname,
+        os: &identity.os,
         architecture: &identity.arch,
-        version:      "1.0.0",
-        tags:         vec![],
-        metadata:     serde_json::json!({}),
-        secret:       &secret,
+        version: "1.0.0",
+        tags: vec![],
+        metadata: serde_json::json!({}),
+        secret: &secret,
     };
 
     let client = build_http_client(config)?;
@@ -128,18 +128,25 @@ pub async fn register(
 
             info!(
                 "Agent registered successfully (id={}, status={:?})",
-                resp.agent_id,
-                resp.status
+                resp.agent_id, resp.status
             );
 
-            log_engine.info("auth_engine", &format!(
-                "Agent {} registered with server (hostname={})",
-                &resp.agent_id[..16.min(resp.agent_id.len())],
-                identity.hostname,
-            )).await?;
+            log_engine
+                .info(
+                    "auth_engine",
+                    &format!(
+                        "Agent {} registered with server (hostname={})",
+                        &resp.agent_id[..16.min(resp.agent_id.len())],
+                        identity.hostname,
+                    ),
+                )
+                .await?;
 
             storage
-                .set_config("registration_status", RegistrationStatus::Registered.as_str())
+                .set_config(
+                    "registration_status",
+                    RegistrationStatus::Registered.as_str(),
+                )
                 .await?;
             storage
                 .set_config("registered_agent_id", &resp.agent_id)
@@ -156,10 +163,15 @@ pub async fn register(
             );
             error!("{}", msg);
 
-            log_engine.warn("auth_engine", "Registration rejected — secret mismatch").await?;
+            log_engine
+                .warn("auth_engine", "Registration rejected — secret mismatch")
+                .await?;
 
             storage
-                .set_config("registration_status", RegistrationStatus::SecretMismatch.as_str())
+                .set_config(
+                    "registration_status",
+                    RegistrationStatus::SecretMismatch.as_str(),
+                )
                 .await?;
 
             bail!(
@@ -179,12 +191,18 @@ pub async fn register(
             );
             warn!("{}", msg);
 
-            log_engine.warn("auth_engine", &format!(
-                "Registration rejected — agent disabled or removed on server"
-            )).await?;
+            log_engine
+                .warn(
+                    "auth_engine",
+                    &format!("Registration rejected — agent disabled or removed on server"),
+                )
+                .await?;
 
             storage
-                .set_config("registration_status", RegistrationStatus::Unregistered.as_str())
+                .set_config(
+                    "registration_status",
+                    RegistrationStatus::Unregistered.as_str(),
+                )
                 .await?;
             bail!("{}", msg);
         }
@@ -197,14 +215,20 @@ pub async fn register(
             );
             error!("{}", msg);
 
-            log_engine.warn("auth_engine", &format!(
-                "Registration failed (HTTP {})", other,
-            )).await?;
+            log_engine
+                .warn(
+                    "auth_engine",
+                    &format!("Registration failed (HTTP {})", other,),
+                )
+                .await?;
 
             let current = storage.get_config("registration_status").await?;
             if current.as_deref() != Some("registered") {
                 storage
-                    .set_config("registration_status", RegistrationStatus::Unregistered.as_str())
+                    .set_config(
+                        "registration_status",
+                        RegistrationStatus::Unregistered.as_str(),
+                    )
                     .await?;
             }
             bail!("{}", msg);
@@ -226,7 +250,10 @@ pub async fn is_registered(storage: &StorageManager) -> Result<bool> {
 /// registration on next start).
 pub async fn clear_registration(storage: &StorageManager) -> Result<()> {
     storage
-        .set_config("registration_status", RegistrationStatus::Unregistered.as_str())
+        .set_config(
+            "registration_status",
+            RegistrationStatus::Unregistered.as_str(),
+        )
         .await?;
     Ok(())
 }
@@ -265,13 +292,12 @@ pub fn resolve_secret(config: &AgentConfig) -> Result<String> {
 
 /// Extract HTTP(S) base URL from a WebSocket URL.
 fn extract_base_url(ws_url: &str) -> Result<String> {
-    let url =
-        url::Url::parse(ws_url).map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
+    let url = url::Url::parse(ws_url).map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
 
     let scheme = match url.scheme() {
-        "ws"  => "http",
+        "ws" => "http",
         "wss" => "https",
-        s     => bail!("Invalid WebSocket scheme: {}", s),
+        s => bail!("Invalid WebSocket scheme: {}", s),
     };
 
     let host = url
@@ -285,8 +311,7 @@ fn extract_base_url(ws_url: &str) -> Result<String> {
 
 /// Build a `reqwest::Client` that respects the TLS configuration.
 fn build_http_client(config: &AgentConfig) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
 
     if !config.tls.verify_cert {
         warn!("TLS certificate verification DISABLED for HTTP registration client");

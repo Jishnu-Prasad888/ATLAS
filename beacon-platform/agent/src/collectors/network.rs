@@ -3,8 +3,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use sysinfo::Networks;
 use std::fs;
+use sysinfo::Networks;
 
 use super::trait_collector::Collector;
 
@@ -22,7 +22,9 @@ impl NetworkCollector {
 
 #[async_trait]
 impl Collector for NetworkCollector {
-    fn name(&self) -> &'static str { "network" }
+    fn name(&self) -> &'static str {
+        "network"
+    }
 
     async fn collect(&self) -> Result<Value> {
         let mut networks = self.networks.lock().unwrap();
@@ -32,19 +34,22 @@ impl Collector for NetworkCollector {
 }
 
 pub fn collect_from(networks: &Networks) -> Value {
-    let interfaces: Vec<Value> = networks.iter().map(|(name, net)| {
-        json!({
-            "name":          name,
-            "rx_bytes":      net.total_received(),
-            "tx_bytes":      net.total_transmitted(),
-            "rx_packets":    net.total_packets_received(),
-            "tx_packets":    net.total_packets_transmitted(),
-            "rx_errors":     net.total_errors_on_received(),
-            "tx_errors":     net.total_errors_on_transmitted(),
-            "rx_bytes_rate": net.received(),
-            "tx_bytes_rate": net.transmitted(),
+    let interfaces: Vec<Value> = networks
+        .iter()
+        .map(|(name, net)| {
+            json!({
+                "name":          name,
+                "rx_bytes":      net.total_received(),
+                "tx_bytes":      net.total_transmitted(),
+                "rx_packets":    net.total_packets_received(),
+                "tx_packets":    net.total_packets_transmitted(),
+                "rx_errors":     net.total_errors_on_received(),
+                "tx_errors":     net.total_errors_on_transmitted(),
+                "rx_bytes_rate": net.received(),
+                "tx_bytes_rate": net.transmitted(),
+            })
         })
-    }).collect();
+        .collect();
 
     json!({
         "interfaces": interfaces,
@@ -55,17 +60,22 @@ pub fn collect_from(networks: &Networks) -> Value {
 
 // ─── /proc readers ────────────────────────────────────────────────────────────
 
-fn count_tcp_states(content: &str, established: &mut u32, time_wait: &mut u32,
-                    close_wait: &mut u32, listen: &mut u32) {
+fn count_tcp_states(
+    content: &str,
+    established: &mut u32,
+    time_wait: &mut u32,
+    close_wait: &mut u32,
+    listen: &mut u32,
+) {
     for line in content.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 4 {
             match parts[3] {
                 "01" => *established += 1,
-                "06" => *time_wait   += 1,
-                "08" => *close_wait  += 1,
-                "0A" => *listen      += 1,
-                _    => {}
+                "06" => *time_wait += 1,
+                "08" => *close_wait += 1,
+                "0A" => *listen += 1,
+                _ => {}
             }
         }
     }
@@ -75,7 +85,13 @@ pub fn read_tcp_stats() -> Value {
     let (mut established, mut time_wait, mut close_wait, mut listen) = (0u32, 0u32, 0u32, 0u32);
     for path in &["/proc/net/tcp", "/proc/net/tcp6"] {
         if let Ok(c) = fs::read_to_string(path) {
-            count_tcp_states(&c, &mut established, &mut time_wait, &mut close_wait, &mut listen);
+            count_tcp_states(
+                &c,
+                &mut established,
+                &mut time_wait,
+                &mut close_wait,
+                &mut listen,
+            );
         }
     }
     json!({ "established": established, "time_wait": time_wait,

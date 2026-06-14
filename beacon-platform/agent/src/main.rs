@@ -2,27 +2,24 @@
 // Distributed Linux observability agent
 // Async-first, Tokio runtime
 
-mod engines;
-mod collectors;
-mod transport;
-mod storage;
-mod config;
 mod auth;
+mod collectors;
+mod config;
+mod engines;
 mod registration;
+mod storage;
+mod transport;
 // config::validator is a sub-module of config — no explicit declaration needed here
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing::{info, warn, error};
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing::{error, info, warn};
+use tracing_subscriber::{fmt, EnvFilter};
 
-use config::AgentConfig;
+use config::{create_collector_flags, AgentConfig};
 use engines::{
-    identity::IdentityEngine,
-    health::HealthEngine,
-    queue::QueueEngine,
-    encryption::EncryptionEngine,
-    logging::LogEngine,
+    encryption::EncryptionEngine, health::HealthEngine, identity::IdentityEngine,
+    logging::LogEngine, queue::QueueEngine,
 };
 use storage::StorageManager;
 use transport::WebSocketTransport;
@@ -201,9 +198,13 @@ enum MetricsAction {
     EnableAll,
     DisableAll,
     /// Set collection interval (e.g. 1s, 5s, 30s, 1m)
-    Interval { value: String },
+    Interval {
+        value: String,
+    },
     /// Set retention period (e.g. 30d)
-    Retention { value: String },
+    Retention {
+        value: String,
+    },
     Status,
 }
 
@@ -223,9 +224,13 @@ enum LogsAction {
     /// Stream logs in real-time
     Follow,
     /// Export logs to file
-    Export { output: String },
+    Export {
+        output: String,
+    },
     /// Search logs
-    Search { query: String },
+    Search {
+        query: String,
+    },
     /// Clear all logs
     Clear,
     /// Clear logs by severity
@@ -287,8 +292,7 @@ async fn main() -> Result<()> {
     // Initialise tracing
     fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&cli.log_level))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cli.log_level)),
         )
         .json()
         .init();
@@ -296,34 +300,32 @@ async fn main() -> Result<()> {
     info!("beacon-agent v1.0.0 starting");
 
     match cli.command.unwrap_or(Commands::Start) {
-        Commands::Init  => run_init(&cli.config).await,
+        Commands::Init => run_init(&cli.config).await,
         Commands::Start => run_daemon(&cli.config).await,
         Commands::Status => run_status(&cli.config).await,
-        Commands::Tui   => run_tui(&cli.config).await,
+        Commands::Tui => run_tui(&cli.config).await,
 
-        Commands::Login { username, password } => {
-            run_login(&cli.config, &username, password).await
-        }
-        Commands::Logout  => run_logout(&cli.config).await,
-        Commands::Whoami  => run_whoami(&cli.config).await,
+        Commands::Login { username, password } => run_login(&cli.config, &username, password).await,
+        Commands::Logout => run_logout(&cli.config).await,
+        Commands::Whoami => run_whoami(&cli.config).await,
 
         Commands::Service { action } => handle_service(action),
-        Commands::Cpu       { action } => handle_collector("cpu",        action),
-        Commands::Ram       { action } => handle_collector("ram",        action),
-        Commands::Storage   { action } => handle_collector("storage",    action),
-        Commands::Network   { action } => handle_collector("network",    action),
-        Commands::Process   { action } => handle_collector("process",    action),
-        Commands::Systemd   { action } => handle_collector("systemd",    action),
-        Commands::Docker    { action } => handle_collector("docker",     action),
+        Commands::Cpu { action } => handle_collector("cpu", action),
+        Commands::Ram { action } => handle_collector("ram", action),
+        Commands::Storage { action } => handle_collector("storage", action),
+        Commands::Network { action } => handle_collector("network", action),
+        Commands::Process { action } => handle_collector("process", action),
+        Commands::Systemd { action } => handle_collector("systemd", action),
+        Commands::Docker { action } => handle_collector("docker", action),
         Commands::Kubernetes { action } => handle_collector("kubernetes", action),
-        Commands::Metrics   { action } => handle_metrics_cmd(action, &cli.config).await,
-        Commands::Agent     { action } => handle_agent_cmd(action, &cli.config).await,
-        Commands::Logs      { action } => handle_logs_cmd(action, &cli.config).await,
-        Commands::Audit     { action } => handle_audit_cmd(action, &cli.config).await,
-        Commands::Db        { action } => handle_db_cmd(action, &cli.config).await,
+        Commands::Metrics { action } => handle_metrics_cmd(action, &cli.config).await,
+        Commands::Agent { action } => handle_agent_cmd(action, &cli.config).await,
+        Commands::Logs { action } => handle_logs_cmd(action, &cli.config).await,
+        Commands::Audit { action } => handle_audit_cmd(action, &cli.config).await,
+        Commands::Db { action } => handle_db_cmd(action, &cli.config).await,
         Commands::Encryption { action } => handle_encryption_cmd(action, &cli.config).await,
-        Commands::Queue     { action } => handle_queue_cmd(action, &cli.config).await,
-        Commands::Server    { action } => handle_server_cmd(action, &cli.config).await,
+        Commands::Queue { action } => handle_queue_cmd(action, &cli.config).await,
+        Commands::Server { action } => handle_server_cmd(action, &cli.config).await,
     }
 }
 
@@ -349,9 +351,18 @@ async fn run_daemon(config_path: &str) -> Result<()> {
 
     // Initialise logging engine
     let log_engine = LogEngine::new(&identity, queue.clone(), storage.clone());
-    log_engine.info("service_engine", "Beacon Agent starting").await?;
-    log_engine.info("service_engine", &format!("Agent identity: {}", identity.agent_id)).await?;
-    log_engine.info("service_engine", "Configuration loaded").await?;
+    log_engine
+        .info("service_engine", "Beacon Agent starting")
+        .await?;
+    log_engine
+        .info(
+            "service_engine",
+            &format!("Agent identity: {}", identity.agent_id),
+        )
+        .await?;
+    log_engine
+        .info("service_engine", "Configuration loaded")
+        .await?;
 
     // Inject log engine into queue for dead-letter/retry logs
     queue.set_log_engine(log_engine.clone());
@@ -378,15 +389,15 @@ async fn run_daemon(config_path: &str) -> Result<()> {
                 error!("{}", err_str);
                 eprintln!("\n[beacon-agent] ERROR: Secret mismatch.\n{}\n", err_str);
                 eprintln!("Metrics will NOT be sent until this is resolved.");
-                eprintln!(
-                    "Run 'beacon-agent init' to re-configure, or set BEACON_AGENT_SECRET."
-                );
+                eprintln!("Run 'beacon-agent init' to re-configure, or set BEACON_AGENT_SECRET.");
                 std::process::exit(1);
             }
 
-            warn!("Registration request failed ({}). Checking local registration cache...", e);
-            let locally_registered = registration::is_registered(&storage).await
-                .unwrap_or(false);
+            warn!(
+                "Registration request failed ({}). Checking local registration cache...",
+                e
+            );
+            let locally_registered = registration::is_registered(&storage).await.unwrap_or(false);
 
             if locally_registered {
                 warn!(
@@ -409,6 +420,9 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Create shared collector flags for dynamic server-side toggle
+    let collector_flags = create_collector_flags(&config);
+
     // Start WebSocket transport
     let transport = WebSocketTransport::new(
         config.clone(),
@@ -416,6 +430,7 @@ async fn run_daemon(config_path: &str) -> Result<()> {
         queue.clone(),
         encryption.clone(),
         log_engine.clone(),
+        collector_flags.clone(),
     );
 
     // Start all collectors
@@ -425,11 +440,14 @@ async fn run_daemon(config_path: &str) -> Result<()> {
         queue.clone(),
         storage.clone(),
         &log_engine,
+        collector_flags,
     )
     .await?;
 
     health.set_status(engines::health::AgentStatus::Online);
-    let _ = log_engine.info("service_engine", "All engines online. Agent is running.").await;
+    let _ = log_engine
+        .info("service_engine", "All engines online. Agent is running.")
+        .await;
     info!("All engines online. Agent is running.");
 
     // Run transport (reconnects automatically on disconnect)
@@ -444,7 +462,9 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     }
 
     // Log shutdown
-    log_engine.info("service_engine", "Beacon Agent shutting down").await?;
+    log_engine
+        .info("service_engine", "Beacon Agent shutting down")
+        .await?;
 
     // Flush queue before exit
     info!("Flushing queue before shutdown...");
@@ -461,7 +481,7 @@ async fn run_daemon(config_path: &str) -> Result<()> {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 async fn run_init(config_path: &str) -> Result<()> {
-    use std::io::{self, Write, BufRead};
+    use std::io::{self, BufRead, Write};
 
     println!("=== Beacon Agent Initialization ===\n");
     println!("This will configure the agent and register it with the Beacon server.");
@@ -488,14 +508,26 @@ async fn run_init(config_path: &str) -> Result<()> {
     print!("Username [admin]: ");
     io::stdout().flush()?;
     let username = {
-        let s = lines.next().unwrap_or(Ok(String::new()))?.trim().to_string();
-        if s.is_empty() { "admin".to_string() } else { s }
+        let s = lines
+            .next()
+            .unwrap_or(Ok(String::new()))?
+            .trim()
+            .to_string();
+        if s.is_empty() {
+            "admin".to_string()
+        } else {
+            s
+        }
     };
 
     // ── Password ──────────────────────────────────────────────────────────────
     print!("Password: ");
     io::stdout().flush()?;
-    let password = lines.next().unwrap_or(Ok(String::new()))?.trim().to_string();
+    let password = lines
+        .next()
+        .unwrap_or(Ok(String::new()))?
+        .trim()
+        .to_string();
     if password.is_empty() {
         eprintln!("\n  ⚠ Warning: password is empty.");
     }
@@ -510,7 +542,11 @@ async fn run_init(config_path: &str) -> Result<()> {
     io::stdout().flush()?;
 
     let secret = loop {
-        let s = lines.next().unwrap_or(Ok(String::new()))?.trim().to_string();
+        let s = lines
+            .next()
+            .unwrap_or(Ok(String::new()))?
+            .trim()
+            .to_string();
         if !s.is_empty() {
             // Inline value provided
             break s;
@@ -570,10 +606,7 @@ async fn run_init(config_path: &str) -> Result<()> {
     match registration::register(&config, &identity, &storage, &log_engine).await {
         Ok(()) => {
             println!("✓ Agent registered successfully!");
-            println!(
-                "  Agent ID : {}",
-                identity.agent_id
-            );
+            println!("  Agent ID : {}", identity.agent_id);
             println!("  Hostname : {}", identity.hostname);
             println!("\nRun 'beacon-agent start' to begin collecting and sending telemetry.");
         }
@@ -592,7 +625,7 @@ async fn run_init(config_path: &str) -> Result<()> {
 }
 
 async fn run_status(config_path: &str) -> Result<()> {
-    let config  = AgentConfig::load(config_path).await?;
+    let config = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     let identity = IdentityEngine::new(&storage).await?;
     let reg_status = storage
@@ -640,7 +673,7 @@ async fn run_whoami(config_path: &str) -> Result<()> {
 }
 
 async fn run_tui(config_path: &str) -> Result<()> {
-    let config  = AgentConfig::load(config_path).await?;
+    let config = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     engines::tui::run(config, storage).await
 }
@@ -650,18 +683,18 @@ async fn run_tui(config_path: &str) -> Result<()> {
 fn handle_service(action: ServiceAction) -> Result<()> {
     match action {
         ServiceAction::Install => println!("Installing systemd service..."),
-        ServiceAction::Remove  => println!("Removing systemd service..."),
-        ServiceAction::Start   => println!("Starting service: systemctl start beacon-agent"),
-        ServiceAction::Stop    => println!("Stopping service: systemctl stop beacon-agent"),
+        ServiceAction::Remove => println!("Removing systemd service..."),
+        ServiceAction::Start => println!("Starting service: systemctl start beacon-agent"),
+        ServiceAction::Stop => println!("Stopping service: systemctl stop beacon-agent"),
         ServiceAction::Restart => println!("Restarting service: systemctl restart beacon-agent"),
-        ServiceAction::Status  => println!("Service status: systemctl status beacon-agent"),
+        ServiceAction::Status => println!("Service status: systemctl status beacon-agent"),
     }
     Ok(())
 }
 
 fn handle_collector(name: &str, action: EnableDisable) -> Result<()> {
     match action {
-        EnableDisable::Enable  => println!("Enabled collector: {name}"),
+        EnableDisable::Enable => println!("Enabled collector: {name}"),
         EnableDisable::Disable => println!("Disabled collector: {name}"),
     }
     Ok(())
@@ -669,30 +702,30 @@ fn handle_collector(name: &str, action: EnableDisable) -> Result<()> {
 
 async fn handle_metrics_cmd(action: MetricsAction, config_path: &str) -> Result<()> {
     match action {
-        MetricsAction::EnableAll          => println!("All collectors enabled."),
-        MetricsAction::DisableAll         => println!("All collectors disabled."),
+        MetricsAction::EnableAll => println!("All collectors enabled."),
+        MetricsAction::DisableAll => println!("All collectors disabled."),
         MetricsAction::Interval { value } => println!("Collection interval set to {value}"),
         MetricsAction::Retention { value } => println!("Retention set to {value}"),
-        MetricsAction::Status             => run_status(config_path).await?,
+        MetricsAction::Status => run_status(config_path).await?,
     }
     Ok(())
 }
 
 async fn handle_agent_cmd(action: AgentAction, _config_path: &str) -> Result<()> {
     match action {
-        AgentAction::List                       => println!("Listing agents via server API..."),
-        AgentAction::Show { agent_id }          => println!("Showing agent: {agent_id}"),
-        AgentAction::Enable { agent_id }        => println!("Enabling: {agent_id}"),
-        AgentAction::Disable { agent_id }       => println!("Disabling: {agent_id}"),
-        AgentAction::Remove { agent_id }        => println!("Removing: {agent_id}"),
-        AgentAction::Rename { agent_id, name }  => println!("Renaming {agent_id} → {name}"),
-        AgentAction::RegenerateId              => println!("Regenerating agent ID..."),
+        AgentAction::List => println!("Listing agents via server API..."),
+        AgentAction::Show { agent_id } => println!("Showing agent: {agent_id}"),
+        AgentAction::Enable { agent_id } => println!("Enabling: {agent_id}"),
+        AgentAction::Disable { agent_id } => println!("Disabling: {agent_id}"),
+        AgentAction::Remove { agent_id } => println!("Removing: {agent_id}"),
+        AgentAction::Rename { agent_id, name } => println!("Renaming {agent_id} → {name}"),
+        AgentAction::RegenerateId => println!("Regenerating agent ID..."),
     }
     Ok(())
 }
 
 async fn handle_logs_cmd(action: LogsAction, config_path: &str) -> Result<()> {
-    let config  = AgentConfig::load(config_path).await?;
+    let config = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     match action {
         LogsAction::View => {
@@ -712,7 +745,10 @@ async fn handle_logs_cmd(action: LogsAction, config_path: &str) -> Result<()> {
                 println!("No logs matching '{}'", query);
             } else {
                 for row in &results {
-                    println!("[{}] [{}] ({}) {}", row.timestamp, row.severity, row.source, row.message);
+                    println!(
+                        "[{}] [{}] ({}) {}",
+                        row.timestamp, row.severity, row.source, row.message
+                    );
                 }
                 println!("--- {} result(s) ---", results.len());
             }
@@ -734,20 +770,20 @@ async fn handle_logs_cmd(action: LogsAction, config_path: &str) -> Result<()> {
 }
 
 async fn handle_audit_cmd(action: AuditAction, config_path: &str) -> Result<()> {
-    let config  = AgentConfig::load(config_path).await?;
+    let config = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     match action {
-        AuditAction::Logs              => storage.print_audit_logs(50).await?,
+        AuditAction::Logs => storage.print_audit_logs(50).await?,
         AuditAction::Export { output } => println!("Exporting audit to {output}..."),
     }
     Ok(())
 }
 
 async fn handle_db_cmd(action: DbAction, config_path: &str) -> Result<()> {
-    let config  = AgentConfig::load(config_path).await?;
+    let config = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
     match action {
-        DbAction::Status  => storage.print_status().await?,
+        DbAction::Status => storage.print_status().await?,
         DbAction::Backup { output } => {
             let path = output.unwrap_or_else(|| "/tmp/beacon_backup.db".to_string());
             storage.backup(&path).await?;
@@ -761,34 +797,52 @@ async fn handle_db_cmd(action: DbAction, config_path: &str) -> Result<()> {
             storage.vacuum().await?;
             println!("Vacuum complete.");
         }
-        DbAction::Verify  => { storage.verify().await?; println!("Integrity OK."); }
+        DbAction::Verify => {
+            storage.verify().await?;
+            println!("Integrity OK.");
+        }
         DbAction::Export { output } => println!("Exporting to {output}..."),
-        DbAction::Clear   => println!("Cleared databases."),
-        DbAction::Reset   => println!("Reset databases."),
+        DbAction::Clear => println!("Cleared databases."),
+        DbAction::Reset => println!("Reset databases."),
     }
     Ok(())
 }
 
 async fn handle_encryption_cmd(action: EncryptionAction, _config_path: &str) -> Result<()> {
     match action {
-        EncryptionAction::Enable    => println!("Encryption enabled."),
-        EncryptionAction::Disable   => println!("Encryption disabled."),
+        EncryptionAction::Enable => println!("Encryption enabled."),
+        EncryptionAction::Disable => println!("Encryption disabled."),
         EncryptionAction::RotateKey => println!("Rotating encryption key..."),
-        EncryptionAction::Status    => println!("Encryption: AES-256-GCM | TLS 1.3"),
+        EncryptionAction::Status => println!("Encryption: AES-256-GCM | TLS 1.3"),
     }
     Ok(())
 }
 
 async fn handle_queue_cmd(action: QueueAction, config_path: &str) -> Result<()> {
-    let config  = AgentConfig::load(config_path).await?;
+    let config = AgentConfig::load(config_path).await?;
     let storage = StorageManager::new(&config.storage_dir).await?;
-    let queue   = QueueEngine::new(storage).await?;
+    let queue = QueueEngine::new(storage).await?;
     match action {
-        QueueAction::Status      => { let s = queue.status().await?; println!("{s:?}"); }
-        QueueAction::Clear       => { queue.clear().await?; println!("Queue cleared."); }
-        QueueAction::Pause       => { queue.pause().await; println!("Queue paused."); }
-        QueueAction::Resume      => { queue.resume().await; println!("Queue resumed."); }
-        QueueAction::RetryFailed => { let n = queue.retry_failed().await?; println!("Retried {n} messages."); }
+        QueueAction::Status => {
+            let s = queue.status().await?;
+            println!("{s:?}");
+        }
+        QueueAction::Clear => {
+            queue.clear().await?;
+            println!("Queue cleared.");
+        }
+        QueueAction::Pause => {
+            queue.pause().await;
+            println!("Queue paused.");
+        }
+        QueueAction::Resume => {
+            queue.resume().await;
+            println!("Queue resumed.");
+        }
+        QueueAction::RetryFailed => {
+            let n = queue.retry_failed().await?;
+            println!("Retried {n} messages.");
+        }
     }
     Ok(())
 }
@@ -796,11 +850,11 @@ async fn handle_queue_cmd(action: QueueAction, config_path: &str) -> Result<()> 
 async fn handle_server_cmd(action: ServerAction, config_path: &str) -> Result<()> {
     let config = AgentConfig::load(config_path).await?;
     match action {
-        ServerAction::Connect    => println!("Connecting to {}...", config.server_addr),
+        ServerAction::Connect => println!("Connecting to {}...", config.server_addr),
         ServerAction::Disconnect => println!("Disconnecting from server."),
-        ServerAction::Status     => println!("Server: {}", config.server_addr),
-        ServerAction::Ping       => println!("Pinging {}...", config.server_addr),
-        ServerAction::Test       => println!("Testing connection to {}...", config.server_addr),
+        ServerAction::Status => println!("Server: {}", config.server_addr),
+        ServerAction::Ping => println!("Pinging {}...", config.server_addr),
+        ServerAction::Test => println!("Testing connection to {}...", config.server_addr),
     }
     Ok(())
 }

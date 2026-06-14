@@ -263,6 +263,276 @@ export interface AuditLog {
   success: boolean
 }
 
+// ─── Docker Metrics ───────────────────────────────────────────────────────────
+
+export interface DockerContainer {
+  id: string
+  name: string
+  state: string
+  status: string
+  health: string
+  restart_count: number
+  exit_code: number
+  image: string
+  command: string
+  ports: string
+  mounts: string
+  networks: string
+  platform: string
+  labels: string
+  cpu_percent: number | null
+  memory_usage_bytes: number | null
+  memory_limit_bytes: number | null
+  memory_percent: number | null
+  network_rx_bytes: number | null
+  network_tx_bytes: number | null
+  block_read_bytes: number | null
+  block_write_bytes: number | null
+  pids: number | null
+}
+
+export interface DockerResourceTotals {
+  containers_reporting: number
+  cpu_percent_sum: number
+  cpu_percent_avg: number
+  memory_usage_bytes_sum: number
+  memory_limit_bytes_sum: number
+  memory_percent_avg: number
+  network_rx_bytes_sum: number
+  network_tx_bytes_sum: number
+  block_read_bytes_sum: number
+  block_write_bytes_sum: number
+  pids_sum: number
+}
+
+export interface DockerImage {
+  repository: string
+  tag: string
+  digest: string
+  size: string
+  created: string
+}
+
+export interface DockerData {
+  total_containers: number
+  state_counts: Record<string, number>
+  running_containers: number
+  stopped_containers: number
+  paused_containers: number
+  restarting_containers: number
+  created_containers: number
+  dead_containers: number
+  removing_containers: number
+  unknown_containers: number
+  containers: DockerContainer[]
+  resource_totals: DockerResourceTotals | null
+  images?: DockerImage[]
+  collector_disabled?: boolean
+}
+
+// ─── Kubernetes Metrics ──────────────────────────────────────────────────────
+
+export interface KubeNodeMetric {
+  cpu_cores: number
+  cpu_percent: number | null
+  memory_bytes: number
+  memory_percent: number | null
+}
+
+export interface KubeNode {
+  name: string
+  ready: boolean
+  kubelet_version: string
+  architecture: string
+  os: string
+  capacity_cpu: string
+  capacity_memory: string
+  allocatable_cpu: string
+  allocatable_memory: string
+  metrics: KubeNodeMetric | null
+}
+
+export interface KubeContainerState {
+  type: string
+  started_at?: string
+  reason?: string
+  message?: string
+  exit_code?: number
+  finished_at?: string
+}
+
+export interface KubeContainer {
+  name: string
+  image: string
+  ready: boolean
+  restarts: number
+  state: KubeContainerState
+  last_state: KubeContainerState
+  image_id: string
+  container_id: string
+  started: boolean
+}
+
+export interface KubePodMetric {
+  cpu_cores: number
+  cpu_percent: number | null
+  memory_bytes: number
+  memory_percent: number | null
+}
+
+export interface KubePodCondition {
+  type: string
+  status: string
+  reason: string
+  message: string
+  last_transition: string
+}
+
+export interface KubePod {
+  name: string
+  namespace: string
+  phase: string
+  node: string
+  pod_ip: string
+  host_ip: string
+  qos_class: string
+  reason: string
+  start_time: string
+  deletion_timestamp: string
+  containers: KubeContainer[]
+  init_containers: KubeContainer[]
+  ephemeral_containers: KubeContainer[]
+  conditions: KubePodCondition[]
+  metrics: KubePodMetric | null
+}
+
+export interface KubeDeploymentCondition {
+  type: string
+  status: string
+  reason: string
+  message: string
+  last_transition: string
+}
+
+export interface KubeDeployment {
+  name: string
+  namespace: string
+  generation: number
+  replicas: number
+  updated_replicas: number
+  ready_replicas: number
+  available_replicas: number
+  unavailable_replicas: number
+  conditions: KubeDeploymentCondition[]
+}
+
+export interface KubeDaemonset {
+  name: string
+  namespace: string
+  desired: number
+  current: number
+  ready: number
+  available: number
+  unavailable: number
+  updated: number
+  misscheduled: number
+}
+
+export interface KubeStatefulset {
+  name: string
+  namespace: string
+  replicas: number
+  ready_replicas: number
+  current_replicas: number
+  updated_replicas: number
+  update_revision: string
+}
+
+export interface KubeServicePort {
+  port: number
+  target_port: number | string | null
+  protocol: string
+  node_port: number
+}
+
+export interface KubeService {
+  name: string
+  namespace: string
+  type: string
+  cluster_ip: string
+  external_ips: string[]
+  selector: string[]
+  ports: KubeServicePort[]
+}
+
+export interface KubePVC {
+  name: string
+  namespace: string
+  phase: string
+  storage_class: string
+  volume_name: string
+  requested_storage: string
+  capacity: string
+  access_modes: string[]
+}
+
+export interface KubeEvent {
+  name: string
+  namespace: string
+  creation_timestamp: string
+  reason: string
+  message: string
+  type: string
+  count: number
+  last_timestamp: string
+  first_timestamp: string
+}
+
+export interface KubeClusterResources {
+  nodes_reporting: number
+  cpu_usage_cores: number
+  cpu_capacity_cores: number
+  cpu_allocatable_cores: number
+  cpu_percent_avg: number
+  memory_usage_bytes: number
+  memory_capacity_bytes: number
+  memory_allocatable_bytes: number
+}
+
+export interface KubeWorkloads {
+  deployments: KubeDeployment[]
+  daemonsets: KubeDaemonset[]
+  statefulsets: KubeStatefulset[]
+  services: KubeService[]
+  persistent_volume_claims: KubePVC[]
+}
+
+export interface KubernetesData {
+  server_reachable: boolean
+  nodes: KubeNode[]
+  pods: KubePod[]
+  events: KubeEvent[]
+  node_count: number
+  pod_count: number
+  running_pods: number
+  pending_pods: number
+  failed_pods: number
+  succeeded_pods: number
+  unknown_pods: number
+  crashloopbackoff_pods: number
+  event_count: number
+  node_metrics_available: boolean
+  pod_metrics_available: boolean
+  deployment_count: number
+  daemonset_count: number
+  statefulset_count: number
+  service_count: number
+  persistent_volume_claim_count: number
+  cluster_resources: KubeClusterResources
+  workloads: KubeWorkloads
+  collector_disabled?: boolean
+}
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 export interface FleetHealth {

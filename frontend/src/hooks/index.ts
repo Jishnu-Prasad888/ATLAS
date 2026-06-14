@@ -173,6 +173,7 @@ export function useLogs(params: LogQueryParams, enabled = true) {
     queryFn: () => logsApi.query(params),
     enabled,
     staleTime: 10_000,
+    refetchInterval: enabled ? 10_000 : undefined,
   })
 }
 

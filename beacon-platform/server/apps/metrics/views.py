@@ -213,4 +213,22 @@ class MetricConfigView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         logger.debug("MetricConfigView config updated for agent %s", agent_id)
+
+        # Push updated config to agent via WebSocket
+        safe_id = agent_id.replace(":", "_").replace("#", "_").replace(" ", "_")
+        try:
+            async_to_sync(channel_layer.group_send)(
+                f"agent_{safe_id}",
+                {
+                    "type": "agent.command",
+                    "data": {
+                        "type": "config_update",
+                        "payload": serializer.data,
+                    },
+                },
+            )
+            logger.debug("MetricConfigView config_update sent via group_send to agent_%s", safe_id)
+        except Exception as e:
+            logger.warning("MetricConfigView WebSocket group_send failed: %s", e)
+
         return Response(serializer.data)

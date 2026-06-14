@@ -13,6 +13,7 @@ __pycache__/
 dist/
 build/
 bak_outputs/
+bhak.py
 
 
 # deps

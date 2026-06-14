@@ -8,10 +8,28 @@ pub mod validator;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::fs;
+use tokio::sync::RwLock;
 
 pub use validator::ConfigValidator;
+
+/// Shared runtime flags that control whether each collector is active.
+/// The Transport updates these when the server pushes a `config_update`.
+/// Collectors check their flag on every `collect()` call.
+pub type CollectorFlags = Arc<RwLock<HashMap<String, bool>>>;
+
+/// Create initial collector flags from the on-disk config.
+/// Called once at agent startup before the transport connects;
+/// thereafter the server may push updates at any time.
+pub fn create_collector_flags(config: &AgentConfig) -> CollectorFlags {
+    let mut flags = HashMap::new();
+    flags.insert("docker".to_string(), config.collectors.docker);
+    flags.insert("kubernetes".to_string(), config.collectors.kubernetes);
+    Arc::new(RwLock::new(flags))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -32,46 +50,46 @@ pub struct AgentConfig {
     /// Collection interval in seconds
     pub interval_seconds: u64,
     pub collectors: CollectorConfig,
-    pub tls:        TlsConfig,
-    pub queue:      QueueConfig,
+    pub tls: TlsConfig,
+    pub queue: QueueConfig,
     pub encryption: EncryptionConfig,
     #[serde(default)]
-    pub logging:    LoggingConfig,
+    pub logging: LoggingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectorConfig {
-    pub cpu:         bool,
-    pub ram:         bool,
-    pub storage:     bool,
-    pub network:     bool,
-    pub process:     bool,
-    pub systemd:     bool,
-    pub docker:      bool,
+    pub cpu: bool,
+    pub ram: bool,
+    pub storage: bool,
+    pub network: bool,
+    pub process: bool,
+    pub systemd: bool,
+    pub docker: bool,
     /// Enable k3s / Kubernetes metrics collection
-    pub kubernetes:  bool,
+    pub kubernetes: bool,
     pub temperature: bool,
-    pub power:       bool,
+    pub power: bool,
     /// Max processes to track per collection cycle
     pub max_processes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsConfig {
-    pub verify_cert:  bool,
+    pub verify_cert: bool,
     pub ca_cert_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueConfig {
-    pub max_retries:      u32,
-    pub max_queue_size:   usize,
+    pub max_retries: u32,
+    pub max_queue_size: usize,
     pub retry_backoff_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionConfig {
-    pub enabled:           bool,
+    pub enabled: bool,
     pub key_rotation_days: u32,
 }
 
@@ -100,36 +118,36 @@ impl Default for LoggingConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            server_addr:      "wss://localhost:8000/ws/ingest/".to_string(),
-            username:         "admin".to_string(),
-            password:         String::new(),
-            secret:           String::new(),
-            storage_dir:      "/var/lib/beacon/agent".to_string(),
+            server_addr: "wss://localhost:8000/ws/ingest/".to_string(),
+            username: "admin".to_string(),
+            password: String::new(),
+            secret: String::new(),
+            storage_dir: "/var/lib/beacon/agent".to_string(),
             interval_seconds: 5,
             collectors: CollectorConfig {
-                cpu:           true,
-                ram:           true,
-                storage:       true,
-                network:       true,
-                process:       true,
-                systemd:       true,
-                docker:        false,
-                kubernetes:    false,
-                temperature:   true,
-                power:         false,
+                cpu: true,
+                ram: true,
+                storage: true,
+                network: true,
+                process: true,
+                systemd: true,
+                docker: false,
+                kubernetes: false,
+                temperature: true,
+                power: false,
                 max_processes: 512,
             },
             tls: TlsConfig {
-                verify_cert:  true,
+                verify_cert: true,
                 ca_cert_path: None,
             },
             queue: QueueConfig {
-                max_retries:      5,
-                max_queue_size:   100_000,
+                max_retries: 5,
+                max_queue_size: 100_000,
                 retry_backoff_ms: 1_000,
             },
             encryption: EncryptionConfig {
-                enabled:           true,
+                enabled: true,
                 key_rotation_days: 30,
             },
             logging: LoggingConfig::default(),

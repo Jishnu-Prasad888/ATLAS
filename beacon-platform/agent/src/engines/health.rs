@@ -2,11 +2,11 @@
 // Tracks agent-level and per-collector health state.
 // Status is readable via TUI, REST API, and WebSocket.
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 
 use crate::engines::logging::LogEngine;
 
@@ -25,14 +25,14 @@ pub enum AgentStatus {
 impl std::fmt::Display for AgentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AgentStatus::Booting          => write!(f, "BOOTING"),
-            AgentStatus::Initializing     => write!(f, "INITIALIZING"),
-            AgentStatus::Online           => write!(f, "ONLINE"),
-            AgentStatus::Degraded         => write!(f, "DEGRADED"),
+            AgentStatus::Booting => write!(f, "BOOTING"),
+            AgentStatus::Initializing => write!(f, "INITIALIZING"),
+            AgentStatus::Online => write!(f, "ONLINE"),
+            AgentStatus::Degraded => write!(f, "DEGRADED"),
             AgentStatus::OfflineBuffering => write!(f, "OFFLINE_BUFFERING"),
-            AgentStatus::Recovering       => write!(f, "RECOVERING"),
-            AgentStatus::Failed           => write!(f, "FAILED"),
-            AgentStatus::ShuttingDown     => write!(f, "SHUTTING_DOWN"),
+            AgentStatus::Recovering => write!(f, "RECOVERING"),
+            AgentStatus::Failed => write!(f, "FAILED"),
+            AgentStatus::ShuttingDown => write!(f, "SHUTTING_DOWN"),
         }
     }
 }
@@ -48,9 +48,9 @@ pub enum CollectorStatus {
 impl std::fmt::Display for CollectorStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CollectorStatus::Healthy  => write!(f, "Healthy"),
+            CollectorStatus::Healthy => write!(f, "Healthy"),
             CollectorStatus::Degraded => write!(f, "Degraded"),
-            CollectorStatus::Failed   => write!(f, "Failed"),
+            CollectorStatus::Failed => write!(f, "Failed"),
             CollectorStatus::Disabled => write!(f, "Disabled"),
         }
     }
@@ -58,11 +58,11 @@ impl std::fmt::Display for CollectorStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectorHealthRecord {
-    pub name:          String,
-    pub status:        CollectorStatus,
-    pub last_run:      Option<DateTime<Utc>>,
-    pub last_success:  Option<DateTime<Utc>>,
-    pub last_failure:  Option<DateTime<Utc>>,
+    pub name: String,
+    pub status: CollectorStatus,
+    pub last_run: Option<DateTime<Utc>>,
+    pub last_success: Option<DateTime<Utc>>,
+    pub last_failure: Option<DateTime<Utc>>,
     pub failure_count: u32,
     pub error_message: Option<String>,
 }
@@ -70,11 +70,11 @@ pub struct CollectorHealthRecord {
 impl CollectorHealthRecord {
     pub fn new(name: &str) -> Self {
         Self {
-            name:          name.to_string(),
-            status:        CollectorStatus::Healthy,
-            last_run:      None,
-            last_success:  None,
-            last_failure:  None,
+            name: name.to_string(),
+            status: CollectorStatus::Healthy,
+            last_run: None,
+            last_success: None,
+            last_failure: None,
             failure_count: 0,
             error_message: None,
         }
@@ -82,9 +82,9 @@ impl CollectorHealthRecord {
 
     pub fn record_success(&mut self) {
         let now = Utc::now();
-        self.last_run     = Some(now);
+        self.last_run = Some(now);
         self.last_success = Some(now);
-        self.status       = CollectorStatus::Healthy;
+        self.status = CollectorStatus::Healthy;
         self.error_message = None;
         // Reset failure count after consecutive successes
         if self.failure_count > 0 {
@@ -94,7 +94,7 @@ impl CollectorHealthRecord {
 
     pub fn record_failure(&mut self, error: &str) {
         let now = Utc::now();
-        self.last_run     = Some(now);
+        self.last_run = Some(now);
         self.last_failure = Some(now);
         self.failure_count += 1;
         self.error_message = Some(error.to_string());
@@ -114,14 +114,14 @@ impl CollectorHealthRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthSnapshot {
     pub agent_status: AgentStatus,
-    pub collectors:   HashMap<String, CollectorHealthRecord>,
-    pub snapshot_at:  DateTime<Utc>,
-    pub uptime_secs:  u64,
+    pub collectors: HashMap<String, CollectorHealthRecord>,
+    pub snapshot_at: DateTime<Utc>,
+    pub uptime_secs: u64,
 }
 
 #[derive(Clone)]
 pub struct HealthEngine {
-    status:     Arc<RwLock<AgentStatus>>,
+    status: Arc<RwLock<AgentStatus>>,
     collectors: Arc<RwLock<HashMap<String, CollectorHealthRecord>>>,
     started_at: DateTime<Utc>,
     log_engine: Option<LogEngine>,
@@ -130,7 +130,7 @@ pub struct HealthEngine {
 impl HealthEngine {
     pub fn new() -> Self {
         Self {
-            status:     Arc::new(RwLock::new(AgentStatus::Booting)),
+            status: Arc::new(RwLock::new(AgentStatus::Booting)),
             collectors: Arc::new(RwLock::new(HashMap::new())),
             started_at: Utc::now(),
             log_engine: None,
@@ -150,11 +150,16 @@ impl HealthEngine {
                 _ => "Info",
             };
             tokio::spawn(async move {
-                let _ = log.log(
-                    log.new_entry(severity, "health_engine", &format!(
-                        "System state changed to {}", to_s,
-                    )).with_tags(&["health", "state"]),
-                ).await;
+                let _ = log
+                    .log(
+                        log.new_entry(
+                            severity,
+                            "health_engine",
+                            &format!("System state changed to {}", to_s,),
+                        )
+                        .with_tags(&["health", "state"]),
+                    )
+                    .await;
             });
         }
     }
@@ -174,11 +179,16 @@ impl HealthEngine {
                         AgentStatus::Failed | AgentStatus::Degraded => "Warning",
                         _ => "Info",
                     };
-                    let _ = l.log(
-                        l.new_entry(severity, "health_engine", &format!(
-                            "System state changed to {}", new_s,
-                        )).with_tags(&["health", "state"]),
-                    ).await;
+                    let _ = l
+                        .log(
+                            l.new_entry(
+                                severity,
+                                "health_engine",
+                                &format!("System state changed to {}", new_s,),
+                            )
+                            .with_tags(&["health", "state"]),
+                        )
+                        .await;
                 }
             }
         });
@@ -214,17 +224,26 @@ impl HealthEngine {
 
         if old_status != new_status {
             if let Some(ref log) = self.log_engine {
-                let _ = log.error("metrics_engine", &format!(
-                    "{} collector status changed to {}: {}",
-                    name, new_status, error,
-                )).await;
+                let _ = log
+                    .error(
+                        "metrics_engine",
+                        &format!(
+                            "{} collector status changed to {}: {}",
+                            name, new_status, error,
+                        ),
+                    )
+                    .await;
             }
         }
 
         // Escalate agent status if any collector has failed
         let collectors = self.collectors.read().await;
-        let any_failed = collectors.values().any(|c| c.status == CollectorStatus::Failed);
-        let any_degraded = collectors.values().any(|c| c.status == CollectorStatus::Degraded);
+        let any_failed = collectors
+            .values()
+            .any(|c| c.status == CollectorStatus::Failed);
+        let any_degraded = collectors
+            .values()
+            .any(|c| c.status == CollectorStatus::Degraded);
         drop(collectors);
 
         let mut status = self.status.write().await;
@@ -232,21 +251,31 @@ impl HealthEngine {
             *status = AgentStatus::Degraded;
             drop(status);
             if let Some(ref log) = self.log_engine {
-                let _ = log.log(
-                    log.new_entry("Warning", "health_engine", &format!(
-                        "System state changed to {}", AgentStatus::Degraded,
-                    )).with_tags(&["health", "state"]),
-                ).await;
+                let _ = log
+                    .log(
+                        log.new_entry(
+                            "Warning",
+                            "health_engine",
+                            &format!("System state changed to {}", AgentStatus::Degraded,),
+                        )
+                        .with_tags(&["health", "state"]),
+                    )
+                    .await;
             }
         } else if !any_failed && !any_degraded && *status == AgentStatus::Degraded {
             *status = AgentStatus::Online;
             drop(status);
             if let Some(ref log) = self.log_engine {
-                let _ = log.log(
-                    log.new_entry("Info", "health_engine", &format!(
-                        "System state changed to {}", AgentStatus::Online,
-                    )).with_tags(&["health", "state"]),
-                ).await;
+                let _ = log
+                    .log(
+                        log.new_entry(
+                            "Info",
+                            "health_engine",
+                            &format!("System state changed to {}", AgentStatus::Online,),
+                        )
+                        .with_tags(&["health", "state"]),
+                    )
+                    .await;
             }
         }
     }
@@ -260,13 +289,13 @@ impl HealthEngine {
     }
 
     pub async fn snapshot(&self) -> HealthSnapshot {
-        let now   = Utc::now();
+        let now = Utc::now();
         let uptime = (now - self.started_at).num_seconds().max(0) as u64;
         HealthSnapshot {
             agent_status: self.status.read().await.clone(),
-            collectors:   self.collectors.read().await.clone(),
-            snapshot_at:  now,
-            uptime_secs:  uptime,
+            collectors: self.collectors.read().await.clone(),
+            snapshot_at: now,
+            uptime_secs: uptime,
         }
     }
 

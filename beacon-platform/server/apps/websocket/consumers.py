@@ -69,6 +69,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
             "logs":               self.handle_logs,
             "collector_health":   self.handle_collector_health,
             "status_update":      self.handle_status_update,
+            "config_request":     self.handle_config_request,
         }
         handler = handlers.get(msg_type)
         if handler:
@@ -164,10 +165,22 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         logger.debug("AgentIngestConsumer status_update — %s status set to %s", self.agent_id, new_status)
         await self.send_json({"type": "status_ack", "status": new_status})
 
+    async def handle_config_request(self, data):
+        """Respond to agent's config_request with the current MetricConfig."""
+        agent_id = data.get("agent_id") or self.agent_id
+        if not agent_id:
+            await self.send_json({"error": "agent_id is required for config_request"})
+            return
+        config_data = await self.get_metric_config(agent_id)
+        await self.send_json({
+            "type": "config_update",
+            "payload": config_data,
+        })
+
     # ─── Channel layer message handlers ───────────────────────────────────────
 
     async def agent_command(self, event):
-        """Forward server→agent commands."""
+        """Forward server→agent commands (e.g. config_update)."""
         await self.send_json(event.get("data", {}))
 
     # ─── DB helpers ───────────────────────────────────────────────────────────
@@ -251,6 +264,13 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         if objects:
             LogEntry.objects.bulk_create(objects, batch_size=500)
         return len(objects)
+
+    @database_sync_to_async
+    def get_metric_config(self, agent_id):
+        from apps.metrics.models import MetricConfig
+        from apps.metrics.serializers import MetricConfigSerializer
+        config, _ = MetricConfig.objects.get_or_create(agent_id=agent_id)
+        return MetricConfigSerializer(config).data
 
     @database_sync_to_async
     def update_collector_health(self, agent_id, payload):

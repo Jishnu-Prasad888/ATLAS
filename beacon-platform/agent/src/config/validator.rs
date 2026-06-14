@@ -8,8 +8,8 @@
 // at runtime.  `registration::resolve_secret()` enforces that at least one
 // source provides a non-empty value right before the registration attempt.
 
-use anyhow::{bail, Result};
 use crate::config::AgentConfig;
+use anyhow::{bail, Result};
 
 pub struct ConfigValidator;
 
