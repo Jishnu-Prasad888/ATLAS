@@ -408,7 +408,7 @@ function TileProcesses({ data }) {
 }
 
 function TileImages({ data }) {
-  const images = data.images.images;
+  const images = Array.isArray(data.images?.images) ? data.images.images : [];
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Images" count={images.length} />

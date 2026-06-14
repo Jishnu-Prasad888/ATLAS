@@ -14,7 +14,7 @@ import {
   AgentStatusBadge, SeverityBadge, Sparkline, LoadingState, EmptyState, Tag, Button,
 } from '@/components/common'
 import {
-  formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId, gaugeColor,
+  formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId
 } from '@/utils'
 import type { Agent, CpuData, RamData, StorageData, NetworkData, KernelData, LogEntry } from '@/types'
 
@@ -446,60 +446,6 @@ const MetricPanel = memo(function MetricPanel({
   )
 })
 
-// ─── Log panel ────────────────────────────────────────────────────────────────
-
-const LogPanel = memo(function LogPanel({
-  agentId,
-}: {
-  agentId: string | null
-}) {
-  const { logs: rawLogs } = useLiveLogs(agentId)
-  const logs = useCappedLogs(rawLogs)
-
-  // Auto-scroll to bottom as new entries arrive
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const isNearBottom = useRef(true)
-
-  const onScroll = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-  }, [])
-
-  useEffect(() => {
-    if (isNearBottom.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [logs.length])
-
-  return (
-      <div className="panel" style={{ display: 'flex', flexDirection: 'column', height: 260 }}>
-      <div className="panel-header">
-        <span className="panel-label">Live Logs</span>
-          <span style={{ fontSize: 9.5, color: 'var(--color-text-dim)' }}>
-            {logs.length > 0 ? `${logs.length} entries${logs.length >= LOG_BUFFER_MAX ? ' (capped)' : ''}` : ''}
-          </span>
-        </div>
-        <div
-          ref={containerRef}
-          onScroll={onScroll}
-          style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
-      >
-        {logs.length === 0 ? (
-          <div style={{ paddingTop: 20 }}>
-            <EmptyState message={agentId ? 'Waiting for log entries…' : 'Select an agent'} />
-          </div>
-        ) : (
-          <>
-            {logs.map((log) => <LogRow key={log.id} log={log} />)}
-            <div ref={bottomRef} />
-          </>
-        )}
-      </div>
-    </div>
-  )
-})
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
@@ -620,7 +566,6 @@ export function DashboardPage() {
             agentId={activeAgentId}
             hostname={activeAgent?.hostname}
           />
-          <LogPanel agentId={activeAgentId} />
         </div>
 
       </div>
