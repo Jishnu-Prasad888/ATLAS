@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAgents, useAgentHealth, useAgentMutations, useMetricConfig, useLatestMetrics, usePersistedState } from '@/hooks'
+import { useAgents, useAgentHealth, useAgentMutations, useMetricConfig, usePersistedState } from '@/hooks'
 import { telemetryApi } from '@/api'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
@@ -17,12 +17,10 @@ import {
   KvRow,
   Tag,
   Toggle,
-  GaugeBar,
   SectionHeader,
 } from '@/components/common'
-import { DockerMetricsCard, KubernetesMetricsCard } from '@/components/agents'
-import { formatBytes, shortAgentId, timeAgo, formatTimestamp, validateHostname } from '@/utils'
-import type { Agent, MetricConfig, DockerData, KubernetesData } from '@/types'
+import { timeAgo, formatTimestamp, validateHostname } from '@/utils'
+import type { Agent, MetricConfig } from '@/types'
 
 type ConfirmAction =
   | { type: 'delete'; agentId: string; hostname: string }
@@ -195,10 +193,6 @@ function AgentDetail({
 
   const { data: health } = useAgentHealth(agent.agent_id)
   const { data: config } = useMetricConfig(agent.agent_id)
-  const { data: latestMetrics, isLoading: metricsLoading } = useLatestMetrics(agent.agent_id)
-
-  const dockerData = latestMetrics?.['docker']?.data as DockerData | undefined
-  const k8sData = latestMetrics?.['kubernetes']?.data as KubernetesData | undefined
 
   const handleRename = () => {
     const err = validateHostname(newHostname)
@@ -321,16 +315,6 @@ function AgentDetail({
             </table>
           </div>
         </Card>
-      )}
-
-      {/* Docker metrics */}
-      {dockerData && (
-        <DockerMetricsCard data={dockerData} loading={metricsLoading} />
-      )}
-
-      {/* Kubernetes metrics */}
-      {k8sData && (
-        <KubernetesMetricsCard data={k8sData} loading={metricsLoading} />
       )}
 
       {/* Raw metadata */}
