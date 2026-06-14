@@ -1,2 +1,2 @@
-export { DockerMetricsCard } from './DockerMetricsCard'
+export { default as DockerMetricsCard } from './DockerMetricsCard'
 export { KubernetesMetricsCard } from './KubernetesMetricsCard'

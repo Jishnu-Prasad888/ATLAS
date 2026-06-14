@@ -1,508 +1,596 @@
-import { useMemo } from 'react'
-import { SectionHeader, GaugeBar, Tag } from '@/components/common'
-import { formatBytes, formatPct, timeAgo } from '@/utils'
-import type {
-  DockerData,
-  ContainerInventoryItem,
-  ContainerCpuSample,
-  ContainerMemorySample,
-  ContainerDiskSample,
-  ContainerNetworkSample,
-  ContainerLogSample,
-  ContainerSecurityProfile,
-  ContainerHealthStatus,
-  ContainerTopologySample,
-  ContainerProcessSample,
-  ContainerFilesystemSample,
-} from '@/types'
+import { useMemo, useState, useRef, useCallback } from "react";
 
-const statePalette: Record<string, string> = {
-  running: 'text-green-400',
-  exited: 'text-[--color-text-dim]',
-  paused: 'text-yellow-400',
-  restarting: 'text-orange-400',
-  created: 'text-blue-400',
-  dead: 'text-red-400',
-  removing: 'text-red-400',
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function formatBytes(b) {
+  if (b == null || isNaN(b)) return "–";
+  if (b === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(Math.abs(b)) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(1) + " " + units[i];
+}
+function timeAgo(ts) {
+  if (!ts) return "–";
+  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ─── Mock data generator ─────────────────────────────────────────────────────
+function generateMockData() {
+  const containers = [
+    { id: "a1b2c3d4e5f6", name: "api-gateway",   image: "nginx:alpine",          state: "running", restarts: 0 },
+    { id: "b2c3d4e5f6a1", name: "postgres-db",   image: "postgres:15",           state: "running", restarts: 1 },
+    { id: "c3d4e5f6a1b2", name: "redis-cache",   image: "redis:7-alpine",        state: "running", restarts: 0 },
+    { id: "d4e5f6a1b2c3", name: "worker-queue",  image: "python:3.12-slim",      state: "running", restarts: 3 },
+    { id: "e5f6a1b2c3d4", name: "prometheus",    image: "prom/prometheus:v2.47", state: "running", restarts: 0 },
+    { id: "f6a1b2c3d4e5", name: "old-migrator",  image: "node:18",               state: "exited",  restarts: 0 },
+  ];
+  const rng = (lo, hi) => lo + Math.random() * (hi - lo);
+  const cpuSamples  = containers.map(c => ({ container_id: c.id, cpu_percent: c.state === "running" ? rng(0.5, 45) : 0, cpu_system_usage: Math.floor(rng(1e9, 9e9)), throttled_periods: Math.floor(rng(0, 20)), throttled_time: Math.floor(rng(0, 1e7)) }));
+  const memSamples  = containers.map(c => ({ container_id: c.id, memory_usage: c.state === "running" ? Math.floor(rng(50e6, 800e6)) : 0, memory_limit: 2 * 1024 * 1024 * 1024, memory_percent: c.state === "running" ? rng(2, 38) : 0 }));
+  const netSamples  = containers.map(c => ({ container_id: c.id, interfaces: [{ name: "eth0", rx_bytes: Math.floor(rng(1e6, 500e6)), tx_bytes: Math.floor(rng(1e6, 200e6)) }] }));
+  const diskSamples = containers.map(c => ({ container_id: c.id, read_bytes: Math.floor(rng(0, 100e6)), write_bytes: Math.floor(rng(0, 50e6)) }));
+  const healthStatuses = containers.filter(c => c.state === "running").map(c => ({ container_id: c.id, health_status: Math.random() > 0.15 ? "healthy" : "unhealthy" }));
+  const events = [
+    { timestamp: new Date(Date.now() - 2  * 60000).toISOString(), container_id: "a1b2c3d4e5f6", event: "start",         attributes: { exitCode: "0" } },
+    { timestamp: new Date(Date.now() - 8  * 60000).toISOString(), container_id: "d4e5f6a1b2c3", event: "restart",       attributes: {} },
+    { timestamp: new Date(Date.now() - 15 * 60000).toISOString(), container_id: "f6a1b2c3d4e5", event: "die",           attributes: { exitCode: "0" } },
+    { timestamp: new Date(Date.now() - 22 * 60000).toISOString(), container_id: "b2c3d4e5f6a1", event: "health_status", attributes: { status: "healthy" } },
+    { timestamp: new Date(Date.now() - 45 * 60000).toISOString(), container_id: "c3d4e5f6a1b2", event: "start",         attributes: {} },
+  ];
+  const logSamples = containers.slice(0, 4).map(c => ({ container_id: c.id, entries: [
+    { timestamp: new Date(Date.now() - Math.floor(rng(1000, 600000))).toISOString(),   stream: Math.random() > 0.8 ? "stderr" : "stdout", message: `[INFO] ${c.name} heartbeat ok` },
+    { timestamp: new Date(Date.now() - Math.floor(rng(600000, 3600000))).toISOString(), stream: "stdout", message: `[INFO] Connection pool size=10` },
+  ]}));
+  const securityProfiles = containers.slice(0, 4).map(c => ({ container_id: c.id, privileged: false, readonly_rootfs: Math.random() > 0.5, host_network: false, host_pid: false, docker_socket_mounted: false, user: "1000", capabilities: Math.random() > 0.5 ? ["NET_BIND_SERVICE"] : [], seccomp_profile: "runtime/default", apparmor_profile: "docker-default" }));
+  const processSamples = containers.filter(c => c.state === "running").slice(0, 3).map(c => ({ container_id: c.id, capped: false, processes: [
+    { pid: Math.floor(rng(100, 999)),  command: c.name,  cpu_percent: rng(0.1, 5), memory_bytes: Math.floor(rng(10e6, 200e6)) },
+    { pid: Math.floor(rng(1000, 9999)), command: "/bin/sh", cpu_percent: 0,          memory_bytes: Math.floor(rng(1e6, 5e6)) },
+  ]}));
+  const topologySamples = containers.filter(c => c.state === "running").slice(0, 3).map((c, i) => ({ container_id: c.id, networks: [{ network_name: "app-network", ip_address: `172.18.0.${i + 2}`, gateway: "172.18.0.1", ports: i === 0 ? [{ private_port: 80, public_port: 8080, protocol: "tcp" }] : [] }] }));
+  const images = containers.map(c => ({ image_id: c.id, repo_tags: [c.image], repo_digests: [] }));
+  const totalCpu = cpuSamples.reduce((s, x) => s + x.cpu_percent, 0) / cpuSamples.filter(x => x.cpu_percent > 0).length;
+  const totalMem = memSamples.reduce((s, x) => s + x.memory_usage, 0);
+  const totalMemLimit = memSamples.reduce((s, x) => s + x.memory_limit, 0);
+  const totalRx = netSamples.reduce((s, x) => s + x.interfaces.reduce((a, i) => a + i.rx_bytes, 0), 0);
+  const totalTx = netSamples.reduce((s, x) => s + x.interfaces.reduce((a, i) => a + i.tx_bytes, 0), 0);
+  return {
+    inventory: { containers: containers.map(c => ({ container_id: c.id, name: c.name, image: c.image, state: c.state, restart_count: c.restarts, created: new Date(Date.now() - rng(1e9, 9e9)).toISOString() })) },
+    summary: { total_containers: containers.length, state_counts: { running: 5, exited: 1 }, last_event: events[0].timestamp, resource_totals: { cpu_percent_avg: totalCpu, cpu_system_usage_sum: cpuSamples.reduce((s, x) => s + x.cpu_system_usage, 0), cpu_throttled_periods_sum: cpuSamples.reduce((s, x) => s + x.throttled_periods, 0), cpu_throttled_time_sum: cpuSamples.reduce((s, x) => s + x.throttled_time, 0), memory_usage_bytes_sum: totalMem, memory_limit_bytes_sum: totalMemLimit, memory_percent_avg: (totalMem / totalMemLimit) * 100, network_rx_bytes_sum: totalRx, network_tx_bytes_sum: totalTx, block_read_bytes_sum: diskSamples.reduce((s, x) => s + x.read_bytes, 0), block_write_bytes_sum: diskSamples.reduce((s, x) => s + x.write_bytes, 0), pids_sum: 42 } },
+    host: { metrics: { hostname: "prod-host-01", cpu_percent: 24.7, memory_used: 6.2 * 1024 * 1024 * 1024, memory_total: 16 * 1024 * 1024 * 1024, disk_used: 48 * 1024 * 1024 * 1024, disk_total: 256 * 1024 * 1024 * 1024, load_1: 1.42, load_5: 1.18, load_15: 0.97, uptime: 432000 } },
+    metrics: { cpu: { samples: cpuSamples }, memory: { samples: memSamples }, disk: { samples: diskSamples }, network: { samples: netSamples } },
+    health: { statuses: healthStatuses },
+    lifecycle: { events },
+    logs: { samples: logSamples },
+    security: { profiles: securityProfiles },
+    processes: { samples: processSamples },
+    filesystem: { samples: [] },
+    topology: { samples: topologySamples },
+    images: { images },
+    collector_disabled: false,
+  };
 }
 
-const healthPalette: Record<string, string> = {
-  healthy: 'text-green-400',
-  starting: 'text-blue-400',
-  unhealthy: 'text-red-400',
-  none: 'text-[--color-text-muted]',
-}
+// ─── CSS variable tokens ──────────────────────────────────────────────────────
+const C = {
+  bg:           "var(--color-bg, #0b0d10)",
+  surface:      "var(--color-surface, rgba(255,255,255,0.02))",
+  surface2:     "var(--color-surface-2, rgba(255,255,255,0.04))",
+  border:       "var(--color-border, rgba(255,255,255,0.08))",
+  borderStrong: "var(--color-border-strong, rgba(255,255,255,0.14))",
+  text:         "var(--color-text, #f1f5f9)",
+  muted:        "var(--color-text-muted, rgba(255,255,255,0.45))",
+  dim:          "var(--color-text-dim, rgba(255,255,255,0.25))",
+};
 
-const sectionCardClass = 'rounded-lg border border-[--color-border] bg-[--color-surface-2] p-4'
+const STATE_COLOR = {
+  running:    "#22c55e",
+  exited:     "#6b7280",
+  paused:     "#eab308",
+  restarting: "#f97316",
+  created:    "#3b82f6",
+  dead:       "#ef4444",
+  removing:   "#ef4444",
+};
 
-type SampleMaps = {
-  cpu: Map<string, ContainerCpuSample>
-  memory: Map<string, ContainerMemorySample>
-  disk: Map<string, ContainerDiskSample>
-  network: Map<string, ContainerNetworkSample>
-  health: Map<string, ContainerHealthStatus>
-}
+const HEALTH_COLOR = {
+  healthy:   "#22c55e",
+  unhealthy: "#ef4444",
+  starting:  "#3b82f6",
+  none:      "#6b7280",
+};
 
-function mapByContainer<T extends { container_id: string }>(samples: T[]): Map<string, T> {
-  const map = new Map<string, T>()
-  for (const sample of samples) {
-    map.set(sample.container_id, sample)
-  }
-  return map
-}
-
-function SummaryBanner({ data }: { data: DockerData }) {
-  const { summary, host } = data
-  const totals = summary.resource_totals
-  const hostMetrics = host.metrics
-
+// ─── Micro components ─────────────────────────────────────────────────────────
+function Dot({ color }) {
   return (
-    <div className="rounded-xl p-5 mb-6 border border-[--color-border] bg-gradient-to-r from-[#0a141f] via-[#0f1d33] to-[#101a28] shadow-lg">
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-        <div className="space-y-3">
-          <div>
-            <p className="text-xs text-[--color-text-muted] font-mono uppercase tracking-widest">Docker Inventory</p>
-            <h3 className="text-2xl font-mono font-semibold text-white mt-1">
-              {summary.total_containers} container{summary.total_containers === 1 ? '' : 's'} observed
-            </h3>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(summary.state_counts).map(([state, count]) => (
-              <span
-                key={state}
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-white/10 bg-white/5 text-xs font-mono text-white/80"
-              >
-                <span className={statePalette[state] ?? 'text-white/60'}>{state}</span>
-                <span className="tabular-nums">{count}</span>
-              </span>
-            ))}
-          </div>
-          {summary.last_event && (
-            <p className="text-xs font-mono text-white/60">
-              Last lifecycle event {timeAgo(summary.last_event)}
-            </p>
-          )}
-        </div>
+    <span style={{
+      display: "inline-block", width: 6, height: 6,
+      borderRadius: "50%", background: color,
+      marginRight: 6, flexShrink: 0,
+    }} />
+  );
+}
 
-        {totals && (
-          <div className="grid sm:grid-cols-2 gap-4 bg-black/20 backdrop-blur-sm border border-white/10 rounded-lg p-4">
-            <div>
-              <GaugeBar label="CPU Average" value={totals.cpu_percent_avg} />
-              <p className="text-[10px] text-white/60 font-mono mt-2">
-                Σ {totals.cpu_system_usage_sum.toLocaleString()} system ticks
-              </p>
-            </div>
-            <div>
-              <GaugeBar label="Memory Average" value={totals.memory_percent_avg} />
-              <p className="text-[10px] text-white/60 font-mono mt-2">
-                {formatBytes(totals.memory_usage_bytes_sum)} / {formatBytes(totals.memory_limit_bytes_sum)} committed
-              </p>
-            </div>
-            <div>
-              <p className="text-[11px] font-mono text-white/70 uppercase tracking-wide mb-1">I/O totals</p>
-              <div className="text-[10px] text-white/70 font-mono space-y-1">
-                <p>Net RX {formatBytes(totals.network_rx_bytes_sum)}</p>
-                <p>Net TX {formatBytes(totals.network_tx_bytes_sum)}</p>
-                <p>Blk R {formatBytes(totals.block_read_bytes_sum)} / W {formatBytes(totals.block_write_bytes_sum)}</p>
-              </div>
-            </div>
-            <div>
-              <p className="text-[11px] font-mono text-white/70 uppercase tracking-wide mb-1">Scheduler pressure</p>
-              <div className="text-[10px] text-white/70 font-mono space-y-1">
-                <p>Throttled periods {totals.cpu_throttled_periods_sum}</p>
-                <p>Throttled time {totals.cpu_throttled_time_sum.toLocaleString()}</p>
-                <p>PIDs observed {totals.pids_sum}</p>
-              </div>
-            </div>
-          </div>
-        )}
+function MiniGauge({ value, color }) {
+  const pct = clamp(value ?? 0, 0, 100);
+  return (
+    <div style={{ position: "relative", height: 2, background: C.border, borderRadius: 999, overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: "0 auto 0 0", width: `${pct}%`, background: color, borderRadius: 999, transition: "width .4s ease" }} />
+    </div>
+  );
+}
 
-        {hostMetrics && (
-          <div className="min-w-[220px] bg-black/25 border border-white/10 rounded-lg p-4">
-            <p className="text-[11px] font-mono text-white/70 uppercase tracking-widest mb-2">Host Snapshot</p>
-            <div className="space-y-1.5 text-[11px] text-white/80 font-mono">
-              <p>Hostname {hostMetrics.hostname}</p>
-              <p>CPU {hostMetrics.cpu_percent.toFixed(1)}%</p>
-              <p>Memory {formatBytes(hostMetrics.memory_used)} / {formatBytes(hostMetrics.memory_total)}</p>
-              <p>Disk {formatBytes(hostMetrics.disk_used)} / {formatBytes(hostMetrics.disk_total)}</p>
-              <p>Load {hostMetrics.load_1.toFixed(2)} / {hostMetrics.load_5.toFixed(2)} / {hostMetrics.load_15.toFixed(2)}</p>
-              <p>Uptime {Math.round(hostMetrics.uptime / 3600)}h</p>
+function SectionLabel({ title, count }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+      <span style={{ fontSize: 10, fontWeight: 600, color: C.dim, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em" }}>{title}</span>
+      {count != null && (
+        <span style={{ marginLeft: "auto", fontSize: 9, background: C.surface2, color: C.dim, border: `1px solid ${C.border}`, borderRadius: 20, padding: "1px 7px", fontFamily: "monospace" }}>{count}</span>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub }) {
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", minWidth: 0 }}>
+      <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: C.text, fontFamily: "monospace", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 9, color: C.dim, marginTop: 2, fontFamily: "monospace" }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Tiles ───────────────────────────────────────────────────────────────────
+function TileHostSnapshot({ data }) {
+  const m = data.host.metrics;
+  const cpuPct  = m.cpu_percent;
+  const memPct  = (m.memory_used  / m.memory_total) * 100;
+  const diskPct = (m.disk_used    / m.disk_total)   * 100;
+  const rows = [
+    { label: "CPU",    pct: cpuPct,  val: cpuPct.toFixed(1) + "%",                                              color: cpuPct  > 80 ? "#ef4444" : cpuPct  > 50 ? "#f97316" : "#22c55e" },
+    { label: "Memory", pct: memPct,  val: formatBytes(m.memory_used) + " / " + formatBytes(m.memory_total),     color: memPct  > 85 ? "#ef4444" : "#22c55e" },
+    { label: "Disk",   pct: diskPct, val: formatBytes(m.disk_used)   + " / " + formatBytes(m.disk_total),       color: diskPct > 90 ? "#ef4444" : "#22c55e" },
+  ];
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Host" />
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.text, fontFamily: "monospace", marginBottom: 2 }}>{m.hostname}</div>
+      <div style={{ fontSize: 10, color: C.dim, fontFamily: "monospace", marginBottom: 16 }}>
+        Up {Math.round(m.uptime / 3600)}h &nbsp;·&nbsp; load {m.load_1.toFixed(2)} / {m.load_5.toFixed(2)} / {m.load_15.toFixed(2)}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+        {rows.map(r => (
+          <div key={r.label}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+              <span style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "monospace" }}>{r.label}</span>
+              <span style={{ fontSize: 9, color: r.color, fontFamily: "monospace", fontWeight: 600 }}>{r.val}</span>
             </div>
+            <MiniGauge value={r.pct} color={r.color} />
           </div>
-        )}
+        ))}
       </div>
     </div>
-  )
+  );
 }
 
-function InventoryTable({
-  containers,
-  maps,
-}: {
-  containers: ContainerInventoryItem[]
-  maps: SampleMaps
-}) {
-  if (!containers.length) {
-    return <p className="text-xs text-[--color-text-dim] font-mono">No containers detected.</p>
-  }
-
+function TileSummary({ data }) {
+  const { summary } = data;
+  const t = summary.resource_totals;
   return (
-    <div className={sectionCardClass}>
-      <SectionHeader
-        title="Container Inventory"
-        description="Live resource posture per container"
-      />
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-xs font-mono">
-          <thead>
-            <tr className="border-b border-[--color-border] text-[--color-text-muted]">
-              <th className="text-left py-1.5 pr-3 font-normal">Container</th>
-              <th className="text-left py-1.5 pr-3 font-normal">State</th>
-              <th className="text-right py-1.5 pr-3 font-normal">CPU</th>
-              <th className="text-right py-1.5 pr-3 font-normal">Memory</th>
-              <th className="text-right py-1.5 pr-3 font-normal">Net I/O</th>
-              <th className="text-right py-1.5 pr-3 font-normal">Blk I/O</th>
-              <th className="text-right py-1.5 font-normal">Restarts</th>
-            </tr>
-          </thead>
-          <tbody>
-            {containers.map((c) => {
-              const cpu = maps.cpu.get(c.container_id)
-              const mem = maps.memory.get(c.container_id)
-              const disk = maps.disk.get(c.container_id)
-              const net = maps.network.get(c.container_id)
-              const health = maps.health.get(c.container_id)
-
-              const interfaces = net?.interfaces ?? []
-              const rx = interfaces.reduce((sum, iface) => sum + iface.rx_bytes, 0)
-              const tx = interfaces.reduce((sum, iface) => sum + iface.tx_bytes, 0)
-
-              const stateClass = statePalette[c.state] ?? 'text-[--color-text]'
-              const healthBadge = health?.health_status ?? (c.state === 'running' ? 'unknown' : 'none')
-
-              return (
-                <tr key={c.container_id} className="border-b border-[--color-border] last:border-0 hover:bg-[--color-surface] transition-colors">
-                  <td className="py-2 pr-3">
-                    <div className="flex flex-col">
-                      <span className="text-[--color-text] truncate" title={c.name}>{c.name}</span>
-                      <span className="text-[--color-text-dim] text-[10px] truncate" title={c.image}>{c.image}</span>
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3">
-                    <div className="flex items-center gap-2">
-                      <span className={stateClass}>{c.state}</span>
-                      <span className={`text-[10px] ${healthPalette[healthBadge] ?? 'text-[--color-text-muted]'}`}>
-                        {healthBadge}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-[--color-text]">
-                    {cpu ? `${cpu.cpu_percent.toFixed(1)}%` : '--'}
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-[--color-text]">
-                    {mem ? `${formatBytes(mem.memory_usage)} (${formatPct(mem.memory_percent)})` : '--'}
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-[--color-text]">
-                    {net ? `${formatBytes(rx)} / ${formatBytes(tx)}` : '--'}
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-[--color-text]">
-                    {disk ? `${formatBytes(disk.read_bytes)} / ${formatBytes(disk.write_bytes)}` : '--'}
-                  </td>
-                  <td className="py-2 text-right tabular-nums text-[--color-text]">{c.restart_count}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Cluster" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, flex: 1 }}>
+        <StatCard label="Containers" value={summary.total_containers}              sub={`${summary.state_counts.running ?? 0} running`} />
+        <StatCard label="CPU avg"    value={t.cpu_percent_avg.toFixed(1) + "%"}    sub={`${t.cpu_throttled_periods_sum} throttled`} />
+        <StatCard label="Memory"     value={formatBytes(t.memory_usage_bytes_sum)} sub={`/ ${formatBytes(t.memory_limit_bytes_sum)}`} />
+        <StatCard label="Net I/O"    value={formatBytes(t.network_rx_bytes_sum + t.network_tx_bytes_sum)} sub={`${t.pids_sum} PIDs`} />
+      </div>
+      <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
+        {Object.entries(summary.state_counts).map(([state, count]) => (
+          <div key={state} style={{ display: "flex", alignItems: "center", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20, padding: "3px 9px", gap: 5 }}>
+            <Dot color={STATE_COLOR[state] ?? "#888"} />
+            <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{state}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>{count}</span>
+          </div>
+        ))}
       </div>
     </div>
-  )
+  );
 }
 
-function EventsSection({
-  events,
-  containerName,
-}: {
-  events: DockerData['lifecycle']['events']
-  containerName: (id: string) => string
-}) {
-  if (!events.length) {
-    return null
-  }
-
+function TileInventory({ data }) {
+  const containers = data.inventory.containers;
+  const cpuMap    = useMemo(() => new Map(data.metrics.cpu.samples.map(s    => [s.container_id, s])), [data]);
+  const memMap    = useMemo(() => new Map(data.metrics.memory.samples.map(s => [s.container_id, s])), [data]);
+  const healthMap = useMemo(() => new Map(data.health.statuses.map(s         => [s.container_id, s])), [data]);
   return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Lifecycle Events" description="Last 20 Docker daemon events" />
-      <ul className="space-y-2">
-        {events.slice(0, 20).map((event) => (
-          <li key={`${event.timestamp}-${event.container_id}-${event.event}`} className="flex items-start gap-3">
-            <span className="text-[10px] text-[--color-text-muted] font-mono shrink-0 w-20">
-              {timeAgo(event.timestamp)}
-            </span>
-            <div className="flex-1">
-              <p className="text-xs font-mono text-[--color-text]">
-                <span className="text-[--color-text-muted]">{containerName(event.container_id)}</span> →{' '}
-                <span className="text-[--color-text] uppercase tracking-wide">{event.event}</span>
-              </p>
-              {Object.keys(event.attributes).length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {Object.entries(event.attributes).map(([k, v]) => (
-                    <Tag key={k}>{k}:{v}</Tag>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Containers" count={containers.length} />
+      <div style={{ flex: 1, overflow: "auto", marginRight: -4, paddingRight: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {containers.map(c => {
+            const cpu    = cpuMap.get(c.container_id);
+            const mem    = memMap.get(c.container_id);
+            const health = healthMap.get(c.container_id);
+            const cpuVal = cpu?.cpu_percent ?? 0;
+            const memPct = mem?.memory_percent ?? 0;
+            const hStatus = health?.health_status ?? "none";
+            return (
+              <div key={c.container_id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <Dot color={STATE_COLOR[c.state] ?? "#888"} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: C.text, fontFamily: "monospace", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                  {health && <span style={{ fontSize: 9, color: HEALTH_COLOR[hStatus] ?? "#888", fontFamily: "monospace", flexShrink: 0 }}>{hStatus}</span>}
+                  {c.restart_count > 0 && (
+                    <span style={{ fontSize: 9, color: "#f87171", fontFamily: "monospace", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
+                      r:{c.restart_count}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.image}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {[
+                    { label: "CPU", pct: cpuVal, val: cpuVal.toFixed(1) + "%", color: cpuVal > 70 ? "#f97316" : "#22c55e" },
+                    { label: "MEM", pct: memPct, val: memPct.toFixed(1) + "%", color: memPct  > 80 ? "#ef4444" : "#22c55e" },
+                  ].map(r => (
+                    <div key={r.label}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "monospace" }}>{r.label}</span>
+                        <span style={{ fontSize: 9, fontFamily: "monospace", color: r.color }}>{r.val}</span>
+                      </div>
+                      <MiniGauge value={r.pct} color={r.color} />
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
-  )
+  );
 }
 
-function LogsSection({ samples, containerName }: { samples: ContainerLogSample[]; containerName: (id: string) => string }) {
+function TileEvents({ data }) {
+  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+  const events  = useMemo(() => [...data.lifecycle.events].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 12), [data]);
+  const eventColor = { start: "#22c55e", die: "#ef4444", restart: "#f97316", health_status: "#6b7280" };
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Events" count={events.length} />
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        {events.map((e, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, paddingTop: 8, paddingBottom: 8, borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ width: 5, height: 5, borderRadius: "50%", background: eventColor[e.event] ?? "#6b7280", marginTop: 4, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 10, fontFamily: "monospace", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{nameMap[e.container_id] ?? e.container_id.slice(0, 8)}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: eventColor[e.event] ?? C.muted, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>{e.event}</span>
+              </div>
+              <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", marginTop: 1 }}>{timeAgo(e.timestamp)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TileLogs({ data }) {
+  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
   const entries = useMemo(() => {
-    const all = samples.flatMap((sample) =>
-      sample.entries.map((entry) => ({ ...entry, container_id: sample.container_id })),
-    )
-    return all
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 25)
-  }, [samples])
-
-  if (!entries.length) return null
-
+    const all = data.logs.samples.flatMap(s => s.entries.map(e => ({ ...e, cid: s.container_id })));
+    return all.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 20);
+  }, [data]);
   return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Recent Logs" description="Docker stdout/stderr tails" />
-      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-        {entries.map((entry, idx) => (
-          <div key={`${entry.timestamp}-${idx}`} className="flex items-start gap-3">
-            <span className="text-[10px] text-[--color-text-muted] font-mono shrink-0 w-20">
-              {timeAgo(entry.timestamp)}
-            </span>
-            <span className="text-[10px] font-mono text-[--color-text-muted] uppercase tracking-wide">
-              {containerName(entry.container_id)}
-            </span>
-            <span className={`text-[10px] font-mono uppercase ${entry.stream === 'stderr' ? 'text-red-400' : 'text-green-400'}`}>
-              {entry.stream}
-            </span>
-            <p className="flex-1 text-xs font-mono text-[--color-text] whitespace-pre-wrap">{entry.message}</p>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Logs" count={entries.length} />
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        {entries.map((e, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "52px 80px 30px 1fr", gap: 6, alignItems: "start", paddingTop: 6, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", paddingTop: 1 }}>{timeAgo(e.timestamp)}</span>
+            <span style={{ fontSize: 9, color: C.muted, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingTop: 1 }}>{nameMap[e.cid] ?? e.cid.slice(0, 8)}</span>
+            <span style={{ fontSize: 9, fontFamily: "monospace", color: e.stream === "stderr" ? "#f87171" : "#4ade80", textTransform: "uppercase", paddingTop: 1 }}>{e.stream === "stderr" ? "ERR" : "OUT"}</span>
+            <span style={{ fontSize: 9, color: C.muted, fontFamily: "monospace", wordBreak: "break-all" }}>{e.message}</span>
           </div>
         ))}
       </div>
     </div>
-  )
+  );
 }
 
-function SecuritySection({ profiles }: { profiles: ContainerSecurityProfile[] }) {
-  if (!profiles.length) return null
-
+function TileSecurity({ data }) {
+  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+  const profiles = data.security.profiles;
   return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Security Posture" description="Runtime isolation per container" />
-      <div className="grid md:grid-cols-2 gap-3">
-        {profiles.map((profile) => (
-          <div key={profile.container_id} className="border border-[--color-border] rounded-lg p-3 bg-[--color-surface]">
-            <p className="text-xs text-[--color-text-muted] font-mono mb-2">{profile.container_id.slice(0, 12)}</p>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              <Tag>{profile.privileged ? 'privileged' : 'rootless'}</Tag>
-              <Tag>{profile.readonly_rootfs ? 'read-only fs' : 'rw fs'}</Tag>
-              <Tag>{profile.host_network ? 'host net' : 'bridge net'}</Tag>
-              <Tag>{profile.host_pid ? 'host pid' : 'isolated pid'}</Tag>
-              {profile.docker_socket_mounted && <Tag>docker.sock</Tag>}
-            </div>
-            <p className="text-[10px] text-[--color-text-muted] font-mono">User {profile.user || 'default'}</p>
-            {profile.capabilities.length > 0 && (
-              <p className="text-[10px] text-[--color-text-muted] font-mono mt-1">Caps {profile.capabilities.join(', ')}</p>
-            )}
-            <p className="text-[10px] text-[--color-text-muted] font-mono mt-1">Seccomp {profile.seccomp_profile || 'default'}</p>
-            <p className="text-[10px] text-[--color-text-muted] font-mono">AppArmor {profile.apparmor_profile || 'default'}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ProcessesSection({ samples, containerName }: { samples: ContainerProcessSample[]; containerName: (id: string) => string }) {
-  if (!samples.length) return null
-
-  return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Foreground Processes" description="Top task list by container" />
-      <div className="grid md:grid-cols-2 gap-3">
-        {samples.map((sample) => (
-          <div key={sample.container_id} className="border border-[--color-border] rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-[--color-text-muted] font-mono">{containerName(sample.container_id)}</span>
-              {sample.capped && <Tag>capped</Tag>}
-            </div>
-            <table className="w-full text-[10px] font-mono">
-              <thead>
-                <tr className="text-[--color-text-muted]">
-                  <th className="text-left font-normal">PID</th>
-                  <th className="text-left font-normal">CMD</th>
-                  <th className="text-right font-normal">CPU</th>
-                  <th className="text-right font-normal">MEM</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sample.processes.slice(0, 6).map((proc) => (
-                  <tr key={proc.pid}>
-                    <td className="py-1 pr-2">{proc.pid}</td>
-                    <td className="py-1 pr-2 text-[--color-text] truncate" title={proc.command}>{proc.command}</td>
-                    <td className="py-1 pr-2 text-right">{proc.cpu_percent.toFixed(1)}%</td>
-                    <td className="py-1 text-right">{formatBytes(proc.memory_bytes)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function FilesystemSection({ samples, containerName }: { samples: ContainerFilesystemSample[]; containerName: (id: string) => string }) {
-  if (!samples.length) return null
-
-  return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Filesystem Footprint" description="Writable layers and mounted volumes" />
-      <div className="grid md:grid-cols-2 gap-3">
-        {samples.map((sample) => (
-          <div key={sample.container_id} className="border border-[--color-border] rounded-lg p-3 bg-[--color-surface]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-[--color-text-muted] font-mono">{containerName(sample.container_id)}</span>
-              <span className="text-[10px] text-[--color-text-dim] font-mono">Layer {sample.writable_layer_size != null ? formatBytes(sample.writable_layer_size) : '--'}</span>
-            </div>
-            <p className="text-[10px] text-[--color-text-muted] font-mono mb-2">
-              Volumes {sample.total_volume_usage != null ? formatBytes(sample.total_volume_usage) : 'n/a'} · Inodes {sample.inode_usage != null ? sample.inode_usage.toLocaleString() : 'n/a'}
-            </p>
-            {sample.volumes.length > 0 && (
-              <div className="space-y-1">
-                {sample.volumes.slice(0, 3).map((volume) => (
-                  <div key={`${volume.name}-${volume.destination}`} className="flex justify-between text-[10px] font-mono text-[--color-text]">
-                    <span className="truncate" title={volume.destination}>{volume.destination}</span>
-                    <span>{volume.used_bytes != null ? formatBytes(volume.used_bytes) : 'n/a'}</span>
-                  </div>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Security" count={profiles.length} />
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+        {profiles.map(p => {
+          const issues = [p.privileged && "privileged", !p.readonly_rootfs && "rw-fs", p.host_network && "host-net", p.host_pid && "host-pid", p.docker_socket_mounted && "sock-mount"].filter(Boolean);
+          return (
+            <div key={p.container_id} style={{ background: C.surface, border: `1px solid ${issues.length ? "rgba(239,68,68,0.18)" : C.border}`, borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: C.text, fontFamily: "monospace" }}>{nameMap[p.container_id] ?? p.container_id.slice(0, 12)}</span>
+                <span style={{ fontSize: 9, color: issues.length ? "#ef4444" : "#22c55e", fontFamily: "monospace" }}>
+                  {issues.length ? `${issues.length} risk${issues.length > 1 ? "s" : ""}` : "clean"}
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {[
+                  { label: p.privileged ? "privileged" : "rootless",      ok: !p.privileged },
+                  { label: p.readonly_rootfs ? "read-only fs" : "rw fs", ok: p.readonly_rootfs },
+                  { label: p.host_network ? "host-net" : "bridge",        ok: !p.host_network },
+                  ...(p.capabilities.length ? [{ label: `caps:${p.capabilities.join(",")}`, ok: false }] : []),
+                ].map((tag, i) => (
+                  <span key={i} style={{ fontSize: 9, fontFamily: "monospace", background: tag.ok ? "rgba(34,197,94,0.07)" : "rgba(239,68,68,0.07)", color: tag.ok ? "#4ade80" : "#f87171", border: `1px solid ${tag.ok ? "rgba(34,197,94,0.18)" : "rgba(239,68,68,0.18)"}`, borderRadius: 4, padding: "2px 6px" }}>{tag.label}</span>
                 ))}
               </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function TopologySection({ samples, containerName }: { samples: ContainerTopologySample[]; containerName: (id: string) => string }) {
-  if (!samples.length) return null
-
-  return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Network Topology" description="Container attachment across Docker networks" />
-      <div className="space-y-3">
-        {samples.map((sample) => (
-          <div key={sample.container_id} className="border border-[--color-border] rounded-lg p-3">
-            <p className="text-xs text-[--color-text-muted] font-mono mb-2">{containerName(sample.container_id)}</p>
-            {sample.networks.length === 0 ? (
-              <p className="text-[10px] text-[--color-text-dim] font-mono">No network attachments</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {sample.networks.map((network) => (
-                  <div key={`${network.network_name}-${network.ip_address}`} className="bg-[--color-surface] border border-[--color-border] rounded-md px-3 py-2">
-                    <p className="text-[10px] text-[--color-text] font-mono">{network.network_name}</p>
-                    <p className="text-[10px] text-[--color-text-muted] font-mono">IP {network.ip_address || 'n/a'}</p>
-                    {network.gateway && (
-                      <p className="text-[10px] text-[--color-text-muted] font-mono">GW {network.gateway}</p>
-                    )}
-                    {network.ports.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {network.ports.slice(0, 4).map((port, idx) => (
-                          <Tag key={idx}>{port.private_port}{port.public_port ? `→${port.public_port}` : ''}/{port.protocol}</Tag>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ImagesSection({ images }: { images: DockerData['images']['images'] }) {
-  if (!images.length) return null
-
-  return (
-    <div className={sectionCardClass}>
-      <SectionHeader title="Image Catalogue" description={`${images.length} unique images referenced`} />
-      <div className="flex flex-wrap gap-1.5">
-        {images.slice(0, 40).map((image) => {
-          const label = image.repo_tags[0] ?? image.repo_digests[0] ?? image.image_id.slice(0, 12)
-          return <Tag key={`${image.image_id}-${label}`}>{label}</Tag>
+            </div>
+          );
         })}
       </div>
     </div>
-  )
+  );
 }
 
-export function DockerMetricsCard({ data, loading }: { data: DockerData | null; loading: boolean }) {
-  if (loading || !data || data.collector_disabled) return null
+function TileNetwork({ data }) {
+  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+  const netMap  = useMemo(() => new Map(data.metrics.network.samples.map(s => [s.container_id, s])), [data]);
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Network" />
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+        {data.topology.samples.map(s => {
+          const net = netMap.get(s.container_id);
+          const rx  = net?.interfaces.reduce((a, i) => a + i.rx_bytes, 0) ?? 0;
+          const tx  = net?.interfaces.reduce((a, i) => a + i.tx_bytes, 0) ?? 0;
+          return (
+            <div key={s.container_id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: C.text, marginBottom: 8, fontFamily: "monospace" }}>{nameMap[s.container_id] ?? s.container_id.slice(0, 12)}</div>
+              {s.networks.map((n, i) => (
+                <div key={i} style={{ marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                    <span style={{ fontSize: 9, fontFamily: "monospace", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 5px" }}>{n.network_name}</span>
+                    <span style={{ fontSize: 9, color: C.dim, fontFamily: "monospace" }}>{n.ip_address}</span>
+                  </div>
+                  {n.ports.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                      {n.ports.map((p, j) => (
+                        <span key={j} style={{ fontSize: 9, fontFamily: "monospace", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 5px" }}>
+                          {p.private_port}{p.public_port ? `→${p.public_port}` : ""}/{p.protocol}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace" }}>rx {formatBytes(rx)}</div>
+                <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace" }}>tx {formatBytes(tx)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-  const containers = data.inventory.containers
+function TileProcesses({ data }) {
+  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Processes" />
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+        {data.processes.samples.map(s => (
+          <div key={s.container_id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: C.text, marginBottom: 8, fontFamily: "monospace" }}>{nameMap[s.container_id] ?? s.container_id.slice(0, 12)}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "40px 1fr 46px 60px", gap: 4 }}>
+              {["PID", "CMD", "CPU", "MEM"].map(h => (
+                <div key={h} style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "monospace", paddingBottom: 5 }}>{h}</div>
+              ))}
+              {s.processes.map(p => [
+                <div key={`${p.pid}-pid`} style={{ fontSize: 9, color: C.muted, fontFamily: "monospace" }}>{p.pid}</div>,
+                <div key={`${p.pid}-cmd`} style={{ fontSize: 9, color: C.text, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.command}</div>,
+                <div key={`${p.pid}-cpu`} style={{ fontSize: 9, color: C.muted, fontFamily: "monospace", textAlign: "right" }}>{p.cpu_percent.toFixed(1)}%</div>,
+                <div key={`${p.pid}-mem`} style={{ fontSize: 9, color: C.muted, fontFamily: "monospace", textAlign: "right" }}>{formatBytes(p.memory_bytes)}</div>,
+              ])}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-  const sampleMaps: SampleMaps = useMemo(
-    () => ({
-      cpu: mapByContainer(data.metrics.cpu.samples),
-      memory: mapByContainer(data.metrics.memory.samples),
-      disk: mapByContainer(data.metrics.disk.samples),
-      network: mapByContainer(data.metrics.network.samples),
-      health: mapByContainer(data.health.statuses),
-    }),
-    [
-      data.metrics.cpu.samples,
-      data.metrics.memory.samples,
-      data.metrics.disk.samples,
-      data.metrics.network.samples,
-      data.health.statuses,
-    ],
-  )
+function TileImages({ data }) {
+  const images = data.images.images;
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <SectionLabel title="Images" count={images.length} />
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexWrap: "wrap", alignContent: "flex-start", gap: 6 }}>
+        {images.map(img => {
+          const label = img.repo_tags[0] ?? img.image_id.slice(0, 12);
+          const [name, tag] = label.includes(":") ? label.split(":") : [label, "latest"];
+          return (
+            <div key={img.image_id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 10px", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{name}</span>
+              <span style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", borderLeft: `1px solid ${C.border}`, paddingLeft: 6 }}>{tag}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-  const containerName = (id: string) => {
-    const match = containers.find((c) => c.container_id === id)
-    return match ? match.name : id.slice(0, 12)
-  }
+// ─── Tile registry ────────────────────────────────────────────────────────────
+const TILE_DEFS = [
+  { id: "summary",   label: "Cluster Summary", component: TileSummary,      defaultSpan: { col: 2, row: 1 } },
+  { id: "host",      label: "Host Snapshot",   component: TileHostSnapshot, defaultSpan: { col: 1, row: 1 } },
+  { id: "inventory", label: "Containers",      component: TileInventory,    defaultSpan: { col: 1, row: 2 } },
+  { id: "events",    label: "Events",          component: TileEvents,       defaultSpan: { col: 1, row: 1 } },
+  { id: "logs",      label: "Logs",            component: TileLogs,         defaultSpan: { col: 2, row: 1 } },
+  { id: "security",  label: "Security",        component: TileSecurity,     defaultSpan: { col: 1, row: 1 } },
+  { id: "network",   label: "Network",         component: TileNetwork,      defaultSpan: { col: 1, row: 1 } },
+  { id: "processes", label: "Processes",       component: TileProcesses,    defaultSpan: { col: 1, row: 1 } },
+  { id: "images",    label: "Images",          component: TileImages,       defaultSpan: { col: 2, row: 1 } },
+];
 
-  const pairedEvents = useMemo(() => data.lifecycle.events.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()), [data.lifecycle.events])
+// ─── Bento Grid ───────────────────────────────────────────────────────────────
+function BentoGrid({ data }) {
+  const [order, setOrder]   = useState(TILE_DEFS.map(t => t.id));
+  const [hidden, setHidden] = useState(new Set());
+  const [dragging, setDragging] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+  const dragSrc = useRef(null);
+
+  const visibleOrder = order.filter(id => !hidden.has(id));
+
+  const handleDragStart = useCallback((e, id) => { dragSrc.current = id; setDragging(id); e.dataTransfer.effectAllowed = "move"; }, []);
+  const handleDragOver  = useCallback((e, id) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragSrc.current !== id) setDragOver(id); }, []);
+  const handleDrop      = useCallback((e, targetId) => {
+    e.preventDefault();
+    const src = dragSrc.current;
+    if (!src || src === targetId) return;
+    setOrder(prev => {
+      const next = [...prev];
+      const si = next.indexOf(src), ti = next.indexOf(targetId);
+      next.splice(si, 1); next.splice(ti, 0, src);
+      return next;
+    });
+    setDragging(null); setDragOver(null); dragSrc.current = null;
+  }, []);
+  const handleDragEnd = useCallback(() => { setDragging(null); setDragOver(null); dragSrc.current = null; }, []);
+  const toggleHide    = useCallback((id) => { setHidden(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
+
+  const COLS  = 3;
+  const ROW_H = 320;
+  const GAP   = 12;
 
   return (
-    <div className="space-y-6">
-      <SummaryBanner data={data} />
+    <div style={{ fontFamily: "monospace", minHeight: "100vh", background: C.bg, color: C.text, padding: "24px" }}>
 
-      <InventoryTable containers={containers} maps={sampleMaps} />
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        <EventsSection events={pairedEvents} containerName={containerName} />
-        <LogsSection samples={data.logs.samples} containerName={containerName} />
+      {/* Top bar — mirrors RecoverPage header layout */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
+        <div>
+          <p style={{ fontSize: 10, fontFamily: "monospace", color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Docker Monitor</p>
+          <h1 style={{ fontSize: 15, fontFamily: "monospace", fontWeight: 600, color: C.text, marginBottom: 4 }}>Container Dashboard</h1>
+          <p style={{ fontSize: 10, color: C.dim, fontFamily: "monospace" }}>Drag tiles to reorder · click ✕ to hide</p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4 }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e" }} />
+          <span style={{ fontSize: 10, color: C.dim, fontFamily: "monospace" }}>live</span>
+          {hidden.size > 0 && (
+            <button
+              onClick={() => setHidden(new Set())}
+              style={{ marginLeft: 4, fontSize: 10, fontFamily: "monospace", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, color: C.muted, padding: "3px 10px", cursor: "pointer" }}
+            >
+              show all ({hidden.size})
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <SecuritySection profiles={data.security.profiles} />
-        <ProcessesSection samples={data.processes.samples} containerName={containerName} />
+      {/* Hidden tile chips */}
+      {hidden.size > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+          {[...hidden].map(id => {
+            const def = TILE_DEFS.find(t => t.id === id);
+            return (
+              <button key={id} onClick={() => toggleHide(id)} style={{ fontSize: 10, fontFamily: "monospace", background: "transparent", border: `1px dashed ${C.borderStrong}`, borderRadius: 20, color: C.muted, padding: "3px 10px", cursor: "pointer" }}>
+                + {def?.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Bento grid */}
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS}, 1fr)`, gap: GAP, alignItems: "start" }}>
+        {visibleOrder.map(id => {
+          const def  = TILE_DEFS.find(t => t.id === id);
+          if (!def) return null;
+          const Comp           = def.component;
+          const span           = def.defaultSpan;
+          const isDraggingThis = dragging === id;
+          const isTarget       = dragOver  === id;
+
+          return (
+            <div
+              key={id}
+              draggable
+              onDragStart={e => handleDragStart(e, id)}
+              onDragOver={e  => handleDragOver(e, id)}
+              onDrop={e      => handleDrop(e, id)}
+              onDragEnd={handleDragEnd}
+              style={{
+                gridColumn: `span ${Math.min(span.col, COLS)}`,
+                minHeight:  ROW_H * span.row + GAP * (span.row - 1),
+                background: C.surface,
+                border:     `1px solid ${isTarget ? C.borderStrong : C.border}`,
+                borderRadius: 10,
+                padding:    "16px 18px",
+                cursor:     "grab",
+                transition: "opacity .2s, border-color .15s",
+                opacity:    isDraggingThis ? 0.3 : 1,
+                position:   "relative",
+                overflow:   "hidden",
+              }}
+            >
+              {/* Dismiss button */}
+              <button
+                onClick={e => { e.stopPropagation(); toggleHide(id); }}
+                title="Hide tile"
+                style={{
+                  position: "absolute", top: 10, right: 10,
+                  width: 20, height: 20, borderRadius: 4,
+                  background: "transparent", border: `1px solid ${C.border}`,
+                  color: C.dim, cursor: "pointer", fontSize: 10,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  zIndex: 2, fontFamily: "monospace", lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+
+              <div style={{ position: "relative", height: "100%" }}>
+                <Comp data={data} />
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <FilesystemSection samples={data.filesystem.samples} containerName={containerName} />
-        <TopologySection samples={data.topology.samples} containerName={containerName} />
+      {/* Footer */}
+      <div style={{ marginTop: 24, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 10, color: C.dim, fontFamily: "monospace" }}>
+          {data.inventory.containers.length} containers · {data.images.images.length} images · {data.host.metrics.hostname}
+        </span>
+        <span style={{ fontSize: 10, color: C.dim, fontFamily: "monospace" }}>
+          last event {timeAgo(data.summary.last_event)}
+        </span>
       </div>
-
-      <ImagesSection images={data.images.images} />
     </div>
-  )
+  );
+}
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+export default function DockerDashboard({ data: propData }) {
+  const mockData = useMemo(() => generateMockData(), []);
+  const data = propData ?? mockData;
+
+  if (!data || data.collector_disabled) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", color: C.dim, fontFamily: "monospace", fontSize: 12 }}>
+        No Docker data available.
+      </div>
+    );
+  }
+
+  return <BentoGrid data={data} />;
 }
