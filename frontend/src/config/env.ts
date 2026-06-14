@@ -36,6 +36,15 @@ export const env = {
     if (this.wsBaseUrl) {
       return `${this.wsBaseUrl}${this.wsPath}`
     }
+    if (this.apiBaseUrl) {
+      try {
+        const api = new URL(this.apiBaseUrl)
+        const protocol = api.protocol === 'https:' ? 'wss:' : 'ws:'
+        return `${protocol}//${api.host}${this.wsPath}`
+      } catch {
+        // fall back to window location below
+      }
+    }
     // Auto-derive ws/wss from current page protocol
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     return `${protocol}://${window.location.host}${this.wsPath}`

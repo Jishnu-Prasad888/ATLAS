@@ -143,6 +143,7 @@ export function useTelemetry(params: TelemetryQueryParams, enabled = true) {
     queryKey: queryKeys.telemetry(params),
     queryFn: () => telemetryApi.query(params),
     enabled,
+    staleTime: 5 * 60 * 1000,
   })
 }
 
@@ -151,6 +152,7 @@ export function useLatestMetrics(agentId: string | null) {
     queryKey: queryKeys.telemetryLatest(agentId ?? ''),
     queryFn: () => telemetryApi.latest(agentId!),
     enabled: !!agentId,
+    staleTime: 10_000,
     refetchInterval: 10_000,
   })
 }
@@ -280,7 +282,26 @@ export function useLiveMetrics(agentId: string | null): LiveMetrics {
   })
 
   useEffect(() => {
-    if (!agentId) return
+    if (!agentId) {
+      setState({ latest: {}, history: { cpu: [], ram: [], netRx: [], netTx: [], timestamps: [] } })
+      return
+    }
+
+    let active = true
+
+    const resetHistory = () => ({ cpu: [], ram: [], netRx: [], netTx: [], timestamps: [] })
+
+    setState({ latest: {}, history: resetHistory() })
+
+    ;(async () => {
+      try {
+        const seeded = await telemetryApi.latest(agentId)
+        if (!active) return
+        setState((prev) => ({ ...prev, latest: seeded }))
+      } catch (error) {
+        console.warn('[metrics] failed to seed latest metrics', error)
+      }
+    })()
 
     const append = (arr: number[], val: number): number[] =>
       [...arr, val].slice(-HISTORY_SIZE)
@@ -310,7 +331,10 @@ export function useLiveMetrics(agentId: string | null): LiveMetrics {
       })
     })
 
-    return unsubscribe
+    return () => {
+      active = false
+      unsubscribe?.()
+    }
   }, [agentId])
 
   return state

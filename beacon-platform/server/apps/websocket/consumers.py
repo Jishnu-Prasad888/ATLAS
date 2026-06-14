@@ -16,6 +16,8 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
 
+from apps.metrics.views import update_latest_cache
+
 logger = logging.getLogger("beacon")
 
 VALID_CHANNELS = {"logs", "metrics", "telemetry", "health"}
@@ -210,6 +212,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def save_metrics(self, agent_id, metrics):
         from apps.metrics.models import Metric, MetricResolution
+
         objects = []
         for m in metrics:
             if not isinstance(m, dict):
@@ -224,6 +227,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
             ))
         if objects:
             Metric.objects.bulk_create(objects, batch_size=500)
+            update_latest_cache(agent_id, objects)
         return len(objects)
 
     @database_sync_to_async

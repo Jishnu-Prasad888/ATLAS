@@ -1,6 +1,10 @@
+import { useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useFleetHealth, useAgents, useAgentHealth, usePersistedState } from '@/hooks'
+import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
+  Button,
   AgentStatusBadge,
   CollectorStatusBadge,
   LoadingState,
@@ -251,6 +255,8 @@ function AgentHealthDetail({ agentId, hostname }: { agentId: string; hostname: s
 // ─── Health Page ──────────────────────────────────────────────────────────────
 
 export function HealthPage() {
+  const qc = useQueryClient()
+  const [refreshing, setRefreshing] = useState(false)
   const { data: health, isLoading: healthLoading, error: healthError, refetch } = useFleetHealth()
   const { data: agents } = useAgents()
   const [selectedId, setSelectedId] = usePersistedState<string | null>('health_agent', null)
@@ -259,9 +265,27 @@ export function HealthPage() {
 
   const snapshot = health?.latest_snapshot
 
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true)
+    qc.invalidateQueries({ queryKey: queryKeys.fleetHealth() })
+    qc.invalidateQueries({ queryKey: queryKeys.agents() })
+    setTimeout(() => setRefreshing(false), 800)
+  }, [qc])
+
   return (
     <div className="space-y-5">
-      <PageHeader title="Health" subtitle="Server and agent health status" />
+      <style>{`@keyframes health-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <PageHeader
+        title="Health"
+        subtitle="Server and agent health status"
+        actions={
+          <Button size="sm" variant="ghost" onClick={handleRefresh}>
+            <span
+              style={{ display: 'inline-block', animation: refreshing ? 'health-spin 0.6s linear' : 'none' }}
+            >⟳</span> Refresh
+          </Button>
+        }
+      />
 
       {/* ── Vitals strip ─────────────────────────────────────────────────── */}
       <div className="rounded-lg border border-[--color-border] bg-[--color-surface] px-4 py-3 flex flex-wrap items-center gap-x-2 gap-y-3">

@@ -2,7 +2,10 @@
 Beacon Metrics Views — /api/v1/telemetry/ and /api/v1/metrics/
 """
 import logging
+from collections.abc import Iterable
+
 from django.utils import timezone
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -21,6 +24,39 @@ from .serializers import (
 
 logger = logging.getLogger("beacon")
 channel_layer = get_channel_layer()
+
+LATEST_CACHE_PREFIX = "latest_metrics:"
+LATEST_CACHE_TTL = 60
+
+
+def cache_key_for_latest(agent_id: str) -> str:
+    return f"{LATEST_CACHE_PREFIX}{agent_id}"
+
+
+def cache_safe_get(key: str):
+    try:
+        return cache.get(key)
+    except Exception as exc:  # pragma: no cover - cache backend failures
+        logger.warning("Metric cache get failed for %s: %s", key, exc)
+        return None
+
+
+def cache_safe_set(key: str, value: dict) -> None:
+    try:
+        cache.set(key, value, LATEST_CACHE_TTL)
+    except Exception as exc:  # pragma: no cover - cache backend failures
+        logger.warning("Metric cache set failed for %s: %s", key, exc)
+
+
+def update_latest_cache(agent_id: str, metric_objects: Iterable[Metric]):
+    """Update Redis cache with newly ingested metrics for an agent."""
+    key = cache_key_for_latest(agent_id)
+    cached = cache_safe_get(key)
+    if cached is None:
+        return
+    for metric in metric_objects:
+        cached[metric.metric_type] = MetricSerializer(metric).data
+    cache_safe_set(key, cached)
 
 
 def broadcast_metric(agent_id: str, metric_data: dict):
@@ -65,6 +101,7 @@ class MetricIngestView(APIView):
 
         if objects:
             broadcast_metric(agent_id, MetricSerializer(objects[-1]).data)
+            update_latest_cache(agent_id, objects)
 
         return Response({"ingested": len(objects)}, status=status.HTTP_201_CREATED)
 
@@ -108,13 +145,26 @@ class MetricLatestView(APIView):
 
     def get(self, request, agent_id):
         logger.debug("MetricLatestView GET — agent_id=%s user=%s", agent_id, request.user)
-        from django.db.models import Max
-        types = Metric.objects.filter(agent_id=agent_id).values_list("metric_type", flat=True).distinct()
-        result = {}
-        for mtype in types:
-            latest = Metric.objects.filter(agent_id=agent_id, metric_type=mtype).order_by("-timestamp").first()
-            if latest:
-                result[mtype] = MetricSerializer(latest).data
+
+        key = cache_key_for_latest(agent_id)
+        result = cache_safe_get(key)
+        if result is not None:
+            logger.debug("MetricLatestView cache HIT for agent %s", agent_id)
+            return Response(result)
+
+        logger.debug("MetricLatestView cache MISS for agent %s — querying DB", agent_id)
+        latest_metrics = (
+            Metric.objects
+            .filter(agent_id=agent_id)
+            .order_by("metric_type", "-timestamp")
+            .distinct("metric_type")
+        )
+        result = {
+            metric.metric_type: MetricSerializer(metric).data
+            for metric in latest_metrics
+        }
+
+        cache_safe_set(key, result)
         logger.debug("MetricLatestView returning %d metric types for agent %s", len(result), agent_id)
         return Response(result)
 

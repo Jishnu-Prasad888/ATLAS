@@ -2,14 +2,16 @@ import {
   useState, useMemo, useEffect, useRef,
   memo, useCallback,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
 import {
-  useFleetHealth, useAgents, useLatestMetrics, useLiveMetrics, useLiveLogs,
+  useFleetHealth, useAgents, useLiveMetrics, useLiveLogs,
 } from '@/hooks'
+import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
-  AgentStatusBadge, SeverityBadge, Sparkline, LoadingState, EmptyState, Tag,
+  AgentStatusBadge, SeverityBadge, Sparkline, LoadingState, EmptyState, Tag, Button,
 } from '@/components/common'
 import {
   formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId, gaugeColor,
@@ -119,6 +121,12 @@ const CSS = `
     background: #34d399;
     animation: atlas-pulse-ring 1.8s ease-out infinite;
   }
+
+  @keyframes atlas-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  .atlas-spin { animation: atlas-spin 0.6s linear; }
 `
 
 // ─── Log buffer hook ──────────────────────────────────────────────────────────
@@ -339,14 +347,13 @@ const MetricPanel = memo(function MetricPanel({
   agentId: string | null
   hostname: string | undefined
 }) {
-  const { data: latestMetrics } = useLatestMetrics(agentId)
-  const { history } = useLiveMetrics(agentId)
+  const { latest, history } = useLiveMetrics(agentId)
 
-  const cpu     = latestMetrics?.cpu?.data     as CpuData     | undefined
-  const ram     = latestMetrics?.ram?.data     as RamData     | undefined
-  const storage = latestMetrics?.storage?.data as StorageData | undefined
-  const network = latestMetrics?.network?.data as NetworkData | undefined
-  const kernel  = latestMetrics?.kernel?.data  as KernelData  | undefined
+  const cpu     = latest.cpu?.data     as CpuData     | undefined
+  const ram     = latest.ram?.data     as RamData     | undefined
+  const storage = latest.storage?.data as StorageData | undefined
+  const network = latest.network?.data as NetworkData | undefined
+  const kernel  = latest.kernel?.data  as KernelData  | undefined
 
   const rootDisk         = storage?.filesystems.find((f) => f.mount_point === '/') ?? storage?.filesystems[0]
   const primaryInterface = network?.interfaces.find((i) => i.name !== 'lo') ?? network?.interfaces[0]
@@ -497,6 +504,8 @@ const LogPanel = memo(function LogPanel({
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
+  const qc = useQueryClient()
+  const [refreshing, setRefreshing] = useState(false)
   const { user }                                      = useAuthStore()
   const { selectedAgentId, selectAgent, wsConnected } = useUiStore()
   const { data: health }                              = useFleetHealth()
@@ -517,6 +526,16 @@ export function DashboardPage() {
     (id: string) => selectAgent(id),
     [selectAgent],
   )
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true)
+    qc.invalidateQueries({ queryKey: queryKeys.fleetHealth() })
+    qc.invalidateQueries({ queryKey: queryKeys.agents() })
+    if (activeAgentId) {
+      qc.invalidateQueries({ queryKey: queryKeys.telemetryLatest(activeAgentId) })
+    }
+    setTimeout(() => setRefreshing(false), 800)
+  }, [qc, activeAgentId])
 
   // Stable fleet numbers — only update when values actually change
   const fleetTotal    = health?.agents.total    ?? 0
@@ -548,6 +567,9 @@ export function DashboardPage() {
             <span style={{ fontSize: 12, color: 'var(--color-text-dim)', letterSpacing: '0.12em' }}>
               {wsConnected ? 'live' : 'polling'}
             </span>
+            <Button size="sm" variant="ghost" onClick={handleRefresh}>
+              <span className={refreshing ? 'atlas-spin' : ''} style={{ display: 'inline-block' }}>⟳</span> Refresh
+            </Button>
           </div>
         }
       />

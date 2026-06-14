@@ -208,6 +208,7 @@ function SeverityChip({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function LogsPage() {
+  const [refreshing, setRefreshing] = useState(false)
   const { isAdmin, accessToken } = useAuthStore()
   const addNotification = useUiStore((s) => s.addNotification)
   const { data: agents } = useAgents()
@@ -300,6 +301,7 @@ export function LogsPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      <style>{`@keyframes logs-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <PageHeader
         title={
@@ -325,6 +327,9 @@ export function LogsPage() {
         }
         actions={
           <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" variant="ghost" onClick={() => { setRefreshing(true); refetch(); setTimeout(() => setRefreshing(false), 800); }}>
+              <span style={{ display: 'inline-block', animation: refreshing ? 'logs-spin 0.6s linear' : 'none' }}>⟳</span> Refresh
+            </Button>
             {/* Live toggle */}
             <Button
               size="sm"

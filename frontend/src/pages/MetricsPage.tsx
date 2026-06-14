@@ -1,5 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAgents, useTelemetry, useLiveMetrics, usePersistedState } from '@/hooks'
+import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
   Card,
@@ -20,7 +22,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import type { MetricType, MetricResolution, CpuData, RamData, NetworkData, StorageData, KernelData } from '@/types'
+import type { Metric, MetricType, MetricResolution, CpuData, RamData, NetworkData, StorageData, KernelData } from '@/types'
 
 const METRIC_OPTIONS: Array<{ value: MetricType; label: string }> = [
   { value: 'cpu', label: 'CPU' },
@@ -42,6 +44,8 @@ function isoAgo(hours: number): string {
 }
 
 export function MetricsPage() {
+  const qc = useQueryClient()
+  const [refreshing, setRefreshing] = useState(false)
   const { data: agents } = useAgents()
   const [selectedAgentId, setSelectedAgentId] = usePersistedState<string>('metrics_agent', '')
   const [metricType, setMetricType] = usePersistedState<MetricType>('metrics_type', 'cpu')
@@ -65,26 +69,118 @@ export function MetricsPage() {
 
   const { data: timeSeries, isLoading: tsLoading } = useTelemetry(queryParams, !!agentId)
 
+  const shouldFallbackToRaw = !!agentId
+    && timeRange.resolution !== 'raw'
+    && !tsLoading
+    && ((timeSeries?.length ?? 0) === 0)
+
+  const rawFallbackParams = useMemo(() => ({
+    ...queryParams,
+    resolution: 'raw' as MetricResolution,
+  }), [queryParams])
+
+  const { data: fallbackSeries, isLoading: fallbackLoading } = useTelemetry(
+    rawFallbackParams,
+    shouldFallbackToRaw,
+  )
+
+  const effectiveSeries = useMemo<Metric[]>(() => {
+    if (timeSeries && timeSeries.length) return timeSeries
+    if (fallbackSeries && fallbackSeries.length) return fallbackSeries
+    return []
+  }, [timeSeries, fallbackSeries])
+
+  const telemetryLoading = tsLoading || (shouldFallbackToRaw && fallbackLoading)
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true)
+    qc.invalidateQueries({ queryKey: queryKeys.telemetry(queryParams) })
+    if (shouldFallbackToRaw) {
+      qc.invalidateQueries({ queryKey: queryKeys.telemetry(rawFallbackParams) })
+    }
+    setTimeout(() => setRefreshing(false), 800)
+  }, [qc, queryParams, shouldFallbackToRaw, rawFallbackParams])
+
   const chartData = useMemo(() => {
-    if (!timeSeries) return []
-    return [...timeSeries].reverse().map((m) => {
-      const d = m.data as Record<string, unknown>
-      const t = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-      if (metricType === 'cpu') return { t, value: (d.usage_pct as number) ?? 0 }
-      if (metricType === 'ram') return { t, value: (d.usage_pct as number) ?? 0 }
+    if (!effectiveSeries.length) return []
+
+    const sorted = [...effectiveSeries].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    )
+
+    let prevTs: number | null = null
+    const diffs: number[] = []
+    for (const metric of sorted) {
+      const ts = new Date(metric.timestamp).getTime()
+      if (prevTs !== null) {
+        const diff = ts - prevTs
+        if (diff > 0) diffs.push(diff)
+      }
+      prevTs = ts
+    }
+
+    const baseGap = diffs.length ? Math.min(...diffs) : null
+
+    const data: Array<Record<string, number | string | null>> = []
+    prevTs = null
+
+    const showDate = timeRange.hours >= 24
+    const formatTimestamp = (date: Date) => showDate
+      ? date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      : date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+    const pushGapMarker = (gapMs: number) => {
+      if (!gapMs || !baseGap) return
+      const gapTime = new Date(gapMs)
+      const label = formatTimestamp(gapTime)
       if (metricType === 'network') {
+        data.push({ t: label, rx: null, tx: null })
+      } else {
+        data.push({ t: label, value: null })
+      }
+    }
+
+    for (const metric of sorted) {
+      const ts = new Date(metric.timestamp)
+      const tsMs = ts.getTime()
+
+      if (prevTs !== null && baseGap && tsMs - prevTs > baseGap * 2) {
+        pushGapMarker(prevTs + baseGap)
+      }
+
+      const formatted = formatTimestamp(ts)
+      const d = metric.data as Record<string, unknown>
+
+      if (metricType === 'cpu') {
+        data.push({ t: formatted, value: (d.usage_pct as number) ?? 0 })
+      } else if (metricType === 'ram') {
+        data.push({ t: formatted, value: (d.usage_pct as number) ?? 0 })
+      } else if (metricType === 'network') {
         const ifaces = d.interfaces as Array<{ name: string; rx_bytes_rate: number; tx_bytes_rate: number }>
         const iface = ifaces?.find((i) => i.name !== 'lo') ?? ifaces?.[0]
-        return { t, rx: (iface?.rx_bytes_rate ?? 0) / 1024, tx: (iface?.tx_bytes_rate ?? 0) / 1024 }
-      }
-      if (metricType === 'storage') {
+        data.push({
+          t: formatted,
+          rx: iface ? (iface.rx_bytes_rate ?? 0) / 1024 : null,
+          tx: iface ? (iface.tx_bytes_rate ?? 0) / 1024 : null,
+        })
+      } else if (metricType === 'storage') {
         const fs = (d.filesystems as Array<{ mount_point: string; usage_pct: number }>)
         const root = fs?.find((f) => f.mount_point === '/') ?? fs?.[0]
-        return { t, value: root?.usage_pct ?? 0 }
+        data.push({ t: formatted, value: root?.usage_pct ?? 0 })
+      } else {
+        data.push({ t: formatted, value: 0 })
       }
-      return { t, value: 0 }
-    })
-  }, [timeSeries, metricType])
+
+      prevTs = tsMs
+    }
+
+    return data
+  }, [effectiveSeries, metricType, timeRange.hours])
 
   const cpu = latest.cpu?.data as CpuData | undefined
   const ram = latest.ram?.data as RamData | undefined
@@ -96,9 +192,17 @@ export function MetricsPage() {
 
   return (
     <div>
+      <style>{`@keyframes metrics-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <PageHeader
         title="Metrics"
         subtitle="Historical and live telemetry"
+        actions={(
+          <Button size="sm" variant="ghost" onClick={handleRefresh}>
+            <span
+              style={{ display: 'inline-block', animation: refreshing ? 'metrics-spin 0.6s linear' : 'none' }}
+            >⟳</span> Refresh
+          </Button>
+        )}
       />
 
       {/* Controls */}
@@ -205,29 +309,29 @@ export function MetricsPage() {
           <p className="text-xs font-mono text-[--color-text-muted] uppercase tracking-wide">
             {METRIC_OPTIONS.find((o) => o.value === metricType)?.label} — {timeRange.label}
           </p>
-          <p className="text-xs font-mono text-[--color-text-dim]">{timeSeries?.length ?? 0} points · {timeRange.resolution}</p>
+          <p className="text-xs font-mono text-[--color-text-dim]">{effectiveSeries.length} points · {shouldFallbackToRaw ? 'raw (fallback)' : timeRange.resolution}</p>
         </div>
 
         {!agentId ? (
           <EmptyState message="Select an agent" />
-        ) : tsLoading ? (
+        ) : telemetryLoading ? (
           <LoadingState />
         ) : !chartData.length ? (
           <EmptyState message="No data for selected range" />
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             {metricType === 'network' ? (
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="t" tick={{ fontSize: 10, fontFamily: 'IBM Plex Mono', fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10, fontFamily: 'IBM Plex Mono', fill: 'var(--color-text-muted)' }} tickFormatter={(v) => `${v}KB/s`} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 4, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
-                  labelStyle={{ color: 'var(--color-text-muted)' }}
-                  formatter={(v: number, name: string) => [`${v.toFixed(1)} KB/s`, name === 'rx' ? 'RX' : 'TX']}
-                />
-                <Area type="monotone" dataKey="rx" stroke="#22c55e" fill="#22c55e20" strokeWidth={1.5} dot={false} name="rx" />
-                <Area type="monotone" dataKey="tx" stroke="#3b82f6" fill="#3b82f620" strokeWidth={1.5} dot={false} name="tx" />
+               <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                 <XAxis dataKey="t" tick={{ fontSize: 10, fontFamily: 'IBM Plex Mono', fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                 <YAxis tick={{ fontSize: 10, fontFamily: 'IBM Plex Mono', fill: 'var(--color-text-muted)' }} tickFormatter={(v) => `${v}KB/s`} />
+                 <Tooltip
+                   contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 4, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+                   labelStyle={{ color: 'var(--color-text-muted)' }}
+                   formatter={(v: number, name: string) => [`${v.toFixed(1)} KB/s`, name === 'rx' ? 'RX' : 'TX']}
+                 />
+                 <Area type="monotone" dataKey="rx" stroke="#22c55e" fill="#22c55e20" strokeWidth={1.5} dot={false} name="rx" connectNulls={false} />
+                 <Area type="monotone" dataKey="tx" stroke="#3b82f6" fill="#3b82f620" strokeWidth={1.5} dot={false} name="tx" connectNulls={false} />
               </AreaChart>
             ) : (
               <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -250,6 +354,7 @@ export function MetricsPage() {
                   fill="#3b82f620"
                   strokeWidth={1.5}
                   dot={false}
+                  connectNulls={false}
                 />
               </AreaChart>
             )}
