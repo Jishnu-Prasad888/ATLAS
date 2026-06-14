@@ -27,6 +27,7 @@ const FLUSH_BATCH_SIZE: usize = 50;
 #[derive(Clone)]
 pub struct WebSocketTransport {
     config: AgentConfig,
+    config_path: String,
     identity: AgentIdentity,
     queue: QueueEngine,
     encryption: EncryptionEngine,
@@ -37,6 +38,7 @@ pub struct WebSocketTransport {
 impl WebSocketTransport {
     pub fn new(
         config: AgentConfig,
+        config_path: String,
         identity: AgentIdentity,
         queue: QueueEngine,
         encryption: EncryptionEngine,
@@ -45,6 +47,7 @@ impl WebSocketTransport {
     ) -> Self {
         Self {
             config,
+            config_path,
             identity,
             queue,
             encryption,
@@ -162,6 +165,8 @@ impl WebSocketTransport {
         let identity = self.identity.clone();
         let enc = self.encryption.clone();
         let flags = self.collector_flags.clone();
+        let config = self.config.clone();
+        let config_path = self.config_path.clone();
 
         // Wrap writer in Arc<Mutex> so heartbeat and flush loops can share it
         let writer = Arc::new(Mutex::new(writer));
@@ -170,7 +175,7 @@ impl WebSocketTransport {
         tokio::select! {
             r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())            => r,
             r = Self::flush_loop(Arc::clone(&writer), queue, enc, identity.clone())     => r,
-            r = Self::read_loop(&mut reader, flags)                                     => r,
+            r = Self::read_loop(&mut reader, flags, config, config_path)               => r,
         }
     }
 
@@ -259,7 +264,12 @@ impl WebSocketTransport {
         }
     }
 
-    async fn read_loop<S>(reader: &mut S, collector_flags: CollectorFlags) -> Result<()>
+    async fn read_loop<S>(
+        reader: &mut S,
+        collector_flags: CollectorFlags,
+        agent_config: AgentConfig,
+        config_path: String,
+    ) -> Result<()>
     where
         S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
     {
@@ -273,7 +283,13 @@ impl WebSocketTransport {
                             Some("config_update") => {
                                 info!("Received config update from server");
                                 if let Some(payload) = parsed.get("payload") {
-                                    Self::apply_config_update(&collector_flags, payload).await;
+                                    Self::apply_config_update(
+                                        &collector_flags,
+                                        payload,
+                                        &agent_config,
+                                        &config_path,
+                                    )
+                                    .await;
                                 }
                             }
                             _ => debug!("Server message: {}", &text[..text.len().min(120)]),
@@ -292,20 +308,42 @@ impl WebSocketTransport {
         Ok(())
     }
 
-    /// Apply a config_update payload to the shared collector flags.
+    /// Apply a config_update payload to the shared collector flags and persist to disk.
     /// The payload is expected to contain boolean fields like "docker_enabled".
-    async fn apply_config_update(flags: &CollectorFlags, payload: &serde_json::Value) {
+    async fn apply_config_update(
+        flags: &CollectorFlags,
+        payload: &serde_json::Value,
+        config: &AgentConfig,
+        config_path: &str,
+    ) {
+        // Update in-memory flags for all collectors
         let mut map = flags.write().await;
-        // Map server field names (snake_case with _enabled) to collector keys
         let mappings = [
+            ("cpu_enabled", "cpu"),
+            ("ram_enabled", "ram"),
+            ("storage_enabled", "storage"),
+            ("network_enabled", "network"),
+            ("process_enabled", "process"),
+            ("systemd_enabled", "systemd"),
             ("docker_enabled", "docker"),
             ("kubernetes_enabled", "kubernetes"),
+            ("temperature_enabled", "temperature"),
+            ("power_enabled", "power"),
         ];
         for (field, key) in &mappings {
             if let Some(val) = payload.get(*field).and_then(|v| v.as_bool()) {
                 info!("Config update: {} = {}", key, val);
                 map.insert(key.to_string(), val);
             }
+        }
+        drop(map);
+
+        // Persist updated config to disk so changes survive agent restart
+        let updated = config.clone().apply_update(payload);
+        if let Err(e) = updated.save(config_path).await {
+            error!("Failed to persist config update to disk: {e}");
+        } else {
+            info!("Config persisted to {config_path}");
         }
     }
 

@@ -26,8 +26,16 @@ pub type CollectorFlags = Arc<RwLock<HashMap<String, bool>>>;
 /// thereafter the server may push updates at any time.
 pub fn create_collector_flags(config: &AgentConfig) -> CollectorFlags {
     let mut flags = HashMap::new();
+    flags.insert("cpu".to_string(), config.collectors.cpu);
+    flags.insert("ram".to_string(), config.collectors.ram);
+    flags.insert("storage".to_string(), config.collectors.storage);
+    flags.insert("network".to_string(), config.collectors.network);
+    flags.insert("process".to_string(), config.collectors.process);
+    flags.insert("systemd".to_string(), config.collectors.systemd);
     flags.insert("docker".to_string(), config.collectors.docker);
     flags.insert("kubernetes".to_string(), config.collectors.kubernetes);
+    flags.insert("temperature".to_string(), config.collectors.temperature);
+    flags.insert("power".to_string(), config.collectors.power);
     Arc::new(RwLock::new(flags))
 }
 
@@ -175,6 +183,51 @@ impl AgentConfig {
         }
         fs::write(path, toml::to_string_pretty(self)?).await?;
         Ok(())
+    }
+
+    /// Apply a config update payload (from server WebSocket) and return the modified config.
+    /// Fields like `cpu_enabled`, `docker_enabled`, `interval_seconds` are mapped
+    /// to the corresponding AgentConfig fields.
+    pub fn apply_update(mut self, payload: &serde_json::Value) -> Self {
+        if let Some(val) = payload.get("cpu_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.cpu = val;
+        }
+        if let Some(val) = payload.get("ram_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.ram = val;
+        }
+        if let Some(val) = payload.get("storage_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.storage = val;
+        }
+        if let Some(val) = payload.get("network_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.network = val;
+        }
+        if let Some(val) = payload.get("process_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.process = val;
+        }
+        if let Some(val) = payload.get("systemd_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.systemd = val;
+        }
+        if let Some(val) = payload.get("docker_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.docker = val;
+        }
+        if let Some(val) = payload.get("kubernetes_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.kubernetes = val;
+        }
+        if let Some(val) = payload.get("temperature_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.temperature = val;
+        }
+        if let Some(val) = payload.get("power_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.power = val;
+        }
+        if let Some(val) = payload.get("interval_seconds").and_then(|v| v.as_u64()) {
+            self.interval_seconds = val;
+        }
+        if let Some(val) = payload.get("retention_days").and_then(|v| v.as_u64()) {
+            // retention_days is not a field on AgentConfig; it's server-side only.
+            // Silently ignore.
+            let _ = val;
+        }
+        self
     }
 }
 

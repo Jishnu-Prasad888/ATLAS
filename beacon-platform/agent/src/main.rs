@@ -423,9 +423,10 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     // Create shared collector flags for dynamic server-side toggle
     let collector_flags = create_collector_flags(&config);
 
-    // Start WebSocket transport
+    // Start WebSocket transport (persists config changes to disk on config_update)
     let transport = WebSocketTransport::new(
         config.clone(),
+        config_path.to_string(),
         identity.clone(),
         queue.clone(),
         encryption.clone(),
