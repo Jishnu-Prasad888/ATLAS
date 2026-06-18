@@ -6,13 +6,10 @@ import { PageHeader } from '@/components/layout/AppLayout'
 import {
   Button,
   AgentStatusBadge,
-  CollectorStatusBadge,
   LoadingState,
-  EmptyState,
   ErrorState,
-  KvRow,
 } from '@/components/common'
-import { timeAgo, formatTimestamp, formatBytes } from '@/utils'
+import { timeAgo, formatBytes } from '@/utils'
 
 // ─── Vitals Strip ────────────────────────────────────────────────────────────
 
@@ -66,19 +63,6 @@ function StatusPulse({ status }: { status: string }) {
   return <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />
 }
 
-// ─── Section Label ────────────────────────────────────────────────────────────
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-[--color-text-dim]">
-        {children}
-      </span>
-      <div className="flex-1 h-px bg-[--color-border] opacity-40" />
-    </div>
-  )
-}
-
 // ─── Agent Row ────────────────────────────────────────────────────────────────
 
 function AgentRow({
@@ -86,7 +70,7 @@ function AgentRow({
   selected,
   onClick,
 }: {
-  agent: { agent_id: string; hostname: string; status: string; last_seen: string; is_stale?: boolean }
+  agent: { agent_id: string; hostname: string; status: string; last_seen: string | null; is_stale?: boolean }
   selected: boolean
   onClick: () => void
 }) {
@@ -257,7 +241,7 @@ function AgentHealthDetail({ agentId, hostname }: { agentId: string; hostname: s
 export function HealthPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
-  const { data: health, isLoading: healthLoading, error: healthError, refetch } = useFleetHealth()
+  const { data: health } = useFleetHealth()
   const { data: agents } = useAgents()
   const [selectedId, setSelectedId] = usePersistedState<string | null>('health_agent', null)
 

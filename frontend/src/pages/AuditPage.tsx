@@ -230,7 +230,7 @@ export function AuditPage() {
   const [userFilter, setUserFilter]         = usePersistedState('audit_user', '')
   const [actionFilter, setActionFilter]     = usePersistedState('audit_action', '')
   const [resourceFilter, setResourceFilter] = usePersistedState('audit_resource', '')
-  const [expandedId, setExpandedId]         = useState<string | null>(null)
+  const [expandedId, setExpandedId]         = useState<number | null>(null)
   const [failOnly, setFailOnly]             = useState(false)
 
   const { data: logs, isLoading, error, refetch } = useAudit({
@@ -411,8 +411,8 @@ function VirtualList({
   onToggle,
 }: {
   logs: AuditLog[]
-  expandedId: string | null
-  onToggle: (id: string) => void
+  expandedId: number | null
+  onToggle: (id: number) => void
 }) {
   const { containerRef, onScroll, startIdx, endIdx, totalH } = useVirtualRows(logs.length, ROW_HEIGHT)
 

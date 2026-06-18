@@ -22,7 +22,7 @@ import type { User, Role } from '@/types'
 export function UsersPage() {
   const { user: currentUser } = useAuthStore()
   const { data: users, isLoading, error, refetch } = useUsers()
-  const { createUser, deleteUser, toggleUser, assignRole } = useUserMutations()
+  const { deleteUser, toggleUser, assignRole } = useUserMutations()
 
   const [showCreate, setShowCreate] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)

@@ -11,11 +11,9 @@ import {
   configApi,
 } from '@/api'
 import { wsClient } from '@/ws/client'
-import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
 import { queryKeys } from './queryKeys'
 import type {
-  Agent,
   AgentListParams,
   Metric,
   LogEntry,
@@ -26,8 +24,6 @@ import type {
   CpuData,
   RamData,
   NetworkData,
-  StorageData,
-  KernelData,
 } from '@/types'
 
 // ─── Auth hooks ───────────────────────────────────────────────────────────────
@@ -313,14 +309,14 @@ export function useLiveMetrics(agentId: string | null): LiveMetrics {
         const h = { ...prev.history }
 
         if (metric.metric_type === 'cpu') {
-          const d = metric.data as CpuData
+          const d = metric.data as unknown as CpuData
           h.cpu = append(h.cpu, d.usage_pct ?? 0)
           h.timestamps = append(h.timestamps as unknown as number[], metric.timestamp as unknown as number) as unknown as string[]
         } else if (metric.metric_type === 'ram') {
-          const d = metric.data as RamData
+          const d = metric.data as unknown as RamData
           h.ram = append(h.ram, d.usage_pct ?? 0)
         } else if (metric.metric_type === 'network') {
-          const d = metric.data as NetworkData
+          const d = metric.data as unknown as NetworkData
           const iface = d.interfaces?.find((i) => i.name !== 'lo') ?? d.interfaces?.[0]
           if (iface) {
             h.netRx = append(h.netRx, iface.rx_bytes_rate)

@@ -3,10 +3,21 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::{collections::HashMap, fs, sync::Mutex};
+use std::{collections::{HashMap, HashSet}, fs, sync::Mutex};
 use sysinfo::Disks;
 
 use super::trait_collector::Collector;
+
+#[derive(Default)]
+struct DiskAggregate {
+    total: u64,
+    used: u64,
+    free: u64,
+    fs_types: HashSet<String>,
+    mount_points: Vec<String>,
+    partitions: Vec<Value>,
+    is_removable: bool,
+}
 
 pub struct StorageCollector {
     /// Previous (reads, writes) per device — used for delta calculation.
@@ -40,11 +51,19 @@ pub fn collect_from(
     io_stats: &HashMap<String, (u64, u64)>,
     prev: &mut HashMap<String, (u64, u64)>,
 ) -> Value {
+    let mut disk_groups: HashMap<String, DiskAggregate> = HashMap::new();
+    let mut os_disk_id: Option<String> = None;
+
     let filesystems: Vec<Value> = disks
         .list()
         .iter()
-        .map(|disk| {
-            let name = disk.name().to_string_lossy().to_string();
+        .filter_map(|disk| {
+            let device = disk.name().to_string_lossy().to_string();
+            let mount_point = disk.mount_point().to_string_lossy().to_string();
+            let base = base_device(&device);
+            if mount_point.starts_with("/var/lib/docker") || base == "overlay" || device == "overlay" {
+                return None;
+            }
             let total = disk.total_space();
             let avail = disk.available_space();
             let used = total.saturating_sub(avail);
@@ -53,18 +72,93 @@ pub fn collect_from(
             } else {
                 0.0
             };
-            json!({
-                "name":        name,
-                "mount_point": disk.mount_point(),
-                "fs_type":     disk.file_system().to_string_lossy(),
-                "total_bytes": total,
-                "used_bytes":  used,
-                "free_bytes":  avail,
-                "usage_pct":   pct,
+            if mount_point == "/" {
+                os_disk_id = Some(base.clone());
+            }
+
+            let fs_type = disk.file_system().to_string_lossy().to_string();
+            let entry = json!({
+                "device":       device.clone(),
+                "name":         device.clone(),
+                "mount_point":  mount_point.clone(),
+                "fs_type":      fs_type.clone(),
+                "total_bytes":  total,
+                "used_bytes":   used,
+                "free_bytes":   avail,
+                "usage_pct":    pct,
                 "is_removable": disk.is_removable(),
+                "parent_disk":  base.clone(),
+            });
+
+            let agg = disk_groups
+                .entry(base.clone())
+                .or_insert_with(|| DiskAggregate {
+                    is_removable: disk.is_removable(),
+                    ..DiskAggregate::default()
+                });
+
+            agg.total = agg.total.saturating_add(total);
+            agg.used = agg.used.saturating_add(used);
+            agg.free = agg.free.saturating_add(avail);
+            agg.fs_types.insert(fs_type);
+            if !agg.mount_points.contains(&mount_point) {
+                agg.mount_points.push(mount_point.clone());
+            }
+            agg.is_removable = agg.is_removable && disk.is_removable();
+            agg.partitions.push(entry.clone());
+
+            Some(entry)
+        })
+        .collect();
+
+    let disks_summary: Vec<Value> = disk_groups
+        .iter()
+        .map(|(device, agg)| {
+            let usage_pct = if agg.total > 0 {
+                agg.used as f64 / agg.total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let mut fs_types: Vec<_> = agg.fs_types.iter().cloned().collect();
+            fs_types.sort();
+            fs_types.dedup();
+            json!({
+                "device":          device,
+                "name":            device,
+                "fs_type":         if fs_types.is_empty() { "unknown".to_string() } else { fs_types.join(",") },
+                "total_bytes":     agg.total,
+                "used_bytes":      agg.used,
+                "free_bytes":      agg.free,
+                "usage_pct":       usage_pct,
+                "mount_points":    agg.mount_points.clone(),
+                "partition_count": agg.partitions.len(),
+                "is_removable":    agg.is_removable,
+                "partitions":      agg.partitions.clone(),
             })
         })
         .collect();
+
+    let os_disk = os_disk_id.and_then(|id| {
+        disk_groups.get(&id).map(|agg| {
+            let mut fs_types: Vec<_> = agg.fs_types.iter().cloned().collect();
+            fs_types.sort();
+            fs_types.dedup();
+            json!({
+                "device":          id,
+                "name":            id,
+                "fs_type":         if fs_types.is_empty() { "unknown".to_string() } else { fs_types.join(",") },
+                "total_bytes":     agg.total,
+                "used_bytes":      agg.used,
+                "free_bytes":      agg.free,
+                "usage_pct":       if agg.total > 0 { agg.used as f64 / agg.total as f64 * 100.0 } else { 0.0 },
+                "mount_points":    agg.mount_points.clone(),
+                "partition_count": agg.partitions.len(),
+                "is_removable":    agg.is_removable,
+                "partitions":      agg.partitions.clone(),
+                "is_os_disk":      true,
+            })
+        })
+    });
 
     let io: Vec<Value> = io_stats
         .iter()
@@ -83,7 +177,34 @@ pub fn collect_from(
         })
         .collect();
 
-    json!({ "filesystems": filesystems, "io_stats": io })
+    json!({
+        "filesystems": filesystems,
+        "partitions":  filesystems,
+        "disks":       disks_summary,
+        "os_disk":     os_disk,
+        "io_stats":    io,
+    })
+}
+
+fn base_device(name: &str) -> String {
+    let basename = name
+        .rsplit_once('/')
+        .map(|(_, tail)| tail)
+        .unwrap_or(name);
+
+    if basename.starts_with("nvme") || basename.starts_with("mmcblk") {
+        if let Some(pos) = basename.rfind('p') {
+            return basename[..pos].to_string();
+        }
+        return basename.to_string();
+    }
+
+    let trimmed = basename.trim_end_matches(|c: char| c.is_ascii_digit());
+    if trimmed.is_empty() {
+        basename.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn read_diskstats() -> HashMap<String, (u64, u64)> {
@@ -160,5 +281,15 @@ mod tests {
         assert!(map.contains_key("sda"));
         assert!(!map.contains_key("loop0"));
         assert!(!map.contains_key("ram0"));
+    }
+
+    #[test]
+    fn base_device_handles_common_names() {
+        assert_eq!(base_device("sda1"), "sda");
+        assert_eq!(base_device("/dev/sda2"), "sda");
+        assert_eq!(base_device("nvme0n1p2"), "nvme0n1");
+        assert_eq!(base_device("/dev/nvme0n1"), "nvme0n1");
+        assert_eq!(base_device("mmcblk0p1"), "mmcblk0");
+        assert_eq!(base_device("vda"), "vda");
     }
 }

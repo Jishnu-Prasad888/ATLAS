@@ -2,9 +2,6 @@ import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type R
 import { clsx } from 'clsx'
 import type { AgentStatus, CollectorStatus, LogSeverity } from '@/types'
 import {
-  AGENT_STATUS_COLOR,
-  COLLECTOR_STATUS_COLOR,
-  LOG_SEVERITY_COLOR,
   agentStatusVariant,
   collectorStatusVariant,
 } from '@/utils'
@@ -151,10 +148,12 @@ export function Card({
   children,
   className,
   padding = true,
+  style,
 }: {
   children: ReactNode
   className?: string
   padding?: boolean
+  style?: React.CSSProperties
 }) {
   return (
     <div
@@ -163,6 +162,7 @@ export function Card({
         padding && 'p-4',
         className,
       )}
+      style={style}
     >
       {children}
     </div>

@@ -7,7 +7,6 @@ import { PageHeader } from '@/components/layout/AppLayout'
 import { DockerMetricsCard, KubernetesMetricsCard } from '@/components/agents'
 import {
   Card,
-  SectionHeader,
   AgentStatusBadge,
   SeverityBadge,
   Button,
@@ -174,12 +173,7 @@ export function OperationsPage() {
     [selectedAgentId, agents],
   )
 
-  const activeAgent = useMemo(
-    () => agents?.find((a) => a.agent_id === activeAgentId),
-    [agents, activeAgentId],
-  )
-
-  const { data: latestMetrics, isLoading: metricsLoading } = useLatestMetrics(activeAgentId)
+  const { data: latestMetrics } = useLatestMetrics(activeAgentId)
 
   const dockerData = latestMetrics?.['docker']?.data as DockerData | undefined
   const k8sData = latestMetrics?.['kubernetes']?.data as KubernetesData | undefined
@@ -254,8 +248,8 @@ export function OperationsPage() {
             <div className="py-16"><EmptyState message="Select an agent" /></div>
           ) : (
             <>
-              {dockerData && <DockerMetricsCard data={dockerData} loading={metricsLoading} />}
-              {k8sData && <KubernetesMetricsCard data={k8sData} loading={metricsLoading} />}
+              {dockerData && <DockerMetricsCard data={dockerData} />}
+              {k8sData && <KubernetesMetricsCard data={k8sData} loading={false} />}
               <CollectorLogsPanel agentId={activeAgentId} />
             </>
           )}

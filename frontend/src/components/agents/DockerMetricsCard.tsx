@@ -2,26 +2,61 @@ import { useMemo, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, X as CloseIcon } from "lucide-react";
 
+// ─── Types ──────────────────────────────────────────────────────────────────
+interface Container {
+  id: string; name: string; image: string; state: string; restarts: number;
+}
+interface CpuSample { container_id: string; cpu_percent: number; cpu_system_usage: number; throttled_periods: number; throttled_time: number; }
+interface MemSample { container_id: string; memory_usage: number; memory_limit: number; memory_percent: number; }
+interface NetSample { container_id: string; interfaces: Array<{ name: string; rx_bytes: number; tx_bytes: number }>; }
+interface DiskSample { container_id: string; read_bytes: number; write_bytes: number; }
+interface HealthStatus { container_id: string; health_status: string; }
+interface LogEntryData { timestamp: string; stream: string; message: string; }
+interface LogSample { container_id: string; entries: LogEntryData[]; }
+interface SecurityProfile { container_id: string; privileged: boolean; readonly_rootfs: boolean; host_network: boolean; host_pid: boolean; docker_socket_mounted: boolean; user: string; capabilities: string[]; seccomp_profile: string; apparmor_profile: string; }
+interface ProcessEntry { pid: number; command: string; cpu_percent: number; memory_bytes: number; }
+interface ProcessSample { container_id: string; capped: boolean; processes: ProcessEntry[]; }
+interface TopologyNetwork { network_name: string; ip_address: string; gateway: string; ports: Array<{ private_port: number; public_port?: number; protocol: string }>; }
+interface TopologySample { container_id: string; networks: TopologyNetwork[]; }
+interface Image { image_id: string; repo_tags: string[]; repo_digests: string[]; }
+interface InventoryContainer { container_id: string; name: string; image: string; state: string; restart_count: number; created: string; }
+interface DockerData {
+  inventory: { containers: InventoryContainer[] };
+  summary: { total_containers: number; state_counts: Record<string, number>; last_event: string; resource_totals: { cpu_percent_avg: number; cpu_system_usage_sum: number; cpu_throttled_periods_sum: number; cpu_throttled_time_sum: number; memory_usage_bytes_sum: number; memory_limit_bytes_sum: number; memory_percent_avg: number; network_rx_bytes_sum: number; network_tx_bytes_sum: number; block_read_bytes_sum: number; block_write_bytes_sum: number; pids_sum: number; } };
+  host: { metrics: { hostname: string; cpu_percent: number; memory_used: number; memory_total: number; disk_used: number; disk_total: number; load_1: number; load_5: number; load_15: number; uptime: number; } };
+  metrics: { cpu: { samples: CpuSample[] }; memory: { samples: MemSample[] }; disk: { samples: DiskSample[] }; network: { samples: NetSample[] } };
+  health: { statuses: HealthStatus[] };
+  lifecycle: { events: Array<{ timestamp: string; container_id: string; event: string; attributes: Record<string, string> }> };
+  logs: { samples: LogSample[] };
+  security: { profiles: SecurityProfile[] };
+  processes: { samples: ProcessSample[] };
+  filesystem: { samples: unknown[] };
+  topology: { samples: TopologySample[] };
+  images: { images: Image[] };
+  collector_disabled: boolean;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
-function formatBytes(b) {
+function formatBytes(b: number): string {
   if (b == null || isNaN(b)) return "–";
   if (b === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(Math.abs(b)) / Math.log(1024));
   return (b / Math.pow(1024, i)).toFixed(1) + " " + units[i];
 }
-function timeAgo(ts) {
+function timeAgo(ts: string): string {
   if (!ts) return "–";
   const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
 }
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, v)); }
+function rng(lo: number, hi: number): number { return lo + Math.random() * (hi - lo); }
 
 // ─── Mock data generator ─────────────────────────────────────────────────────
-function generateMockData() {
-  const containers = [
+function generateMockData(): DockerData {
+  const containers: Container[] = [
     { id: "a1b2c3d4e5f6", name: "api-gateway",   image: "nginx:alpine",          state: "running", restarts: 0 },
     { id: "b2c3d4e5f6a1", name: "postgres-db",   image: "postgres:15",           state: "running", restarts: 1 },
     { id: "c3d4e5f6a1b2", name: "redis-cache",   image: "redis:7-alpine",        state: "running", restarts: 0 },
@@ -29,38 +64,37 @@ function generateMockData() {
     { id: "e5f6a1b2c3d4", name: "prometheus",    image: "prom/prometheus:v2.47", state: "running", restarts: 0 },
     { id: "f6a1b2c3d4e5", name: "old-migrator",  image: "node:18",               state: "exited",  restarts: 0 },
   ];
-  const rng = (lo, hi) => lo + Math.random() * (hi - lo);
-  const cpuSamples  = containers.map(c => ({ container_id: c.id, cpu_percent: c.state === "running" ? rng(0.5, 45) : 0, cpu_system_usage: Math.floor(rng(1e9, 9e9)), throttled_periods: Math.floor(rng(0, 20)), throttled_time: Math.floor(rng(0, 1e7)) }));
-  const memSamples  = containers.map(c => ({ container_id: c.id, memory_usage: c.state === "running" ? Math.floor(rng(50e6, 800e6)) : 0, memory_limit: 2 * 1024 * 1024 * 1024, memory_percent: c.state === "running" ? rng(2, 38) : 0 }));
-  const netSamples  = containers.map(c => ({ container_id: c.id, interfaces: [{ name: "eth0", rx_bytes: Math.floor(rng(1e6, 500e6)), tx_bytes: Math.floor(rng(1e6, 200e6)) }] }));
-  const diskSamples = containers.map(c => ({ container_id: c.id, read_bytes: Math.floor(rng(0, 100e6)), write_bytes: Math.floor(rng(0, 50e6)) }));
-  const healthStatuses = containers.filter(c => c.state === "running").map(c => ({ container_id: c.id, health_status: Math.random() > 0.15 ? "healthy" : "unhealthy" }));
-  const events = [
+  const cpuSamples: CpuSample[]  = containers.map(c => ({ container_id: c.id, cpu_percent: c.state === "running" ? rng(0.5, 45) : 0, cpu_system_usage: Math.floor(rng(1e9, 9e9)), throttled_periods: Math.floor(rng(0, 20)), throttled_time: Math.floor(rng(0, 1e7)) }));
+  const memSamples: MemSample[]  = containers.map(c => ({ container_id: c.id, memory_usage: c.state === "running" ? Math.floor(rng(50e6, 800e6)) : 0, memory_limit: 2 * 1024 * 1024 * 1024, memory_percent: c.state === "running" ? rng(2, 38) : 0 }));
+  const netSamples: NetSample[]  = containers.map(c => ({ container_id: c.id, interfaces: [{ name: "eth0", rx_bytes: Math.floor(rng(1e6, 500e6)), tx_bytes: Math.floor(rng(1e6, 200e6)) }] }));
+  const diskSamples: DiskSample[] = containers.map(c => ({ container_id: c.id, read_bytes: Math.floor(rng(0, 100e6)), write_bytes: Math.floor(rng(0, 50e6)) }));
+  const healthStatuses: HealthStatus[] = containers.filter(c => c.state === "running").map(c => ({ container_id: c.id, health_status: Math.random() > 0.15 ? "healthy" : "unhealthy" }));
+  const events: Array<{ timestamp: string; container_id: string; event: string; attributes: Record<string, string> }> = [
     { timestamp: new Date(Date.now() - 2  * 60000).toISOString(), container_id: "a1b2c3d4e5f6", event: "start",         attributes: { exitCode: "0" } },
     { timestamp: new Date(Date.now() - 8  * 60000).toISOString(), container_id: "d4e5f6a1b2c3", event: "restart",       attributes: {} },
     { timestamp: new Date(Date.now() - 15 * 60000).toISOString(), container_id: "f6a1b2c3d4e5", event: "die",           attributes: { exitCode: "0" } },
     { timestamp: new Date(Date.now() - 22 * 60000).toISOString(), container_id: "b2c3d4e5f6a1", event: "health_status", attributes: { status: "healthy" } },
     { timestamp: new Date(Date.now() - 45 * 60000).toISOString(), container_id: "c3d4e5f6a1b2", event: "start",         attributes: {} },
   ];
-  const logSamples = containers.slice(0, 4).map(c => ({ container_id: c.id, entries: [
+  const logSamples: LogSample[] = containers.slice(0, 4).map(c => ({ container_id: c.id, entries: [
     { timestamp: new Date(Date.now() - Math.floor(rng(1000, 600000))).toISOString(),   stream: Math.random() > 0.8 ? "stderr" : "stdout", message: `[INFO] ${c.name} heartbeat ok` },
     { timestamp: new Date(Date.now() - Math.floor(rng(600000, 3600000))).toISOString(), stream: "stdout", message: `[INFO] Connection pool size=10` },
   ]}));
-  const securityProfiles = containers.slice(0, 4).map(c => ({ container_id: c.id, privileged: false, readonly_rootfs: Math.random() > 0.5, host_network: false, host_pid: false, docker_socket_mounted: false, user: "1000", capabilities: Math.random() > 0.5 ? ["NET_BIND_SERVICE"] : [], seccomp_profile: "runtime/default", apparmor_profile: "docker-default" }));
-  const processSamples = containers.filter(c => c.state === "running").slice(0, 3).map(c => ({ container_id: c.id, capped: false, processes: [
+  const securityProfiles: SecurityProfile[] = containers.slice(0, 4).map(c => ({ container_id: c.id, privileged: false, readonly_rootfs: Math.random() > 0.5, host_network: false, host_pid: false, docker_socket_mounted: false, user: "1000", capabilities: Math.random() > 0.5 ? ["NET_BIND_SERVICE"] : [], seccomp_profile: "runtime/default", apparmor_profile: "docker-default" }));
+  const processSamples: ProcessSample[] = containers.filter(c => c.state === "running").slice(0, 3).map(c => ({ container_id: c.id, capped: false, processes: [
     { pid: Math.floor(rng(100, 999)),  command: c.name,  cpu_percent: rng(0.1, 5), memory_bytes: Math.floor(rng(10e6, 200e6)) },
     { pid: Math.floor(rng(1000, 9999)), command: "/bin/sh", cpu_percent: 0,          memory_bytes: Math.floor(rng(1e6, 5e6)) },
   ]}));
-  const topologySamples = containers.filter(c => c.state === "running").slice(0, 3).map((c, i) => ({ container_id: c.id, networks: [{ network_name: "app-network", ip_address: `172.18.0.${i + 2}`, gateway: "172.18.0.1", ports: i === 0 ? [{ private_port: 80, public_port: 8080, protocol: "tcp" }] : [] }] }));
-  const images = containers.map(c => ({ image_id: c.id, repo_tags: [c.image], repo_digests: [] }));
-  const totalCpu = cpuSamples.reduce((s, x) => s + x.cpu_percent, 0) / cpuSamples.filter(x => x.cpu_percent > 0).length;
-  const totalMem = memSamples.reduce((s, x) => s + x.memory_usage, 0);
-  const totalMemLimit = memSamples.reduce((s, x) => s + x.memory_limit, 0);
-  const totalRx = netSamples.reduce((s, x) => s + x.interfaces.reduce((a, i) => a + i.rx_bytes, 0), 0);
-  const totalTx = netSamples.reduce((s, x) => s + x.interfaces.reduce((a, i) => a + i.tx_bytes, 0), 0);
+  const topologySamples: TopologySample[] = containers.filter(c => c.state === "running").slice(0, 3).map((c, i) => ({ container_id: c.id, networks: [{ network_name: "app-network", ip_address: `172.18.0.${i + 2}`, gateway: "172.18.0.1", ports: i === 0 ? [{ private_port: 80, public_port: 8080, protocol: "tcp" }] : [] }] }));
+  const images: Image[] = containers.map(c => ({ image_id: c.id, repo_tags: [c.image], repo_digests: [] }));
+  const totalCpu = cpuSamples.reduce((s: number, x: CpuSample) => s + x.cpu_percent, 0) / cpuSamples.filter(x => x.cpu_percent > 0).length;
+  const totalMem = memSamples.reduce((s: number, x: MemSample) => s + x.memory_usage, 0);
+  const totalMemLimit = memSamples.reduce((s: number, x: MemSample) => s + x.memory_limit, 0);
+  const totalRx = netSamples.reduce((s: number, x: NetSample) => s + x.interfaces.reduce((a: number, i) => a + i.rx_bytes, 0), 0);
+  const totalTx = netSamples.reduce((s: number, x: NetSample) => s + x.interfaces.reduce((a: number, i) => a + i.tx_bytes, 0), 0);
   return {
     inventory: { containers: containers.map(c => ({ container_id: c.id, name: c.name, image: c.image, state: c.state, restart_count: c.restarts, created: new Date(Date.now() - rng(1e9, 9e9)).toISOString() })) },
-    summary: { total_containers: containers.length, state_counts: { running: 5, exited: 1 }, last_event: events[0].timestamp, resource_totals: { cpu_percent_avg: totalCpu, cpu_system_usage_sum: cpuSamples.reduce((s, x) => s + x.cpu_system_usage, 0), cpu_throttled_periods_sum: cpuSamples.reduce((s, x) => s + x.throttled_periods, 0), cpu_throttled_time_sum: cpuSamples.reduce((s, x) => s + x.throttled_time, 0), memory_usage_bytes_sum: totalMem, memory_limit_bytes_sum: totalMemLimit, memory_percent_avg: (totalMem / totalMemLimit) * 100, network_rx_bytes_sum: totalRx, network_tx_bytes_sum: totalTx, block_read_bytes_sum: diskSamples.reduce((s, x) => s + x.read_bytes, 0), block_write_bytes_sum: diskSamples.reduce((s, x) => s + x.write_bytes, 0), pids_sum: 42 } },
+    summary: { total_containers: containers.length, state_counts: { running: 5, exited: 1 }, last_event: events[0].timestamp, resource_totals: { cpu_percent_avg: totalCpu, cpu_system_usage_sum: cpuSamples.reduce((s: number, x: CpuSample) => s + x.cpu_system_usage, 0), cpu_throttled_periods_sum: cpuSamples.reduce((s: number, x: CpuSample) => s + x.throttled_periods, 0), cpu_throttled_time_sum: cpuSamples.reduce((s: number, x: CpuSample) => s + x.throttled_time, 0), memory_usage_bytes_sum: totalMem, memory_limit_bytes_sum: totalMemLimit, memory_percent_avg: (totalMem / totalMemLimit) * 100, network_rx_bytes_sum: totalRx, network_tx_bytes_sum: totalTx, block_read_bytes_sum: diskSamples.reduce((s: number, x: DiskSample) => s + x.read_bytes, 0), block_write_bytes_sum: diskSamples.reduce((s: number, x: DiskSample) => s + x.write_bytes, 0), pids_sum: 42 } },
     host: { metrics: { hostname: "prod-host-01", cpu_percent: 24.7, memory_used: 6.2 * 1024 * 1024 * 1024, memory_total: 16 * 1024 * 1024 * 1024, disk_used: 48 * 1024 * 1024 * 1024, disk_total: 256 * 1024 * 1024 * 1024, load_1: 1.42, load_5: 1.18, load_15: 0.97, uptime: 432000 } },
     metrics: { cpu: { samples: cpuSamples }, memory: { samples: memSamples }, disk: { samples: diskSamples }, network: { samples: netSamples } },
     health: { statuses: healthStatuses },
@@ -72,11 +106,11 @@ function generateMockData() {
     topology: { samples: topologySamples },
     images: { images },
     collector_disabled: false,
-  };
+  } as DockerData;
 }
 
 // ─── CSS variable tokens ──────────────────────────────────────────────────────
-const C = {
+const C: Record<string, string> = {
   bg:           "var(--color-bg, #0b0d10)",
   surface:      "var(--color-surface, rgba(255,255,255,0.02))",
   surface2:     "var(--color-surface-2, rgba(255,255,255,0.04))",
@@ -87,7 +121,7 @@ const C = {
   dim:          "var(--color-text-dim, rgba(255,255,255,0.25))",
 };
 
-const STATE_COLOR = {
+const STATE_COLOR: Record<string, string> = {
   running:    "#22c55e",
   exited:     "#6b7280",
   paused:     "#eab308",
@@ -97,7 +131,7 @@ const STATE_COLOR = {
   removing:   "#ef4444",
 };
 
-const HEALTH_COLOR = {
+const HEALTH_COLOR: Record<string, string> = {
   healthy:   "#22c55e",
   unhealthy: "#ef4444",
   starting:  "#3b82f6",
@@ -105,7 +139,7 @@ const HEALTH_COLOR = {
 };
 
 // ─── Micro components ─────────────────────────────────────────────────────────
-function Dot({ color }) {
+function Dot({ color }: { color: string }) {
   return (
     <span style={{
       display: "inline-block", width: 6, height: 6,
@@ -115,7 +149,7 @@ function Dot({ color }) {
   );
 }
 
-function MiniGauge({ value, color }) {
+function MiniGauge({ value, color }: { value: number; color: string }) {
   const pct = clamp(value ?? 0, 0, 100);
   return (
     <div style={{ position: "relative", height: 2, background: C.border, borderRadius: 999, overflow: "hidden" }}>
@@ -124,7 +158,7 @@ function MiniGauge({ value, color }) {
   );
 }
 
-function SectionLabel({ title, count }) {
+function SectionLabel({ title, count }: { title: string; count?: number }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
       <span style={{ fontSize: 10, fontWeight: 600, color: C.dim, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em" }}>{title}</span>
@@ -135,7 +169,7 @@ function SectionLabel({ title, count }) {
   );
 }
 
-function StatCard({ label, value, sub }) {
+function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", minWidth: 0 }}>
       <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>{label}</div>
@@ -146,7 +180,7 @@ function StatCard({ label, value, sub }) {
 }
 
 // ─── Tiles ───────────────────────────────────────────────────────────────────
-function TileHostSnapshot({ data }) {
+function TileHostSnapshot({ data }: { data: DockerData }) {
   const m = data.host.metrics;
   const cpuPct  = m.cpu_percent;
   const memPct  = (m.memory_used  / m.memory_total) * 100;
@@ -178,14 +212,14 @@ function TileHostSnapshot({ data }) {
   );
 }
 
-function TileSummary({ data }) {
+function TileSummary({ data }: { data: DockerData }) {
   const { summary } = data;
   const t = summary.resource_totals;
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Cluster" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, flex: 1 }}>
-        <StatCard label="Containers" value={summary.total_containers}              sub={`${summary.state_counts.running ?? 0} running`} />
+        <StatCard label="Containers" value={String(summary.total_containers)}              sub={`${summary.state_counts.running ?? 0} running`} />
         <StatCard label="CPU avg"    value={t.cpu_percent_avg.toFixed(1) + "%"}    sub={`${t.cpu_throttled_periods_sum} throttled`} />
         <StatCard label="Memory"     value={formatBytes(t.memory_usage_bytes_sum)} sub={`/ ${formatBytes(t.memory_limit_bytes_sum)}`} />
         <StatCard label="Net I/O"    value={formatBytes(t.network_rx_bytes_sum + t.network_tx_bytes_sum)} sub={`${t.pids_sum} PIDs`} />
@@ -203,7 +237,7 @@ function TileSummary({ data }) {
   );
 }
 
-function TileInventory({ data }) {
+function TileInventory({ data }: { data: DockerData }) {
   const containers = data.inventory.containers;
   const cpuMap    = useMemo(() => new Map(data.metrics.cpu.samples.map(s    => [s.container_id, s])), [data]);
   const memMap    = useMemo(() => new Map(data.metrics.memory.samples.map(s => [s.container_id, s])), [data]);
@@ -214,9 +248,9 @@ function TileInventory({ data }) {
       <div style={{ flex: 1, overflow: "auto", marginRight: -4, paddingRight: 4 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {containers.map(c => {
-            const cpu    = cpuMap.get(c.container_id);
-            const mem    = memMap.get(c.container_id);
-            const health = healthMap.get(c.container_id);
+            const cpu    = cpuMap.get(c.container_id) as CpuSample | undefined;
+            const mem    = memMap.get(c.container_id) as MemSample | undefined;
+            const health = healthMap.get(c.container_id) as HealthStatus | undefined;
             const cpuVal = cpu?.cpu_percent ?? 0;
             const memPct = mem?.memory_percent ?? 0;
             const hStatus = health?.health_status ?? "none";
@@ -256,11 +290,11 @@ function TileInventory({ data }) {
   );
 }
 
-function TileLogs({ data }) {
-  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+function TileLogs({ data }: { data: DockerData }) {
+  const nameMap = useMemo(() => { const m: Record<string, string> = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
   const entries = useMemo(() => {
-    const all = data.logs.samples.flatMap(s => s.entries.map(e => ({ ...e, cid: s.container_id })));
-    return all.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 20);
+    const all: Array<LogEntryData & { cid: string }> = data.logs.samples.flatMap(s => s.entries.map(e => ({ ...e, cid: s.container_id })));
+    return all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 20);
   }, [data]);
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -279,15 +313,15 @@ function TileLogs({ data }) {
   );
 }
 
-function TileSecurity({ data }) {
-  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+function TileSecurity({ data }: { data: DockerData }) {
+  const nameMap = useMemo(() => { const m: Record<string, string> = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
   const profiles = data.security.profiles;
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Security" count={profiles.length} />
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
         {profiles.map(p => {
-          const issues = [p.privileged && "privileged", !p.readonly_rootfs && "rw-fs", p.host_network && "host-net", p.host_pid && "host-pid", p.docker_socket_mounted && "sock-mount"].filter(Boolean);
+          const issues: string[] = [p.privileged && "privileged", !p.readonly_rootfs && "rw-fs", p.host_network && "host-net", p.host_pid && "host-pid", p.docker_socket_mounted && "sock-mount"].filter(Boolean) as string[];
           return (
             <div key={p.container_id} style={{ background: C.surface, border: `1px solid ${issues.length ? "rgba(239,68,68,0.18)" : C.border}`, borderRadius: 8, padding: "10px 12px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -314,17 +348,17 @@ function TileSecurity({ data }) {
   );
 }
 
-function TileNetwork({ data }) {
-  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+function TileNetwork({ data }: { data: DockerData }) {
+  const nameMap = useMemo(() => { const m: Record<string, string> = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
   const netMap  = useMemo(() => new Map(data.metrics.network.samples.map(s => [s.container_id, s])), [data]);
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Network" />
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
         {data.topology.samples.map(s => {
-          const net = netMap.get(s.container_id);
-          const rx  = net?.interfaces.reduce((a, i) => a + i.rx_bytes, 0) ?? 0;
-          const tx  = net?.interfaces.reduce((a, i) => a + i.tx_bytes, 0) ?? 0;
+          const net = netMap.get(s.container_id) as NetSample | undefined;
+          const rx  = net?.interfaces.reduce((a: number, i) => a + i.rx_bytes, 0) ?? 0;
+          const tx  = net?.interfaces.reduce((a: number, i) => a + i.tx_bytes, 0) ?? 0;
           return (
             <div key={s.container_id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px" }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: C.text, marginBottom: 8, fontFamily: "monospace" }}>{nameMap[s.container_id] ?? s.container_id.slice(0, 12)}</div>
@@ -357,8 +391,8 @@ function TileNetwork({ data }) {
   );
 }
 
-function TileProcesses({ data }) {
-  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
+function TileProcesses({ data }: { data: DockerData }) {
+  const nameMap = useMemo(() => { const m: Record<string, string> = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Processes" />
@@ -384,13 +418,13 @@ function TileProcesses({ data }) {
   );
 }
 
-function TileImages({ data }) {
+function TileImages({ data }: { data: DockerData }) {
   const images = Array.isArray(data.images?.images) ? data.images.images : [];
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Images" count={images.length} />
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexWrap: "wrap", alignContent: "flex-start", gap: 6 }}>
-        {images.map(img => {
+        {images.map((img: Image) => {
           const label = img.repo_tags[0] ?? img.image_id.slice(0, 12);
           const [name, tag] = label.includes(":") ? label.split(":") : [label, "latest"];
           return (
@@ -406,7 +440,7 @@ function TileImages({ data }) {
 }
 
 // ─── Tile registry ────────────────────────────────────────────────────────────
-const TILE_DEFS = [
+const TILE_DEFS: Array<{ id: string; label: string; component: React.ComponentType<{ data: DockerData }>; defaultSpan: { col: number; row: number } }> = [
   { id: "summary",   label: "Cluster Summary", component: TileSummary,      defaultSpan: { col: 2, row: 1 } },
   { id: "host",      label: "Host Snapshot",   component: TileHostSnapshot, defaultSpan: { col: 1, row: 1 } },
   { id: "inventory", label: "Containers",      component: TileInventory,    defaultSpan: { col: 1, row: 2 } },
@@ -418,19 +452,19 @@ const TILE_DEFS = [
 ];
 
 // ─── Bento Grid ───────────────────────────────────────────────────────────────
-function BentoGrid({ data }) {
-  const [order, setOrder]   = useState(TILE_DEFS.map(t => t.id));
-  const [hidden, setHidden] = useState(new Set());
-  const [dragging, setDragging] = useState(null);
-  const [dragOver, setDragOver] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const dragSrc = useRef(null);
+function BentoGrid({ data }: { data: DockerData }) {
+  const [order, setOrder]   = useState<string[]>(TILE_DEFS.map(t => t.id));
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const dragSrc = useRef<string | null>(null);
 
   const visibleOrder = order.filter(id => !hidden.has(id));
 
-  const handleDragStart = useCallback((e, id) => { dragSrc.current = id; setDragging(id); e.dataTransfer.effectAllowed = "move"; }, []);
-  const handleDragOver  = useCallback((e, id) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragSrc.current !== id) setDragOver(id); }, []);
-  const handleDrop      = useCallback((e, targetId) => {
+  const handleDragStart = useCallback((e: React.DragEvent, id: string) => { dragSrc.current = id; setDragging(id); e.dataTransfer.effectAllowed = "move"; }, []);
+  const handleDragOver  = useCallback((e: React.DragEvent, id: string) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragSrc.current !== id) setDragOver(id); }, []);
+  const handleDrop      = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     const src = dragSrc.current;
     if (!src || src === targetId) return;
@@ -443,7 +477,7 @@ function BentoGrid({ data }) {
     setDragging(null); setDragOver(null); dragSrc.current = null;
   }, []);
   const handleDragEnd = useCallback(() => { setDragging(null); setDragOver(null); dragSrc.current = null; }, []);
-  const toggleHide    = useCallback((id) => { setHidden(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
+  const toggleHide    = useCallback((id: string) => { setHidden(prev => { const next = new Set(prev); if (next.has(id)) { next.delete(id); } else { next.add(id); } return next; }); }, []);
 
   const COLS  = 3;
   const ROW_H = 240;
@@ -452,7 +486,7 @@ function BentoGrid({ data }) {
   return (
     <div style={{ fontFamily: "monospace", minHeight: "100vh", background: C.bg, color: C.text, padding: "24px" }}>
 
-      {/* Top bar — mirrors RecoverPage header layout */}
+      {/* Top bar */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, paddingBottom: 20, borderBottom: `1px solid ${C.border}` }}>
         <div>
           <p style={{ fontSize: 10, fontFamily: "monospace", color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Docker Monitor</p>
@@ -476,7 +510,7 @@ function BentoGrid({ data }) {
       {/* Hidden tile chips */}
       {hidden.size > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-          {[...hidden].map(id => {
+          {[...hidden].map((id: string) => {
             const def = TILE_DEFS.find(t => t.id === id);
             return (
               <button key={id} onClick={() => toggleHide(id)} style={{ fontSize: 10, fontFamily: "monospace", background: "transparent", border: `1px dashed ${C.borderStrong}`, borderRadius: 20, color: C.muted, padding: "3px 10px", cursor: "pointer" }}>
@@ -521,7 +555,7 @@ function BentoGrid({ data }) {
             >
               <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6, zIndex: 2 }}>
                 <button
-                  onClick={e => { e.stopPropagation(); setExpanded(id); }}
+                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); setExpanded(id); }}
                   title="Expand"
                   style={{
                     width: 24, height: 24, borderRadius: 6,
@@ -534,7 +568,7 @@ function BentoGrid({ data }) {
                   <Maximize2 size={12} />
                 </button>
                 <button
-                  onClick={e => { e.stopPropagation(); toggleHide(id); }}
+                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); toggleHide(id); }}
                   title="Hide tile"
                   style={{
                     width: 24, height: 24, borderRadius: 6,
@@ -593,9 +627,9 @@ function BentoGrid({ data }) {
 }
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
-export default function DockerDashboard({ data: propData }) {
+export default function DockerDashboard({ data: propData }: { data?: unknown }) {
   const mockData = useMemo(() => generateMockData(), []);
-  const data = propData ?? mockData;
+  const data = (propData ?? mockData) as DockerData;
 
   if (!data || data.collector_disabled) {
     return (

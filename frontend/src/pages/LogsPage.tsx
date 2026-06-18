@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useAgents, useLogs, useLiveLogs, useDebounce, usePersistedState } from '@/hooks'
 import { logsApi } from '@/api'
 import { buildLogsExportUrl } from '@/api/telemetry'
@@ -15,7 +15,7 @@ import {
   ErrorState,
   ConfirmDialog,
 } from '@/components/common'
-import { LOG_SOURCE_LABEL, downloadFile, formatTimestamp } from '@/utils'
+import { LOG_SOURCE_LABEL, downloadFile } from '@/utils'
 import type { LogSeverity, LogSource, LogEntry } from '@/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -334,7 +334,7 @@ export function LogsPage() {
             <Button
               size="sm"
               variant={liveMode ? 'primary' : 'secondary'}
-              onClick={() => setLiveMode((v) => !v)}
+              onClick={() => setLiveMode(!liveMode)}
               aria-pressed={liveMode}
               aria-label={liveMode ? 'Disable live log stream' : 'Enable live log stream'}
             >
@@ -474,7 +474,7 @@ export function LogsPage() {
                 severity={s as LogSeverity}
                 active={severity === s}
                 count={severityCounts[s] ?? 0}
-                onClick={() => setSeverity((prev) => (prev === s ? '' : s))}
+                onClick={() => setSeverity(severity === s ? '' : s)}
               />
             ))}
             {severity && (

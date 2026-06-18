@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import { renderWithProviders, loginAsAdmin, logout } from '@/test/utils'
 import { RequireAuth, RequireAdmin, RedirectIfAuthenticated } from '@/components/auth/RouteGuards'
 import { useAuthStore } from '@/store/authStore'
-import { MOCK_ACCESS_TOKEN, MOCK_REFRESH_TOKEN } from '@/mocks/handlers'
+import { MOCK_REFRESH_TOKEN } from '@/mocks/handlers'
 
 function ProtectedContent() {
   return <div>Protected Content</div>

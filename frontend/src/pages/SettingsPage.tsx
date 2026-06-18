@@ -11,7 +11,7 @@ import {
   SectionHeader,
   KvRow,
 } from '@/components/common'
-import { validatePassword, mapServerErrors, formatDate } from '@/utils'
+import { validatePassword, mapServerErrors } from '@/utils'
 import { useCopyToClipboard } from '@/hooks'
 import { env } from '@/config/env'
 

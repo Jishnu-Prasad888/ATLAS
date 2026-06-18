@@ -139,7 +139,8 @@ export interface RamData {
   hugepages: { total: number; free: number; size_kb: number }
 }
 
-export interface StorageFilesystem {
+export interface StoragePartition {
+  device: string
   name: string
   mount_point: string
   fs_type: string
@@ -148,10 +149,31 @@ export interface StorageFilesystem {
   free_bytes: number
   usage_pct: number
   is_removable: boolean
+  parent_disk?: string | null
+}
+
+export type StorageFilesystem = StoragePartition
+
+export interface StorageDisk {
+  device: string
+  name: string
+  fs_type: string
+  total_bytes: number
+  used_bytes: number
+  free_bytes: number
+  usage_pct: number
+  is_removable: boolean
+  mount_points: string[]
+  partition_count: number
+  partitions?: StoragePartition[]
+  is_os_disk?: boolean
 }
 
 export interface StorageData {
-  filesystems: StorageFilesystem[]
+  partitions: StoragePartition[]
+  filesystems: StoragePartition[]
+  disks: StorageDisk[]
+  os_disk?: StorageDisk
   io_stats: Array<{
     device: string
     reads_total: number

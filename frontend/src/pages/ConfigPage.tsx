@@ -14,9 +14,8 @@ import {
   EmptyState,
   ErrorState,
   SectionHeader,
-  KvRow,
 } from '@/components/common'
-import { validateIntervalSeconds, validateRetentionDays, formatTimestamp } from '@/utils'
+import { validateRetentionDays, formatTimestamp } from '@/utils'
 import type { RetentionPolicy, ServerConfig } from '@/types'
 
 export function ConfigPage() {

@@ -309,7 +309,15 @@ const MetricPanel = memo(function MetricPanel({
   const network = latest.network?.data as unknown as NetworkData | undefined
   const kernel  = latest.kernel?.data  as unknown as KernelData  | undefined
 
-  const rootDisk         = storage?.filesystems.find((f) => f.mount_point === '/') ?? storage?.filesystems[0]
+  const storagePartitions = storage?.partitions?.length ? storage.partitions : storage?.filesystems ?? []
+  const storageDisks = storage?.disks ?? []
+  const rootPartition = storagePartitions.find((p) => p.mount_point === '/') ?? storagePartitions[0]
+  const osDisk = storage?.os_disk
+    ?? (() => {
+      if (!rootPartition) return storageDisks[0]
+      const parentId = rootPartition.parent_disk ?? rootPartition.device ?? rootPartition.name
+      return storageDisks.find((d) => d.device === parentId || d.name === parentId) ?? storageDisks[0]
+    })()
   const primaryInterface = network?.interfaces.find((i) => i.name !== 'lo') ?? network?.interfaces[0]
 
   if (!agentId) {
@@ -336,7 +344,7 @@ const MetricPanel = memo(function MetricPanel({
       </div>
 
       {/* Arc gauges */}
-      {(cpu || ram || rootDisk) ? (
+      {(cpu || ram || osDisk) ? (
         <div className="metric-grid">
           {cpu && (
             <ArcGauge
@@ -353,11 +361,11 @@ const MetricPanel = memo(function MetricPanel({
               history={history.ram}
             />
           )}
-          {rootDisk && (
+          {osDisk && (
             <ArcGauge
-              label="Disk"
-              value={rootDisk.usage_pct}
-              detail={`${formatBytes(rootDisk.used_bytes)} / ${formatBytes(rootDisk.total_bytes)}`}
+              label="OS Disk"
+              value={osDisk.usage_pct}
+              detail={`${formatBytes(osDisk.used_bytes)} / ${formatBytes(osDisk.total_bytes)}`}
             />
           )}
         </div>

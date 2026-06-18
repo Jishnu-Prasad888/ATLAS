@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useAgents, useFleetHealth, useLatestMetrics, useLogs, useAudit, useDebounce } from '@/hooks'
-import { createWrapper, loginAsAdmin, logout } from '@/test/utils'
+import { createWrapper, loginAsAdmin } from '@/test/utils'
 import { server } from '@/mocks/server'
 import { http, HttpResponse } from 'msw'
-import { mockAgent, mockFleetHealth, mockCpuMetric } from '@/mocks/handlers'
+import { mockAgent, mockFleetHealth } from '@/mocks/handlers'
 
 describe('useAgents', () => {
   beforeEach(() => {
