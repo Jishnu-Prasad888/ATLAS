@@ -1,22 +1,22 @@
-import {
-  useState, useMemo,
-  memo, useCallback,
-} from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useState, useMemo, memo, useCallback, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
 import {
-  useFleetHealth, useAgents, useLiveMetrics,
+  useFleetHealth, useAgents, useLiveMetrics, useLogs,
 } from '@/hooks'
 import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
-  AgentStatusBadge, Sparkline, LoadingState, EmptyState, Tag, Button,
+  AgentStatusBadge, Sparkline, LoadingState, EmptyState, Tag, Button, SeverityBadge,
 } from '@/components/common'
 import {
-  formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId
+  formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId, LOG_SOURCE_LABEL,
 } from '@/utils'
-import type { Agent, CpuData, RamData, StorageData, NetworkData, KernelData } from '@/types'
+import { configApi, usersApi } from '@/api'
+import type {
+  CpuData, RamData, StorageData, NetworkData, KernelData, LogEntry,
+} from '@/types'
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -25,85 +25,293 @@ const CSS = `
 
   .atlas-dash * { font-family: 'JetBrains Mono', monospace; }
 
-  .atlas-dash .agent-row {
+  .atlas-dash {
+    overflow: hidden;
+  }
+
+  .atlas-dash .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     width: 100%;
-    text-align: left;
+    height: 100%;
+    min-height: 0;
+  }
+  .atlas-dash .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--color-border);
-    transition: background 0.1s;
-    cursor: pointer;
-    background: transparent;
-    border-left: 2px solid transparent;
+    flex: 0 0 auto;
   }
-  .atlas-dash .agent-row:hover { background: color-mix(in srgb, var(--color-text) 3%, transparent); }
-  .atlas-dash .agent-row.agent-selected {
-    background: color-mix(in srgb, #F0A500 6%, transparent);
-    border-left-color: #F0A500;
+  .atlas-dash .panel-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
   }
-
-  .atlas-dash .fleet-stat {
-    flex: 1;
-    padding: 14px 16px;
-    border-right: 1px solid var(--color-border);
+  .atlas-dash .panel-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
   }
-  .atlas-dash .fleet-stat:last-child { border-right: none; }
-
-  .atlas-dash .metric-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    padding: 18px;
-  }
-
-  .atlas-dash .info-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 14px 16px;
-    border-top: 1px solid var(--color-border);
+  .atlas-dash .panel-aux {
+    font-size: 11px;
+    color: var(--color-text-muted);
   }
 
   .atlas-dash .info-cell {
     display: flex;
     flex-direction: column;
     gap: 3px;
+    min-width: 0;
   }
 
-  .atlas-dash .log-entry {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    padding: 7px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
-    transition: background 0.08s;
+  .atlas-dash .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    flex-shrink: 0;
   }
-  .atlas-dash .log-entry:hover { background: color-mix(in srgb, var(--color-text) 2.5%, transparent); }
-  .atlas-dash .log-entry:last-child { border-bottom: none; }
-
-  @keyframes dash-fadein {
-    from { opacity: 0; transform: translateY(3px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .atlas-dash .panel {
-    background: var(--color-surface);
+  .atlas-dash .stat-card {
+    padding: 14px 16px;
+    border-radius: 10px;
     border: 1px solid var(--color-border);
-    border-radius: 8px;
-    overflow: hidden;
+    background: var(--color-surface);
   }
-  .atlas-dash .panel-header {
+  .atlas-dash .stat-label {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .atlas-dash .stat-value {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-top: 4px;
+    line-height: 1.2;
+  }
+  .atlas-dash .stat-hint {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-top: 6px;
+  }
+  .atlas-dash .stat-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-text) 10%, transparent);
+    color: var(--color-text-muted);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .atlas-dash .main-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "agent agent agent agent metrics metrics metrics metrics metrics health health health"
+      "signals signals signals signals signals signals signals signals account account account account";
+    gap: 12px;
+  }
+  .atlas-dash .tile-agent   { grid-area: agent; min-width: 0; min-height: 0; height: 100%; display: flex; }
+  .atlas-dash .tile-metrics { grid-area: metrics; min-width: 0; min-height: 0; height: 100%; display: flex; }
+  .atlas-dash .tile-health  { grid-area: health; min-width: 0; min-height: 0; height: 100%; display: flex; }
+  .atlas-dash .tile-signals { grid-area: signals; min-width: 0; min-height: 0; height: 100%; display: flex; }
+  .atlas-dash .tile-account { grid-area: account; min-width: 0; min-height: 0; height: 100%; display: flex; }
+  .atlas-dash .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .atlas-dash .agent-select {
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-2);
+    color: var(--color-text);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+  }
+  .atlas-dash .agent-select:focus {
+    border-color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  }
+  .atlas-dash .mini-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-text) 8%, transparent);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+  .atlas-dash .agent-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-surface-2) 40%, transparent);
+  }
+  .atlas-dash .mini-label {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--color-text-dim);
+    text-transform: uppercase;
+  }
+  .atlas-dash .mini-value {
+    font-size: 12px;
+    color: var(--color-text);
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .atlas-dash .signal-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .atlas-dash .signal-row {
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .atlas-dash .signal-row:last-child { border-bottom: none; }
+  .atlas-dash .signal-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .atlas-dash .signal-message {
+    font-size: 12px;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+  }
+  .atlas-dash .signal-meta {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--color-border);
-  }
-  .atlas-dash .panel-label {
+    gap: 8px;
+    flex-wrap: wrap;
     font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--color-text-dim);
+    color: var(--color-text-muted);
   }
+  .atlas-dash .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-surface-2) 60%, transparent);
+    color: var(--color-text-dim);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .atlas-dash .pill.ok { color: #34d399; border-color: color-mix(in srgb, #34d399 40%, var(--color-border)); }
+  .atlas-dash .pill.warn { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 40%, var(--color-border)); }
+  .atlas-dash .pill.err { color: #f87171; border-color: color-mix(in srgb, #f87171 40%, var(--color-border)); }
+
+  .atlas-dash .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+  .atlas-dash .metric-grid > :nth-child(3) {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+  .atlas-dash .info-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--color-border);
+  }
+  .atlas-dash .net-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-surface-2) 30%, transparent);
+  }
+  .atlas-dash .net-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .atlas-dash .net-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .atlas-dash .agent-title {
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .atlas-dash .agent-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .atlas-dash .agent-sub {
+    padding: 0 14px 12px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .atlas-dash .tags-row {
+    padding: 0 14px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .atlas-dash .agent-footer {
+    padding: 10px 14px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-top: 1px solid var(--color-border);
+  }
+  .atlas-dash .link-ghost {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    text-decoration: none;
+  }
+  .atlas-dash .link-ghost:hover { color: var(--color-text); }
 
   @keyframes atlas-pulse-ring {
     0%   { opacity: 0.7; transform: scale(1); }
@@ -118,15 +326,48 @@ const CSS = `
     animation: atlas-pulse-ring 1.8s ease-out infinite;
   }
 
-  @keyframes atlas-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
+  @keyframes atlas-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .atlas-spin { animation: atlas-spin 0.6s linear; }
+
+  @media (max-width: 1280px) {
+    .atlas-dash {
+      overflow: auto;
+      height: auto;
+      min-height: 100%;
+    }
+    .atlas-dash .main-grid {
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(320px, auto));
+      grid-template-areas:
+        "agent agent agent agent metrics metrics metrics metrics"
+        "health health signals signals signals signals account account";
+    }
+    .atlas-dash .tile-agent,
+    .atlas-dash .tile-metrics,
+    .atlas-dash .tile-health,
+    .atlas-dash .tile-signals,
+    .atlas-dash .tile-account {
+      height: auto;
+    }
+    .atlas-dash .panel { height: auto; }
+    .atlas-dash .panel-body { overflow-y: visible; }
+  }
+  @media (max-width: 900px) {
+    .atlas-dash .stat-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .atlas-dash .main-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-rows: repeat(5, auto);
+      grid-template-areas:
+        "agent agent agent agent"
+        "metrics metrics metrics metrics"
+        "health health health health"
+        "signals signals signals signals"
+        "account account account account";
+    }
+  }
 `
 
 // ─── Arc gauge ────────────────────────────────────────────────────────────────
-// Signature element: a thin SVG arc that sweeps to the percentage.
 
 const ArcGauge = memo(function ArcGauge({
   label,
@@ -139,10 +380,10 @@ const ArcGauge = memo(function ArcGauge({
   detail?: string
   history?: number[]
 }) {
-  const R = 34
-  const cx = 42
-  const cy = 42
-  const stroke = 3.4
+  const R = 48
+  const cx = 56
+  const cy = 56
+  const stroke = 7
   const circumference = Math.PI * R // half-circle arc
   const progress = Math.min(1, Math.max(0, value / 100))
   const dashOffset = circumference * (1 - progress)
@@ -153,8 +394,8 @@ const ArcGauge = memo(function ArcGauge({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      <div style={{ position: 'relative', width: 88, height: 52 }}>
-        <svg width="88" height="52" viewBox="0 0 88 56" style={{ overflow: 'visible' }}>
+      <div style={{ position: 'relative', width: 120, height: 66 }}>
+        <svg width="120" height="66" viewBox="0 0 120 76" style={{ overflow: 'visible' }}>
           {/* Track */}
           <path
             d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
@@ -180,17 +421,17 @@ const ArcGauge = memo(function ArcGauge({
           position: 'absolute', bottom: 4, left: 0, right: 0,
           textAlign: 'center',
         }}>
-          <span style={{ fontSize: 16, fontWeight: 600, color, fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ fontSize: 20, fontWeight: 600, color, fontFamily: "'JetBrains Mono', monospace" }}>
             {Math.round(value)}
           </span>
-          <span style={{ fontSize: 10, color: 'var(--color-text-dim)', marginLeft: 2 }}>%</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-dim)', marginLeft: 2 }}>%</span>
         </div>
       </div>
 
       {/* Sparkline */}
       {history && history.length > 1 && (
         <div style={{ opacity: 0.7 }}>
-          <Sparkline values={history} color={color} width={88} height={20} />
+          <Sparkline values={history} color={color} width={120} height={26} />
         </div>
       )}
 
@@ -199,74 +440,11 @@ const ArcGauge = memo(function ArcGauge({
         {label}
       </span>
       {detail && (
-        <span style={{ fontSize: 11, color: 'var(--color-text-dim)', marginTop: -2 }}>
+        <span style={{ fontSize: 11, color: 'var(--color-text)', marginTop: -2 }}>
           {detail}
         </span>
       )}
     </div>
-  )
-})
-
-// ─── Fleet stat ───────────────────────────────────────────────────────────────
-
-const FleetStat = memo(function FleetStat({
-  label, value, color,
-}: {
-  label: string
-  value: number | string
-  color?: string
-}) {
-  return (
-    <div className="fleet-stat">
-      <div style={{ fontSize: 10, color: 'var(--color-text-dim)', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: 4 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 600, color: color ?? 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
-        {value}
-      </div>
-    </div>
-  )
-})
-
-// ─── Agent row ────────────────────────────────────────────────────────────────
-
-const AgentRow = memo(function AgentRow({
-  agent, selected, onClick,
-}: {
-  agent: Agent
-  selected: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      className={`agent-row ${selected ? 'agent-selected' : ''}`}
-      onClick={onClick}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: selected ? 'var(--color-text)' : 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {agent.hostname}
-        </span>
-        <AgentStatusBadge status={agent.status} />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 10.5, color: 'var(--color-text-dim)', letterSpacing: '0.05em' }}>
-          {shortAgentId(agent.agent_id)}
-        </span>
-        {agent.is_stale && (
-          <span style={{ fontSize: 10, color: '#fbbf24', letterSpacing: '0.1em' }}>stale</span>
-        )}
-      </div>
-      {agent.tags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-          {agent.tags.slice(0, 3).map((tag) => (
-            <Tag key={tag}>{tag}</Tag>
-          ))}
-        </div>
-      )}
-      <div style={{ fontSize: 10.5, color: 'var(--color-text-dim)', marginTop: 4 }}>
-        {timeAgo(agent.last_seen)}
-      </div>
-    </button>
   )
 })
 
@@ -291,6 +469,33 @@ function InfoCell({ label, value, mono = true }: { label: string; value: string;
     </div>
   )
 }
+
+// ─── Stat card ────────────────────────────────────────────────────────────────
+
+const StatCard = memo(function StatCard({
+  label,
+  value,
+  hint,
+  accent,
+  badge,
+}: {
+  label: string
+  value: ReactNode
+  hint?: ReactNode
+  accent?: string
+  badge?: ReactNode
+}) {
+  return (
+    <div className="stat-card">
+      <div className="stat-label">
+        {label}
+        {badge && <span className="stat-badge">{badge}</span>}
+      </div>
+      <div className="stat-value" style={accent ? { color: accent } : undefined}>{value}</div>
+      {hint && <div className="stat-hint">{hint}</div>}
+    </div>
+  )
+})
 
 // ─── Metric panel ─────────────────────────────────────────────────────────────
 
@@ -320,13 +525,16 @@ const MetricPanel = memo(function MetricPanel({
     })()
   const primaryInterface = network?.interfaces.find((i) => i.name !== 'lo') ?? network?.interfaces[0]
 
+  const netRxHistory = useMemo(() => history.netRx.map((v) => Math.max(0, v) / 1024), [history.netRx])
+  const netTxHistory = useMemo(() => history.netTx.map((v) => Math.max(0, v) / 1024), [history.netTx])
+
   if (!agentId) {
     return (
       <div className="panel" style={{ flex: 1 }}>
         <div className="panel-header">
           <span className="panel-label">Metrics</span>
         </div>
-        <div style={{ padding: '36px 0' }}>
+        <div className="panel-body" style={{ padding: '36px 0' }}>
           <EmptyState message="Select an agent to view metrics" />
         </div>
       </div>
@@ -337,87 +545,109 @@ const MetricPanel = memo(function MetricPanel({
     <div className="panel" style={{ flex: 1 }}>
       {/* Header */}
       <div className="panel-header">
-        <span className="panel-label">Metrics</span>
+        <span className="panel-label">Live Metrics</span>
         <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-muted)' }}>
           {hostname ?? '—'}
         </span>
       </div>
 
-      {/* Arc gauges */}
-      {(cpu || ram || osDisk) ? (
-        <div className="metric-grid">
-          {cpu && (
-            <ArcGauge
-              label="CPU"
-              value={cpu.usage_pct}
-              history={history.cpu}
-            />
-          )}
-          {ram && (
-            <ArcGauge
-              label="RAM"
-              value={ram.usage_pct}
-              detail={`${formatBytes(ram.used_bytes)} / ${formatBytes(ram.total_bytes)}`}
-              history={history.ram}
-            />
-          )}
-          {osDisk && (
-            <ArcGauge
-              label="OS Disk"
-              value={osDisk.usage_pct}
-              detail={`${formatBytes(osDisk.used_bytes)} / ${formatBytes(osDisk.total_bytes)}`}
-            />
-          )}
-        </div>
-      ) : (
-        <div style={{ padding: '24px 0' }}>
-          <EmptyState message="Waiting for metrics..." />
-        </div>
-      )}
+      <div className="panel-body">
+        {/* Arc gauges */}
+        {(cpu || ram || osDisk) ? (
+          <div className="metric-grid">
+            {cpu && (
+              <ArcGauge
+                label="CPU"
+                value={cpu.usage_pct}
+                history={history.cpu}
+              />
+            )}
+            {ram && (
+              <ArcGauge
+                label="RAM"
+                value={ram.usage_pct}
+                detail={`${formatBytes(ram.used_bytes)} / ${formatBytes(ram.total_bytes)}`}
+                history={history.ram}
+              />
+            )}
+            {osDisk && (
+              <ArcGauge
+                label="OS Disk"
+                value={osDisk.usage_pct}
+                detail={`${formatBytes(osDisk.used_bytes)} / ${formatBytes(osDisk.total_bytes)}`}
+              />
+            )}
+          </div>
+        ) : (
+          <div style={{ padding: '24px 0' }}>
+            <EmptyState message="Waiting for metrics..." />
+          </div>
+        )}
 
-      {/* Network */}
-      {primaryInterface && (
-        <div className="info-row">
-          <InfoCell label={`${primaryInterface.name} RX`} value={formatBandwidth(primaryInterface.rx_bytes_rate)} />
-          <InfoCell label={`${primaryInterface.name} TX`} value={formatBandwidth(primaryInterface.tx_bytes_rate)} />
-        </div>
-      )}
+        {/* Network */}
+        {primaryInterface && (
+          <div className="net-row">
+            <div className="net-block">
+              <span className="mini-label">{primaryInterface.name} RX</span>
+              <span className="net-value">{formatBandwidth(primaryInterface.rx_bytes_rate)}</span>
+              {netRxHistory.length > 1 && (
+                <Sparkline values={netRxHistory} color="#34d399" width={130} height={26} />
+              )}
+            </div>
+            <div className="net-block">
+              <span className="mini-label">{primaryInterface.name} TX</span>
+              <span className="net-value">{formatBandwidth(primaryInterface.tx_bytes_rate)}</span>
+              {netTxHistory.length > 1 && (
+                <Sparkline values={netTxHistory} color="#60a5fa" width={130} height={26} />
+              )}
+            </div>
+          </div>
+        )}
 
-      {/* CPU load averages */}
-      {cpu && (
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
-          borderTop: '1px solid var(--color-border)',
-          padding: '12px 18px',
-          gap: 12,
-        }}>
-          <InfoCell label="Load 1m"  value={cpu.load_avg_1m.toFixed(2)}  />
-          <InfoCell label="Load 5m"  value={cpu.load_avg_5m.toFixed(2)}  />
-          <InfoCell label="Load 15m" value={cpu.load_avg_15m.toFixed(2)} />
-        </div>
-      )}
+        {/* CPU load averages */}
+        {cpu && (
+          <div className="info-row">
+            <InfoCell label="Load 1m"  value={cpu.load_avg_1m.toFixed(2)}  />
+            <InfoCell label="Load 15m" value={cpu.load_avg_15m.toFixed(2)} />
+          </div>
+        )}
 
-      {/* Kernel / uptime */}
-      {kernel && (
-        <div className="info-row">
-          <InfoCell label="Uptime" value={formatUptime(kernel.uptime_secs)} />
-          <InfoCell label="Kernel" value={kernel.kernel_version} />
-        </div>
-      )}
+        {/* Kernel / uptime */}
+        {kernel && (
+          <div className="info-row">
+            <InfoCell label="Uptime" value={formatUptime(kernel.uptime_secs)} />
+            <InfoCell label="Kernel" value={kernel.kernel_version} />
+          </div>
+        )}
+      </div>
     </div>
   )
 })
-
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
-  const { user }                                      = useAuthStore()
+  const { user, isAdmin }                           = useAuthStore()
   const { selectedAgentId, selectAgent, wsConnected } = useUiStore()
-  const { data: health }                              = useFleetHealth()
-  const { data: agents, isLoading: agentsLoading }    = useAgents()
+  const { data: health }                           = useFleetHealth()
+  const { data: agents, isLoading: agentsLoading } = useAgents()
+  const { data: logsData, isLoading: logsLoading } = useLogs({ limit: 40 })
+
+  const { data: usersData } = useQuery({
+    queryKey: ['dashboard', 'users', isAdmin],
+    queryFn: usersApi.list,
+    enabled: isAdmin,
+    staleTime: 60_000,
+  })
+
+  const { data: configData } = useQuery({
+    queryKey: ['dashboard', 'config', isAdmin],
+    queryFn: configApi.list,
+    enabled: isAdmin,
+    staleTime: 60_000,
+  })
 
   // Stable active agent ID — don't derive inline so it doesn't thrash on each render
   const activeAgentId = useMemo(
@@ -435,15 +665,27 @@ export function DashboardPage() {
     [selectAgent],
   )
 
+  const cycleAgent = useCallback((direction: 1 | -1) => {
+    if (!agents?.length) return
+    const idx = agents.findIndex((a) => a.agent_id === activeAgentId)
+    const nextIdx = idx === -1 ? 0 : (idx + direction + agents.length) % agents.length
+    selectAgent(agents[nextIdx].agent_id)
+  }, [agents, activeAgentId, selectAgent])
+
   const handleRefresh = useCallback(() => {
     setRefreshing(true)
     qc.invalidateQueries({ queryKey: queryKeys.fleetHealth() })
     qc.invalidateQueries({ queryKey: queryKeys.agents() })
+    qc.invalidateQueries({ queryKey: queryKeys.logs({ limit: 40 }) })
     if (activeAgentId) {
       qc.invalidateQueries({ queryKey: queryKeys.telemetryLatest(activeAgentId) })
     }
+    if (isAdmin) {
+      qc.invalidateQueries({ queryKey: ['dashboard', 'users', isAdmin] })
+      qc.invalidateQueries({ queryKey: ['dashboard', 'config', isAdmin] })
+    }
     setTimeout(() => setRefreshing(false), 800)
-  }, [qc, activeAgentId])
+  }, [qc, activeAgentId, isAdmin])
 
   // Stable fleet numbers — only update when values actually change
   const fleetTotal    = health?.agents.total    ?? 0
@@ -451,16 +693,37 @@ export function DashboardPage() {
   const fleetDegraded = health?.agents.degraded ?? 0
   const fleetOffline  = health?.agents.offline  ?? 0
 
+  const logs = logsData ?? []
+  const logCounts = useMemo(() => logs.reduce<Record<string, number>>((acc, log) => {
+    acc[log.severity] = (acc[log.severity] ?? 0) + 1
+    return acc
+  }, {}), [logs])
+
+  const errorCount = (logCounts.Error ?? 0) + (logCounts.Critical ?? 0)
+  const warningCount = logCounts.Warning ?? 0
+  const infoCount = logCounts.Info ?? 0
+
+  const importantLogs = logs.filter((log) => log.severity !== 'Trace' && log.severity !== 'Debug')
+  const recentLogs: LogEntry[] = (importantLogs.length ? importantLogs : logs).slice(0, 4)
+
+  const snapshot = (health?.latest_snapshot ?? {}) as Record<string, unknown>
+  const metricsRate = typeof snapshot.metrics_rate === 'number' ? snapshot.metrics_rate : null
+  const logsRateVal = typeof snapshot.logs_rate === 'number' ? snapshot.logs_rate : null
+  const dbSize = typeof snapshot.db_size_bytes === 'number' ? formatBytes(snapshot.db_size_bytes) : null
+  const snapshotTs = typeof snapshot.timestamp === 'string' ? snapshot.timestamp : null
+
+  const staleCount = useMemo(() => agents?.filter((a) => a.is_stale).length ?? 0, [agents])
+
   return (
     <div
       className="atlas-dash"
-      style={{ display: 'flex', flexDirection: 'column', gap: 18, height: '100%', color: 'var(--color-text)' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%', color: 'var(--color-text)' }}
     >
       <style>{CSS}</style>
 
       <PageHeader
         title="Dashboard"
-        subtitle={user ? `${user.username}` : undefined}
+        subtitle={user ? `Welcome, ${user.username}` : undefined}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ position: 'relative', width: 9, height: 9, display: 'inline-block' }}>
@@ -482,52 +745,213 @@ export function DashboardPage() {
         }
       />
 
-      {/* ── Fleet strip ─────────────────────────────────────────────────── */}
-      <div
-        className="panel"
-        style={{ display: 'flex', flexShrink: 0 }}
-      >
-        <FleetStat label="Total"    value={fleetTotal   || '—'} />
-        <FleetStat label="Online"   value={fleetOnline  || '—'} color={fleetOnline  > 0 ? '#34d399'  : undefined} />
-        <FleetStat label="Degraded" value={fleetDegraded || '—'} color={fleetDegraded > 0 ? '#fbbf24' : undefined} />
-        <FleetStat label="Offline"  value={fleetOffline || '—'}  color={fleetOffline  > 0 ? '#f87171' : undefined} />
+      {/* ── Quick stats ─────────────────────────────────────────────────── */}
+      <div className="stat-grid">
+        <StatCard
+          label="Fleet"
+          value={`${fleetOnline}/${fleetTotal}`}
+          hint={`${fleetDegraded} degraded · ${fleetOffline} offline`}
+          accent="#34d399"
+          badge={`${staleCount} stale`}
+        />
+        <StatCard
+          label="Signals"
+          value={errorCount ? `${errorCount} errors` : 'All clear'}
+          hint={`${warningCount} warnings · ${infoCount} info`}
+          accent={errorCount ? '#f87171' : '#93c5fd'}
+        />
+        <StatCard
+          label="Ingest"
+          value={metricsRate !== null ? `${metricsRate.toFixed(1)} metrics/s` : '—'}
+          hint={`logs ${logsRateVal !== null ? logsRateVal.toFixed(1) : '—'}/s${dbSize ? ` · db ${dbSize}` : ''}`}
+          accent="#a78bfa"
+        />
+        <StatCard
+          label="Agents"
+          value={agents?.length ?? '—'}
+          hint={activeAgent ? `${activeAgent.hostname}` : 'Select an agent to inspect'}
+        />
+        {isAdmin && (
+          <StatCard
+            label="Admin"
+            value={`${usersData?.length ?? '—'} users`}
+            hint={`${configData?.length ?? 0} config keys`}
+          />
+        )}
       </div>
 
       {/* ── Main layout ─────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 18, flex: 1, minHeight: 0 }}>
+      <div className="main-grid">
 
-        {/* Agent list */}
-        <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div className="panel-header">
-            <span className="panel-label">Agents</span>
-            <span style={{ fontSize: 9.5, color: 'var(--color-text-dim)' }}>
-              {agents?.length ?? 0}
-            </span>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+        {/* Agent focus */}
+        <div className="tile-agent">
+          <div className="panel" style={{ minHeight: 0 }}>
+            <div className="panel-header">
+              <span className="panel-label">Agent focus</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <select
+                  className="agent-select"
+                  value={activeAgentId ?? ''}
+                  onChange={(e) => handleSelectAgent(e.target.value)}
+                >
+                  {(agents ?? []).map((agent) => (
+                    <option key={agent.agent_id} value={agent.agent_id}>{agent.hostname}</option>
+                  ))}
+                </select>
+                <div className="mini-chip">
+                  <button onClick={() => cycleAgent(-1)} disabled={!agents?.length} style={{ color: 'inherit' }}>‹</button>
+                  <button onClick={() => cycleAgent(1)} disabled={!agents?.length} style={{ color: 'inherit' }}>›</button>
+                </div>
+              </div>
+            </div>
+
             {agentsLoading ? (
-              <LoadingState />
-            ) : !agents?.length ? (
+              <LoadingState label="Loading agents..." />
+            ) : !activeAgent ? (
               <EmptyState message="No agents registered" />
             ) : (
-              agents.map((agent) => (
-                <AgentRow
-                  key={agent.agent_id}
-                  agent={agent}
-                  selected={agent.agent_id === activeAgentId}
-                  onClick={() => handleSelectAgent(agent.agent_id)}
-                />
-              ))
+              <div className="panel-body">
+                <div className="agent-title">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span className="agent-name">{activeAgent.hostname}</span>
+                    <span style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{shortAgentId(activeAgent.agent_id)}</span>
+                  </div>
+                  <AgentStatusBadge status={activeAgent.status} />
+                </div>
+
+                <div className="agent-sub">
+                  <span>{timeAgo(activeAgent.last_seen)}</span>
+                  {activeAgent.is_stale && <span className="pill warn">stale</span>}
+                </div>
+
+                {activeAgent.tags.length > 0 && (
+                  <div className="tags-row">
+                    {activeAgent.tags.slice(0, 5).map((tag) => (
+                      <Tag key={tag}>{tag}</Tag>
+                    ))}
+                  </div>
+                )}
+
+                <div className="agent-meta">
+                  <div>
+                    <div className="mini-label">OS</div>
+                    <div className="mini-value">{activeAgent.os}</div>
+                  </div>
+                  <div>
+                    <div className="mini-label">Architecture</div>
+                    <div className="mini-value">{activeAgent.architecture}</div>
+                  </div>
+                  <div>
+                    <div className="mini-label">Version</div>
+                    <div className="mini-value">{activeAgent.version}</div>
+                  </div>
+                  <div>
+                    <div className="mini-label">Status</div>
+                    <div className="mini-value">{activeAgent.is_active ? 'Active' : 'Disabled'}</div>
+                  </div>
+                </div>
+
+                <div className="agent-footer">
+                  <a className="link-ghost" href="/agents">Open agents page →</a>
+                  <span className="mini-label">{activeAgent.hostname}</span>
+                </div>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Right column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minHeight: 0 }}>
+        {/* Metrics */}
+        <div className="tile-metrics">
           <MetricPanel
             agentId={activeAgentId}
             hostname={activeAgent?.hostname}
           />
+        </div>
+
+        {/* Health snapshot */}
+        <div className="tile-health">
+          <div className="panel">
+            <div className="panel-header">
+              <span className="panel-label">Health snapshot</span>
+              <span className="pill ok">{health?.server_status ?? '—'}</span>
+            </div>
+            <div className="panel-body">
+              <div className="info-row">
+                <InfoCell label="Online" value={String(fleetOnline)} />
+                <InfoCell label="Offline" value={String(fleetOffline)} />
+              </div>
+              <div className="info-row">
+                <InfoCell label="Metrics/s" value={metricsRate !== null ? metricsRate.toFixed(1) : '—'} />
+                <InfoCell label="Logs/s" value={logsRateVal !== null ? logsRateVal.toFixed(1) : '—'} />
+              </div>
+              <div className="info-row">
+                <InfoCell label="DB size" value={dbSize ?? '—'} />
+                <InfoCell label="Snapshot" value={snapshotTs ? timeAgo(snapshotTs) : '—'} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Logs */}
+        <div className="tile-signals">
+          <div className="panel">
+            <div className="panel-header">
+              <span className="panel-label">Signals</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                <span>{errorCount} errors</span>
+                <span>·</span>
+                <span>{warningCount} warnings</span>
+              </div>
+            </div>
+            <div className="panel-body">
+              {logsLoading ? (
+                <LoadingState label="Loading logs..." />
+              ) : !recentLogs.length ? (
+                <EmptyState message="No recent logs" />
+              ) : (
+                <ul className="signal-list">
+                  {recentLogs.map((log) => (
+                    <li key={log.id} className="signal-row">
+                      <div className="signal-main">
+                        <SeverityBadge severity={log.severity} />
+                        <span className="signal-message" title={log.message}>{log.message}</span>
+                      </div>
+                      <div className="signal-meta">
+                        <span className="pill">{LOG_SOURCE_LABEL[log.source] ?? log.source}</span>
+                        <span>{timeAgo(log.timestamp)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Account */}
+        <div className="tile-account">
+          <div className="panel">
+            <div className="panel-header">
+              <span className="panel-label">Account</span>
+              {isAdmin && <span className="panel-aux">Admin tools</span>}
+            </div>
+            <div className="panel-body">
+              <div className="info-row">
+                <InfoCell label="Role" value={user?.role ?? '—'} />
+                <InfoCell label="Agents" value={`${fleetTotal} total`} />
+              </div>
+              <div className="info-row">
+                <InfoCell label="Live mode" value={wsConnected ? 'WebSocket' : 'Polling'} />
+                <InfoCell label="Snapshot" value={snapshotTs ? timeAgo(snapshotTs) : '—'} />
+              </div>
+              {isAdmin && (
+                <div className="info-row">
+                  <InfoCell label="Users" value={`${usersData?.length ?? '—'}`} />
+                  <InfoCell label="Config keys" value={`${configData?.length ?? 0}`} />
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
       </div>
