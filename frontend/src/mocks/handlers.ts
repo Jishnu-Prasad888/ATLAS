@@ -123,13 +123,20 @@ export const mockLogEntry: LogEntry = {
 
 export const mockAuditLog: AuditLog = {
   id: 1,
+  sha256: '2c5b3d4e5f60718293a4b1c2d3e4f5a60718293a4b1c2d3e4f5a60718293a4b',
   timestamp: new Date().toISOString(),
   user: 'admin',
   ip_address: '192.168.1.1',
   action: 'LOGIN',
   resource: 'auth',
-  resource_id: '',
-  details: {},
+  resource_id: 'user-admin',
+  request_id: 'req-12345',
+  details: {
+    status: 'completed',
+    user_agent: 'Atlas Test Suite',
+    session_id: 'session-xyz',
+    pid: 4242,
+  },
   success: true,
 }
 

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react'
+import { useState, useMemo, useCallback, useRef, memo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAgents, useLatestMetrics, useLogs } from '@/hooks'
 import { queryKeys } from '@/hooks/queryKeys'
@@ -109,18 +109,6 @@ function CollectorLogsPanel({ agentId }: { agentId: string | null }) {
   }, [logs, filterSource])
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const isNearBottom = useRef(true)
-
-  const onScroll = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-  }, [])
-
-  useEffect(() => {
-    if (isNearBottom.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [filtered.length])
 
   return (
     <Card padding={false}>
@@ -144,7 +132,7 @@ function CollectorLogsPanel({ agentId }: { agentId: string | null }) {
           ))}
         </div>
       </div>
-      <div ref={containerRef} onScroll={onScroll} className="overflow-y-auto" style={{ maxHeight: 300 }}>
+      <div ref={containerRef} className="overflow-y-auto" style={{ maxHeight: 300 }}>
         {isLoading ? (
           <div className="py-6"><LoadingState label="Loading logs..." /></div>
         ) : filtered.length === 0 ? (
@@ -152,10 +140,7 @@ function CollectorLogsPanel({ agentId }: { agentId: string | null }) {
             <EmptyState message={agentId ? 'No collector logs yet' : 'Select an agent'} />
           </div>
         ) : (
-          <>
-            {filtered.map((log) => <CollectorLogRow key={log.id} log={log} />)}
-            <div ref={bottomRef} />
-          </>
+          filtered.map((log) => <CollectorLogRow key={log.id} log={log} />)
         )}
       </div>
     </Card>

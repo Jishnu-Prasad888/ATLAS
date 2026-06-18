@@ -119,13 +119,22 @@ function SnapshotMetric({ label, value }: { label: string; value: string }) {
 // ─── Collector Status Chip ────────────────────────────────────────────────────
 
 function CollectorStatus({ status }: { status: string }) {
+  const normalized = (status ?? '').toString().toLowerCase()
   const map: Record<string, { label: string; cls: string }> = {
-    ok:       { label: 'ok',       cls: 'text-emerald-400 bg-emerald-950/60' },
-    error:    { label: 'error',    cls: 'text-red-400 bg-red-950/60' },
-    degraded: { label: 'degraded', cls: 'text-yellow-400 bg-yellow-950/60' },
-    unknown:  { label: 'unknown',  cls: 'text-[--color-text-dim] bg-[--color-surface-2]' },
+    ok:          { label: 'ok',        cls: 'text-emerald-400 bg-emerald-950/60' },
+    healthy:     { label: 'healthy',   cls: 'text-emerald-400 bg-emerald-950/60' },
+    success:     { label: 'healthy',   cls: 'text-emerald-400 bg-emerald-950/60' },
+    degraded:    { label: 'degraded',  cls: 'text-yellow-400 bg-yellow-950/60' },
+    warning:     { label: 'degraded',  cls: 'text-yellow-400 bg-yellow-950/60' },
+    warn:        { label: 'degraded',  cls: 'text-yellow-400 bg-yellow-950/60' },
+    failed:      { label: 'failed',    cls: 'text-red-400 bg-red-950/60' },
+    failure:     { label: 'failed',    cls: 'text-red-400 bg-red-950/60' },
+    error:       { label: 'error',     cls: 'text-red-400 bg-red-950/60' },
+    offline:     { label: 'offline',   cls: 'text-red-400 bg-red-950/60' },
+    disabled:    { label: 'disabled',  cls: 'text-[--color-text-dim] bg-[--color-surface-2]' },
+    unknown:     { label: 'unknown',   cls: 'text-[--color-text-dim] bg-[--color-surface-2]' },
   }
-  const { label, cls } = map[status] ?? map.unknown
+  const { label, cls } = map[normalized] ?? map.unknown
   return (
     <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide ${cls}`}>
       {label}
@@ -142,7 +151,7 @@ function AgentHealthDetail({ agentId, hostname }: { agentId: string; hostname: s
   if (error) return <ErrorState error="Failed to load agent health" onRetry={refetch} />
   if (!health) return null
 
-  const collectorEntries = Object.entries(health.collectors)
+  const collectorEntries = Object.entries(health.collectors ?? {})
 
   return (
     <div className="space-y-4">
@@ -190,6 +199,19 @@ function AgentHealthDetail({ agentId, hostname }: { agentId: string; hostname: s
             <p className="text-[10px] font-mono text-[--color-text-dim] mt-1 opacity-60">
               Agent has not reported yet
             </p>
+            <p className="text-[10px] font-mono text-[--color-text-dim] mt-2">
+              Agent health API must return a collectors map, e.g.
+            </p>
+            <pre className="text-[10px] font-mono text-left inline-block bg-[--color-surface-2] border border-[--color-border] rounded px-2 py-1 mt-1 text-[--color-text-muted]">
+{`"collectors": {
+  "cpu": {
+    "status": "Healthy",
+    "last_run": "2026-06-19T00:00:00Z",
+    "last_success": "2026-06-19T00:00:00Z",
+    "failure_count": 0
+  }
+}`}
+            </pre>
           </div>
         ) : (
           <div className="overflow-x-auto">

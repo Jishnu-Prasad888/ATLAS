@@ -275,12 +275,14 @@ export interface LogEntry {
 
 export interface AuditLog {
   id: number
+  sha256?: string | null
   timestamp: string
   user: string
   ip_address: string | null
   action: string
   resource: string
   resource_id: string
+  request_id?: string | number | null
   details: Record<string, unknown>
   success: boolean
 }

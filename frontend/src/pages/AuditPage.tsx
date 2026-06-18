@@ -18,6 +18,7 @@ const ACTIONS = [
   'AGENT_REGISTER', 'AGENT_REMOVE', 'AGENT_RENAME', 'AGENT_REGEN_ID',
   'AGENT_ENABLE', 'AGENT_DISABLE', 'LOG_CLEAR', 'CONFIG_SET',
   'CONFIG_UPDATE', 'CONFIG_DELETE', 'RETENTION_UPDATE',
+  'AGENT_KILL_PROCESS', 'AGENT_KILL_PROCESS_RESULT',
 ]
 
 // Color-coded action categories — the signature element of this page
@@ -36,6 +37,8 @@ const ACTION_META: Record<string, { color: string; bg: string; group: string }> 
   AGENT_REGEN_ID:     { color: '#fbbf24', bg: 'rgba(251,191,36,0.1)',  group: 'agent'   },
   AGENT_ENABLE:       { color: '#34d399', bg: 'rgba(52,211,153,0.1)',  group: 'agent'   },
   AGENT_DISABLE:      { color: '#f87171', bg: 'rgba(248,113,113,0.1)', group: 'destroy' },
+  AGENT_KILL_PROCESS: { color: '#f87171', bg: 'rgba(248,113,113,0.1)', group: 'destroy' },
+  AGENT_KILL_PROCESS_RESULT: { color: '#fbbf24', bg: 'rgba(251,191,36,0.1)', group: 'agent' },
   LOG_CLEAR:          { color: '#f87171', bg: 'rgba(248,113,113,0.1)', group: 'destroy' },
   CONFIG_SET:         { color: '#F0A500', bg: 'rgba(240,165,0,0.1)',   group: 'config'  },
   CONFIG_UPDATE:      { color: '#F0A500', bg: 'rgba(240,165,0,0.1)',   group: 'config'  },
@@ -193,7 +196,68 @@ const CSS = `
     transition: color 0.12s;
   }
   .atlas-audit .clear-btn:hover { color: var(--color-text-muted); }
-`
+  `
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function pickDetailValue(details: Record<string, unknown> | undefined, keys: string[]) {
+  if (!details) return null
+  for (const key of keys) {
+    const value = details[key]
+    if (value === undefined || value === null) continue
+    if (typeof value === 'object') continue
+    if (typeof value === 'boolean') return value ? 'true' : 'false'
+    return String(value)
+  }
+  return null
+}
+
+function resolveActor(log: AuditLog) {
+  const normalized = (log.user ?? '').trim()
+  if (normalized && normalized.toLowerCase() !== 'anonymous') return normalized
+  const fallback = pickDetailValue(log.details, ['user', 'username', 'actor', 'requester', 'owner', 'agent', 'agent_id'])
+  if (fallback) return fallback
+  return normalized || 'system'
+}
+
+function resolveResourceId(log: AuditLog) {
+  return (log.resource_id ?? '').trim()
+    || pickDetailValue(log.details, ['resource_id', 'target_id', 'id', 'uuid', 'agent_id'])
+    || ''
+}
+
+function resolveAuditHash(log: AuditLog) {
+  return log.sha256 ?? pickDetailValue(log.details, ['sha256', 'hash', 'fingerprint']) ?? ''
+}
+
+function resolveRequestId(log: AuditLog) {
+  if (log.request_id !== undefined && log.request_id !== null) return String(log.request_id)
+  return pickDetailValue(log.details, ['request_id', 'requestId', 'req_id', 'trace_id'])
+}
+
+function resolveStatus(log: AuditLog) {
+  return pickDetailValue(log.details, ['status', 'state']) ?? (log.success ? 'success' : 'failure')
+}
+
+function resolvePid(log: AuditLog) {
+  return pickDetailValue(log.details, ['pid', 'process_id'])
+}
+
+function resolveError(log: AuditLog) {
+  const error = pickDetailValue(log.details, ['error', 'reason', 'message'])
+  if (!error) return null
+  if (error.trim() === '') return null
+  return error
+}
+
+function resolveIp(log: AuditLog) {
+  return log.ip_address ?? pickDetailValue(log.details, ['ip', 'ip_address', 'client_ip']) ?? '—'
+}
+
+function shorten(value: string, tail = 12) {
+  if (value.length <= tail) return value
+  return `…${value.slice(-tail)}`
+}
 
 // ─── Virtual scroll hook ──────────────────────────────────────────────────────
 
@@ -472,6 +536,12 @@ function AuditRow({
   onToggle: () => void
 }) {
   const meta = ACTION_META[log.action]
+  const actor = resolveActor(log)
+  const resourceId = resolveResourceId(log)
+  const ip = resolveIp(log)
+  const rawUser = (log.user ?? '').trim()
+  const rowStatus = resolveStatus(log)
+  const rowError = resolveError(log)
 
   return (
     <div
@@ -485,8 +555,12 @@ function AuditRow({
       </div>
 
       {/* User */}
-      <div className="cell" style={{ color: 'var(--color-text)', fontWeight: 500 }}>
-        {log.user}
+      <div
+        className="cell"
+        style={{ color: 'var(--color-text)', fontWeight: 600 }}
+        title={rawUser && rawUser !== actor ? `raw: ${rawUser}` : undefined}
+      >
+        {actor}
       </div>
 
       {/* Action chip */}
@@ -511,14 +585,14 @@ function AuditRow({
       <div
         className="cell"
         style={{ color: 'var(--color-text-dim)', fontFamily: 'monospace', fontSize: 10 }}
-        title={log.resource_id}
+        title={resourceId || undefined}
       >
-        {log.resource_id ? `…${log.resource_id.slice(-8)}` : '—'}
+        {resourceId ? shorten(resourceId) : '—'}
       </div>
 
       {/* IP */}
       <div className="cell" style={{ color: 'var(--color-text-dim)', fontSize: 10 }}>
-        {log.ip_address ?? '—'}
+        {ip}
       </div>
 
       {/* Result */}
@@ -530,6 +604,7 @@ function AuditRow({
             letterSpacing: '0.08em',
             color: log.success ? '#34d399' : '#f87171',
           }}
+          title={rowError ?? rowStatus}
         >
           {log.success ? 'OK' : 'FAIL'}
         </span>
@@ -544,6 +619,17 @@ function ExpandedDetail({ log, top }: { log: AuditLog; top: number }) {
   const meta    = ACTION_META[log.action]
   const details = log.details ?? {}
   const hasDetails = Object.keys(details).length > 0
+  const actor = resolveActor(log)
+  const auditHash = resolveAuditHash(log) || `audit-${log.id}`
+  const resourceId = resolveResourceId(log) || '—'
+  const requestId = resolveRequestId(log) ?? '—'
+  const status = resolveStatus(log)
+  const statusColor = /fail|error/i.test(status) ? '#f87171' : /success|ok|complete|completed/i.test(status) ? '#34d399' : undefined
+  const pid = resolvePid(log) ?? '—'
+  const agentId = pickDetailValue(details, ['agent', 'agent_id', 'agent_name']) ?? '—'
+  const rawUser = (log.user ?? '').trim()
+  const clientIp = resolveIp(log)
+  const errorMessage = resolveError(log)
 
   return (
     <div
@@ -551,10 +637,17 @@ function ExpandedDetail({ log, top }: { log: AuditLog; top: number }) {
       style={{ position: 'absolute', top, left: 0, right: 0, zIndex: 1 }}
     >
       <div className="flex flex-wrap gap-x-6 gap-y-2 mb-3">
-        <DetailField label="full id"   value={log.resource_id ?? '—'} />
-        <DetailField label="action"    value={log.action} color={meta?.color} />
+        <DetailField label="actor"     value={actor} />
+        {rawUser && rawUser !== actor && <DetailField label="user (raw)" value={rawUser} />}
+        <DetailField label="audit hash" value={auditHash} title={auditHash} />
+        <DetailField label="request id" value={requestId} />
         <DetailField label="resource"  value={log.resource} />
-        <DetailField label="ip"        value={log.ip_address ?? '—'} />
+        <DetailField label="resource id" value={resourceId} />
+        <DetailField label="action"    value={log.action} color={meta?.color} />
+        <DetailField label="status"    value={status} color={statusColor} />
+        <DetailField label="pid"       value={pid} />
+        <DetailField label="agent"     value={agentId} />
+        <DetailField label="ip"        value={clientIp} />
         <DetailField label="timestamp" value={formatTimestamp(log.timestamp)} />
         <DetailField
           label="result"
@@ -562,7 +655,24 @@ function ExpandedDetail({ log, top }: { log: AuditLog; top: number }) {
           color={log.success ? '#34d399' : '#f87171'}
         />
       </div>
-      {hasDetails && (
+      {errorMessage && (
+        <div
+          style={{
+            border: '1px solid color-mix(in srgb, #f87171 40%, transparent)',
+            background: 'color-mix(in srgb, #f87171 8%, transparent)',
+            color: 'var(--color-text)',
+            padding: '8px 10px',
+            borderRadius: 4,
+            fontSize: 11,
+            marginBottom: 8,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          <span style={{ fontWeight: 600, marginRight: 6, color: '#f87171' }}>error</span>
+          {errorMessage}
+        </div>
+      )}
+      {hasDetails ? (
         <>
           <div
             className="text-[9px] font-medium tracking-[0.2em] uppercase mb-1.5"
@@ -584,6 +694,16 @@ function ExpandedDetail({ log, top }: { log: AuditLog; top: number }) {
             {JSON.stringify(details, null, 2)}
           </pre>
         </>
+      ) : (
+        <div
+          style={{
+            fontSize: 10.5,
+            color: 'var(--color-text-dim)',
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          No additional details were provided for this entry.
+        </div>
       )}
     </div>
   )
@@ -593,17 +713,27 @@ function DetailField({
   label,
   value,
   color,
+  title,
 }: {
   label: string
   value: string
   color?: string
+  title?: string
 }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span style={{ fontSize: 9, color: 'var(--color-text-dim)', letterSpacing: '0.2em', textTransform: 'uppercase' }}>
         {label}
       </span>
-      <span style={{ fontSize: 11, color: color ?? 'var(--color-text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>
+      <span
+        title={title ?? (value.length > 24 ? value : undefined)}
+        style={{
+          fontSize: 11,
+          color: color ?? 'var(--color-text-muted)',
+          fontFamily: "'JetBrains Mono', monospace",
+          wordBreak: 'break-all',
+        }}
+      >
         {value}
       </span>
     </div>

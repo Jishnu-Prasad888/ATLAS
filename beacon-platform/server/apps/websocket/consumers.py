@@ -224,23 +224,47 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def save_metrics(self, agent_id, metrics):
+        """Persist metrics and backfill collector health when agents aren't sending it explicitly."""
         from apps.metrics.models import Metric, MetricResolution
+        from apps.agents.models import Agent, CollectorHealth, CollectorStatus
 
         objects = []
+        collector_names = set()
+
         for m in metrics:
             if not isinstance(m, dict):
                 continue
+            collector = str(m.get("collector") or m.get("metric_type") or "unknown")
+            collector_names.add(collector)
             objects.append(Metric(
                 agent_id       = agent_id,
-                metric_type    = m.get("metric_type", "cpu"),
+                metric_type    = collector,
                 resolution     = MetricResolution.RAW,
                 timestamp      = m.get("timestamp", timezone.now()),
                 data           = m.get("data", {}),
                 schema_version = m.get("schema_version", "1.0"),
             ))
+
         if objects:
             Metric.objects.bulk_create(objects, batch_size=500)
             update_latest_cache(agent_id, objects)
+
+            # Auto-maintain collector health so the UI doesn't stay empty when the agent
+            # isn't sending collector_health messages explicitly.
+            agent = Agent.objects.filter(agent_id=agent_id).first()
+            if agent:
+                now = timezone.now()
+                for collector in collector_names:
+                    CollectorHealth.objects.update_or_create(
+                        agent=agent,
+                        collector=collector,
+                        defaults={
+                            "status": CollectorStatus.HEALTHY,
+                            "last_run": now,
+                            "last_success": now,
+                        },
+                    )
+
         return len(objects)
 
     @database_sync_to_async
