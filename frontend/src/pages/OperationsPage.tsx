@@ -56,6 +56,15 @@ const CSS = `
     background: color-mix(in srgb, #F0A500 6%, transparent);
     border-left-color: #F0A500;
   }
+
+  .ops-view-bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--color-bg);
+    padding: 8px 0;
+    margin-bottom: 4px;
+  }
 `
 
 const DOCKER_SOURCES = new Set<string>(['docker', 'docker_engine'])
@@ -708,28 +717,34 @@ export function OperationsPage() {
         </Card>
 
         {/* Main content */}
-        <div className="flex-1 min-w-0 overflow-y-auto space-y-4" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+        <div className="flex-1 min-w-0 overflow-y-auto space-y-4 relative" style={{ maxHeight: 'calc(100vh - 120px)' }}>
           {!activeAgentId ? (
             <div className="py-16"><EmptyState message="Select an agent" /></div>
           ) : (
             <>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {viewOptions.map((opt) => (
-                    <button
-                      key={opt.key}
-                      onClick={() => !opt.disabled && setView(opt.key)}
-                      className={`text-[11px] font-mono px-3 py-1.5 rounded border transition-colors ${
-                        view === opt.key
-                          ? 'border-[--color-border] bg-[--color-surface-2] text-[--color-text]'
-                          : 'border-transparent bg-transparent text-[--color-text-dim] hover:text-[--color-text]'
-                      } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+              <div className="ops-view-bar">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {viewOptions.map((opt) => {
+                      const colorMap: Record<string, string> = { docker: 'border-sky-700 text-sky-400', kubernetes: 'border-violet-700 text-violet-400', network: 'border-emerald-700 text-emerald-400' }
+                      const activeColor = colorMap[opt.key] ?? ''
+                      return (
+                        <button
+                          key={opt.key}
+                          onClick={() => !opt.disabled && setView(opt.key)}
+                          className={`text-[11px] font-mono px-3 py-1.5 rounded border transition-colors ${
+                            view === opt.key
+                              ? `bg-[--color-surface-2] text-[--color-text] ${activeColor}`
+                              : 'border-transparent bg-transparent text-[--color-text-dim] hover:text-[--color-text] hover:border-[--color-border]'
+                          } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <span className="text-[10px] font-mono text-[--color-text-dim]">{view === 'network' ? 'Network telemetry with per-process ports' : view === 'docker' ? 'Docker collector telemetry' : 'Kubernetes collector telemetry'}</span>
                 </div>
-                <span className="text-[10px] font-mono text-[--color-text-dim]">{view === 'network' ? 'Network telemetry with per-process ports' : view === 'docker' ? 'Docker collector telemetry' : 'Kubernetes collector telemetry'}</span>
               </div>
 
               {view === 'docker' && (

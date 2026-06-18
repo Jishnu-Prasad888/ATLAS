@@ -869,27 +869,21 @@ export function MetricsPage() {
                       const rx = iface.rx_bytes_rate ?? 0
                       const tx = iface.tx_bytes_rate ?? 0
                       return (
-                        <div
-                          key={iface.name}
-                          className="rounded border border-[--color-border] bg-[--color-surface-2] p-3 flex flex-col gap-2"
-                          style={{ minWidth: 0 }}
-                        >
-                          <div className="flex items-center justify-between gap-2 min-w-0">
-                            <span className="text-xs font-mono text-[--color-text] truncate">{iface.name}</span>
+                        <Card key={iface.name} className="flex flex-col gap-0 overflow-hidden" padding={false}>
+                          <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <span className="text-xs font-mono font-semibold text-[--color-text] truncate">{iface.name}</span>
                           </div>
-                          <div className="flex items-center justify-between text-[11px] font-mono text-[--color-text]">
-                            <span className="flex items-center gap-1 text-[--color-text-dim]">
-                              <ArrowDownRight size={14} /> In
-                            </span>
-                            <span>{formatBandwidth(rx)}</span>
+                          <div className="grid grid-cols-2 gap-px" style={{ background: 'var(--color-border)' }}>
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-mono" style={{ background: 'color-mix(in srgb, var(--color-surface-2) 50%, transparent)' }}>
+                              <span className="flex items-center gap-1 text-[--color-text-dim]"><ArrowDownRight size={14} /> In</span>
+                              <span className="text-[--color-text] font-medium tabular-nums">{formatBandwidth(rx)}</span>
+                            </div>
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-mono" style={{ background: 'color-mix(in srgb, var(--color-surface-2) 50%, transparent)' }}>
+                              <span className="flex items-center gap-1 text-[--color-text-dim]"><ArrowUpRight size={14} /> Out</span>
+                              <span className="text-[--color-text] font-medium tabular-nums">{formatBandwidth(tx)}</span>
+                            </div>
                           </div>
-                          <div className="flex items-center justify-between text-[11px] font-mono text-[--color-text]">
-                            <span className="flex items-center gap-1 text-[--color-text-dim]">
-                              <ArrowUpRight size={14} /> Out
-                            </span>
-                            <span>{formatBandwidth(tx)}</span>
-                          </div>
-                        </div>
+                        </Card>
                       )
                     })}
                 </div>
