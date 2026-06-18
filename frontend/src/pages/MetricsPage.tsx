@@ -1109,14 +1109,14 @@ export function MetricsPage() {
                       </span>
                       <span className="text-right text-[--color-text-dim]">{formatBytes(g.totalMem)}</span>
                       <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={killMutation.isLoading}
-                          onClick={() => handleKillGroup(g.label, g.pids)}
-                        >
-                          Kill all
-                        </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={killMutation.isPending}
+                            onClick={() => handleKillGroup(g.label, g.pids)}
+                          >
+                            Kill all
+                          </Button>
                       </div>
                     </div>
                   ))}
@@ -1149,7 +1149,7 @@ export function MetricsPage() {
                       <Button
                         size="sm"
                         variant="danger"
-                        disabled={killMutation.isLoading}
+                        disabled={killMutation.isPending}
                         onClick={() => setKillTarget({ pid: p.pid, name: p.name })}
                       >
                         Kill

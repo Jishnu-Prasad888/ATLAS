@@ -193,12 +193,51 @@ export interface NetworkInterface {
   tx_errors: number
   rx_bytes_rate: number
   tx_bytes_rate: number
+  mtu?: number
+  state?: string
+  mac?: string
+  qdisc?: string
+  qlen?: number
+  flags?: string[]
+  addresses?: Array<{
+    family: string
+    address: string
+    prefix: number
+    scope?: string
+    broadcast?: string
+  }>
 }
 
 export interface NetworkData {
   interfaces: NetworkInterface[]
   tcp: { established: number; time_wait: number; close_wait: number; listening: number }
   udp: { sockets: number }
+  process_connections?: ProcessConnection[]
+  open_ports?: OpenPort[]
+}
+
+export interface ProcessConnection {
+  pid: number
+  name: string
+  exe: string | null
+  protocol: string
+  local_addr: string
+  local_port: number
+  remote_addr: string
+  remote_port: number
+  state: string
+  rx_queue: number
+  tx_queue: number
+}
+
+export interface OpenPort {
+  protocol: string
+  local_addr: string
+  local_port: number
+  state: string
+  pid?: number
+  name?: string
+  exe?: string | null
 }
 
 export interface ProcessData {
