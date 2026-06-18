@@ -1,4 +1,6 @@
 import { useMemo, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { Maximize2, X as CloseIcon } from "lucide-react";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function formatBytes(b) {
@@ -254,31 +256,6 @@ function TileInventory({ data }) {
   );
 }
 
-function TileEvents({ data }) {
-  const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
-  const events  = useMemo(() => [...data.lifecycle.events].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 12), [data]);
-  const eventColor = { start: "#22c55e", die: "#ef4444", restart: "#f97316", health_status: "#6b7280" };
-  return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <SectionLabel title="Events" count={events.length} />
-      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        {events.map((e, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, paddingTop: 8, paddingBottom: 8, borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ width: 5, height: 5, borderRadius: "50%", background: eventColor[e.event] ?? "#6b7280", marginTop: 4, flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 10, fontFamily: "monospace", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{nameMap[e.container_id] ?? e.container_id.slice(0, 8)}</span>
-                <span style={{ fontSize: 10, fontWeight: 600, color: eventColor[e.event] ?? C.muted, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>{e.event}</span>
-              </div>
-              <div style={{ fontSize: 9, color: C.dim, fontFamily: "monospace", marginTop: 1 }}>{timeAgo(e.timestamp)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function TileLogs({ data }) {
   const nameMap = useMemo(() => { const m = {}; data.inventory.containers.forEach(c => { m[c.container_id] = c.name; }); return m; }, [data]);
   const entries = useMemo(() => {
@@ -433,7 +410,6 @@ const TILE_DEFS = [
   { id: "summary",   label: "Cluster Summary", component: TileSummary,      defaultSpan: { col: 2, row: 1 } },
   { id: "host",      label: "Host Snapshot",   component: TileHostSnapshot, defaultSpan: { col: 1, row: 1 } },
   { id: "inventory", label: "Containers",      component: TileInventory,    defaultSpan: { col: 1, row: 2 } },
-  { id: "events",    label: "Events",          component: TileEvents,       defaultSpan: { col: 1, row: 1 } },
   { id: "logs",      label: "Logs",            component: TileLogs,         defaultSpan: { col: 2, row: 1 } },
   { id: "security",  label: "Security",        component: TileSecurity,     defaultSpan: { col: 1, row: 1 } },
   { id: "network",   label: "Network",         component: TileNetwork,      defaultSpan: { col: 1, row: 1 } },
@@ -447,6 +423,7 @@ function BentoGrid({ data }) {
   const [hidden, setHidden] = useState(new Set());
   const [dragging, setDragging] = useState(null);
   const [dragOver, setDragOver] = useState(null);
+  const [expanded, setExpanded] = useState(null);
   const dragSrc = useRef(null);
 
   const visibleOrder = order.filter(id => !hidden.has(id));
@@ -469,7 +446,7 @@ function BentoGrid({ data }) {
   const toggleHide    = useCallback((id) => { setHidden(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
 
   const COLS  = 3;
-  const ROW_H = 320;
+  const ROW_H = 240;
   const GAP   = 12;
 
   return (
@@ -511,7 +488,7 @@ function BentoGrid({ data }) {
       )}
 
       {/* Bento grid */}
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS}, 1fr)`, gap: GAP, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`, gridAutoRows: `minmax(${ROW_H}px, auto)`, gridAutoFlow: "row dense", gap: GAP, alignItems: "stretch" }}>
         {visibleOrder.map(id => {
           const def  = TILE_DEFS.find(t => t.id === id);
           if (!def) return null;
@@ -530,6 +507,7 @@ function BentoGrid({ data }) {
               onDragEnd={handleDragEnd}
               style={{
                 gridColumn: `span ${Math.min(span.col, COLS)}`,
+                gridRow:    `span ${span.row}`,
                 minHeight:  ROW_H * span.row + GAP * (span.row - 1),
                 background: C.surface,
                 border:     `1px solid ${isTarget ? C.borderStrong : C.border}`,
@@ -539,24 +517,36 @@ function BentoGrid({ data }) {
                 transition: "opacity .2s, border-color .15s",
                 opacity:    isDraggingThis ? 0.3 : 1,
                 position:   "relative",
-                overflow:   "hidden",
               }}
             >
-              {/* Dismiss button */}
-              <button
-                onClick={e => { e.stopPropagation(); toggleHide(id); }}
-                title="Hide tile"
-                style={{
-                  position: "absolute", top: 10, right: 10,
-                  width: 20, height: 20, borderRadius: 4,
-                  background: "transparent", border: `1px solid ${C.border}`,
-                  color: C.dim, cursor: "pointer", fontSize: 10,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  zIndex: 2, fontFamily: "monospace", lineHeight: 1,
-                }}
-              >
-                ✕
-              </button>
+              <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6, zIndex: 2 }}>
+                <button
+                  onClick={e => { e.stopPropagation(); setExpanded(id); }}
+                  title="Expand"
+                  style={{
+                    width: 24, height: 24, borderRadius: 6,
+                    background: "transparent", border: `1px solid ${C.border}`,
+                    color: C.dim, cursor: "pointer", fontSize: 10,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: "monospace", lineHeight: 1,
+                  }}
+                >
+                  <Maximize2 size={12} />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); toggleHide(id); }}
+                  title="Hide tile"
+                  style={{
+                    width: 24, height: 24, borderRadius: 6,
+                    background: "transparent", border: `1px solid ${C.border}`,
+                    color: C.dim, cursor: "pointer", fontSize: 10,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: "monospace", lineHeight: 1,
+                  }}
+                >
+                  <CloseIcon size={12} />
+                </button>
+              </div>
 
               <div style={{ position: "relative", height: "100%" }}>
                 <Comp data={data} />
@@ -565,6 +555,29 @@ function BentoGrid({ data }) {
           );
         })}
       </div>
+
+      {expanded && (() => {
+        const def = TILE_DEFS.find(t => t.id === expanded);
+        if (!def) return null;
+        const Comp = def.component;
+        return createPortal(
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18, zIndex: 99 }}>
+            <div style={{ position: "relative", background: C.surface, border: `1px solid ${C.borderStrong}`, borderRadius: 12, padding: "18px 20px", maxWidth: "60vw", maxHeight: "75vh", width: "fit-content", height: "fit-content", overflow: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.45)" }}>
+              <button
+                onClick={() => setExpanded(null)}
+                title="Close"
+                style={{ position: "absolute", top: 10, right: 10, width: 28, height: 28, borderRadius: 8, background: "transparent", border: `1px solid ${C.border}`, color: C.dim, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <CloseIcon size={14} />
+              </button>
+              <div>
+                <Comp data={data} />
+              </div>
+            </div>
+          </div>,
+          document.body,
+        );
+      })()}
 
       {/* Footer */}
       <div style={{ marginTop: 24, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
