@@ -1,5 +1,6 @@
 import { useMemo, useCallback, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, useMutation } from '@tanstack/react-query'
+import { agentsApi } from '@/api'
 import { useAgents, useTelemetry, useLiveMetrics, usePersistedState } from '@/hooks'
 import { useUiStore } from '@/store/uiStore'
 import { queryKeys } from '@/hooks/queryKeys'
@@ -72,12 +73,58 @@ export function MetricsPage() {
   const [procMinCpu, setProcMinCpu] = usePersistedState<number>('metrics_proc_min_cpu', 0)
   const [procSearch, setProcSearch] = useState('')
   const [killTarget, setKillTarget] = useState<{ pid: number; name: string } | null>(null)
+  const [killLogs, setKillLogs] = useState<string[]>([])
+  const [procGrouping, setProcGrouping] = usePersistedState<'flat' | 'byExe'>('metrics_proc_grouping', 'flat')
   const timeRange = TIME_RANGES[timeRangeIdx]
   const addNotification = useUiStore((s) => s.addNotification)
 
   const agentId = selectedAgentId || agents?.[0]?.agent_id || ''
 
   const { latest, history } = useLiveMetrics(agentId || null)
+
+  const appendKillLog = useCallback((message: string) => {
+    const ts = new Date().toLocaleTimeString()
+    setKillLogs((prev) => [`${ts} — ${message}`, ...prev].slice(0, 10))
+  }, [])
+
+  const killMutation = useMutation({
+    mutationFn: ({ targetAgentId, pid }: { targetAgentId: string; pid: number }) =>
+      agentsApi.killProcess(targetAgentId, pid),
+    onSuccess: (res, vars) => {
+      appendKillLog(`Server accepted kill for PID ${vars.pid}${res.request_id ? ` (request ${res.request_id})` : ''}`)
+      addNotification?.({ type: 'success', title: 'Kill dispatched', message: `PID ${vars.pid} sent to agent` })
+    },
+    onError: (error: Error, vars) => {
+      appendKillLog(`Kill failed for PID ${vars.pid}: ${error.message}`)
+      addNotification?.({ type: 'error', title: 'Kill failed', message: error.message })
+    },
+  })
+
+  const handleKillConfirm = useCallback(() => {
+    if (!killTarget) return
+    if (!agentId) {
+      appendKillLog('Kill aborted: no agent selected')
+      addNotification?.({ type: 'error', title: 'Select an agent', message: 'Pick an agent before killing a process.' })
+      setKillTarget(null)
+      return
+    }
+    appendKillLog(`Requesting kill for PID ${killTarget.pid} (${killTarget.name || 'process'})`)
+    killMutation.mutate({ targetAgentId: agentId, pid: killTarget.pid })
+    setKillTarget(null)
+  }, [agentId, killMutation, killTarget, appendKillLog, addNotification])
+
+  const handleKillGroup = useCallback((exe: string, pids: number[]) => {
+    if (!agentId) {
+      appendKillLog('Kill aborted: no agent selected')
+      addNotification?.({ type: 'error', title: 'Select an agent', message: 'Pick an agent before killing a process.' })
+      return
+    }
+    if (!pids.length) return
+    appendKillLog(`Requesting kill for ${pids.length} process(es) of ${exe || 'process'}`)
+    pids.forEach((pid) => {
+      killMutation.mutate({ targetAgentId: agentId, pid })
+    })
+  }, [agentId, killMutation, appendKillLog, addNotification])
 
   const queryParams = useMemo(
     () => ({
@@ -502,9 +549,25 @@ export function MetricsPage() {
   const rootDisk = osDisk
   const primaryInterface = network?.interfaces.find((i) => i.name !== 'lo') ?? network?.interfaces[0]
 
-  const filteredProcesses = useMemo(() => {
+  const dedupedProcesses = useMemo(() => {
     if (!processData?.processes?.length) return []
-    return processData.processes
+    const map = new Map<number, ProcessData['processes'][number]>()
+    processData.processes.forEach((p) => {
+      const existing = map.get(p.pid)
+      if (!existing) {
+        map.set(p.pid, p)
+        return
+      }
+      const better = (p.cpu_pct ?? 0) > (existing.cpu_pct ?? 0)
+        || ((p.cpu_pct ?? 0) === (existing.cpu_pct ?? 0) && (p.start_time ?? 0) > (existing.start_time ?? 0))
+      if (better) map.set(p.pid, p)
+    })
+    return Array.from(map.values())
+  }, [processData?.processes])
+
+  const filteredProcesses = useMemo(() => {
+    if (!dedupedProcesses.length) return []
+    return dedupedProcesses
       .filter((p) => (p.cpu_pct ?? 0) >= procMinCpu)
       .filter((p) => {
         if (!procSearch.trim()) return true
@@ -516,7 +579,55 @@ export function MetricsPage() {
         )
       })
       .sort((a, b) => (b.cpu_pct ?? 0) - (a.cpu_pct ?? 0))
-  }, [processData?.processes, procMinCpu, procSearch])
+  }, [dedupedProcesses, procMinCpu, procSearch])
+
+  const processGroups = useMemo(() => {
+    if (!filteredProcesses.length) return [] as Array<{
+      key: string
+      label: string
+      exe: string
+      totalCpu: number
+      totalMem: number
+      count: number
+      pids: number[]
+      sampleName: string
+    }>
+
+    const map = new Map<string, {
+      label: string
+      exe: string
+      totalCpu: number
+      totalMem: number
+      count: number
+      pids: number[]
+      sampleName: string
+    }>()
+
+    filteredProcesses.forEach((p) => {
+      const key = (p.exe || p.name || 'unknown').toLowerCase()
+      const group = map.get(key)
+      if (!group) {
+        map.set(key, {
+          label: p.exe || p.name || 'unknown',
+          exe: p.exe || 'unknown',
+          totalCpu: p.cpu_pct ?? 0,
+          totalMem: p.mem_bytes ?? 0,
+          count: 1,
+          pids: [p.pid],
+          sampleName: p.name || 'process',
+        })
+      } else {
+        group.totalCpu += p.cpu_pct ?? 0
+        group.totalMem += p.mem_bytes ?? 0
+        group.count += 1
+        group.pids.push(p.pid)
+      }
+    })
+
+    return Array.from(map.entries())
+      .map(([key, g]) => ({ key, ...g }))
+      .sort((a, b) => b.totalCpu - a.totalCpu)
+  }, [filteredProcesses])
 
   return (
     <div>
@@ -957,9 +1068,62 @@ export function MetricsPage() {
               placeholder="Search by name or pid"
               className="flex-1 min-w-[180px] max-w-[260px] rounded border border-[--color-border] bg-[--color-surface] text-xs px-2 py-1 font-mono text-[--color-text]"
             />
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant={procGrouping === 'flat' ? 'primary' : 'ghost'}
+                onClick={() => setProcGrouping('flat')}
+              >
+                Flat list
+              </Button>
+              <Button
+                size="sm"
+                variant={procGrouping === 'byExe' ? 'primary' : 'ghost'}
+                onClick={() => setProcGrouping('byExe')}
+              >
+                Group by exe
+              </Button>
+            </div>
           </div>
 
-          {!filteredProcesses.length ? (
+          {procGrouping === 'byExe' ? (
+            !processGroups.length ? (
+              <EmptyState message="No processes match filters" />
+            ) : (
+              <div className="rounded border border-[--color-border] bg-[--color-surface-2] overflow-hidden">
+                <div className="grid grid-cols-[1fr_90px_90px_70px] gap-2 px-3 py-2 text-[10px] font-mono text-[--color-text-dim] border-b border-[--color-border]">
+                  <span>Executable</span>
+                  <span className="text-right">CPU% (sum)</span>
+                  <span className="text-right">Mem (sum)</span>
+                  <span className="text-right">Action</span>
+                </div>
+                <div className="max-h-64 overflow-auto divide-y divide-[--color-border]">
+                  {processGroups.map((g) => (
+                    <div key={g.key} className="grid grid-cols-[1fr_90px_90px_70px] gap-2 px-3 py-2 items-center text-xs font-mono text-[--color-text]">
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate" title={g.label}>{g.label}</span>
+                        <span className="text-[10px] text-[--color-text-dim]">{g.count} proc · ex: {g.sampleName}</span>
+                      </div>
+                      <span className="text-right" style={{ color: g.totalCpu >= 80 ? '#f87171' : g.totalCpu >= 50 ? '#fbbf24' : 'var(--color-text)' }}>
+                        {g.totalCpu.toFixed(1)}%
+                      </span>
+                      <span className="text-right text-[--color-text-dim]">{formatBytes(g.totalMem)}</span>
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={killMutation.isLoading}
+                          onClick={() => handleKillGroup(g.label, g.pids)}
+                        >
+                          Kill all
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          ) : !filteredProcesses.length ? (
             <EmptyState message="No processes match filters" />
           ) : (
             <div className="rounded border border-[--color-border] bg-[--color-surface-2] overflow-hidden">
@@ -982,13 +1146,31 @@ export function MetricsPage() {
                     <span className="text-right text-[--color-text-dim]">{formatBytes(p.mem_bytes)}</span>
                     <span className="truncate text-[--color-text-dim]" title={p.exe || ''}>{p.exe || '—'}</span>
                     <div className="flex justify-end">
-                      <Button size="sm" variant="danger" onClick={() => setKillTarget({ pid: p.pid, name: p.name })}>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={killMutation.isLoading}
+                        onClick={() => setKillTarget({ pid: p.pid, name: p.name })}
+                      >
                         Kill
                       </Button>
                     </div>
                   </div>
                 ))}
               </div>
+              {killLogs.length > 0 && (
+                <div
+                  className="mt-3 mx-2 mb-2 rounded border border-[--color-border] bg-[--color-surface] p-2"
+                  style={{ color: '#ef4444' }}
+                >
+                  <p className="text-[10px] font-mono uppercase tracking-wide mb-1">Kill logs</p>
+                  <div className="space-y-1 text-[11px] font-mono leading-tight">
+                    {killLogs.map((line, idx) => (
+                      <div key={`${line}-${idx}`}>{line}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </Card>
@@ -1025,14 +1207,7 @@ export function MetricsPage() {
           message={`Send kill to PID ${killTarget.pid} (${killTarget.name || 'process'})?`}
           confirmLabel="Kill"
           danger
-          onConfirm={() => {
-            addNotification?.({
-              type: 'warning',
-              title: 'Kill not implemented',
-              message: 'Process termination is not wired to the server in this UI.',
-            })
-            setKillTarget(null)
-          }}
+          onConfirm={handleKillConfirm}
           onCancel={() => setKillTarget(null)}
         />
       )}

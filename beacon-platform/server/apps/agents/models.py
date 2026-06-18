@@ -93,3 +93,39 @@ class CollectorHealth(models.Model):
 
     def __str__(self):
         return f"{self.agent.hostname}:{self.collector} → {self.status}"
+
+
+class ProcessKillRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING    = "pending", "Pending"
+        DISPATCHED = "dispatched", "Dispatched"
+        COMPLETED  = "completed", "Completed"
+        FAILED     = "failed", "Failed"
+
+    agent_id     = models.CharField(max_length=128, db_index=True)
+    pid          = models.IntegerField()
+    status       = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    error        = models.TextField(blank=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    completed_at  = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "beacon_process_kill_requests"
+        indexes = [models.Index(fields=["agent_id", "status", "created_at"])]
+
+    def mark_dispatched(self):
+        self.status = self.Status.DISPATCHED
+        self.dispatched_at = timezone.now()
+        self.save(update_fields=["status", "dispatched_at"])
+
+    def mark_completed(self):
+        self.status = self.Status.COMPLETED
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at"])
+
+    def mark_failed(self, error: str):
+        self.status = self.Status.FAILED
+        self.error = error
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "error", "completed_at"])

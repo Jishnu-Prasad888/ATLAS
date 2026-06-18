@@ -39,6 +39,13 @@ export const agentsApi = {
       data: {},
     }),
 
+  killProcess: (agentId: string, pid: number) =>
+    request<{ status: string; pid: number; request_id?: number }>({
+      method: 'POST',
+      url: `/agents/${encodeURIComponent(agentId)}/kill_process/`,
+      data: { pid },
+    }),
+
   listByStatus: (status: AgentStatus) =>
     request<Agent[]>({ method: 'GET', url: '/agents/', params: { status } }),
 }

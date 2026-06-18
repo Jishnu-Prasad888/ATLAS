@@ -191,6 +191,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "hex",
+ "libc",
  "once_cell",
  "rand 0.8.6",
  "ratatui",

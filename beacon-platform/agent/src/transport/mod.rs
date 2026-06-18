@@ -167,6 +167,7 @@ impl WebSocketTransport {
         let flags = self.collector_flags.clone();
         let config = self.config.clone();
         let config_path = self.config_path.clone();
+        let log_engine = self.log_engine.clone();
 
         // Wrap writer in Arc<Mutex> so heartbeat and flush loops can share it
         let writer = Arc::new(Mutex::new(writer));
@@ -175,7 +176,7 @@ impl WebSocketTransport {
         tokio::select! {
             r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())            => r,
             r = Self::flush_loop(Arc::clone(&writer), queue, enc, identity.clone())     => r,
-            r = Self::read_loop(&mut reader, flags, config, config_path)               => r,
+            r = Self::read_loop(&mut reader, flags, config, config_path, log_engine, identity)    => r,
         }
     }
 
@@ -269,6 +270,8 @@ impl WebSocketTransport {
         collector_flags: CollectorFlags,
         agent_config: AgentConfig,
         config_path: String,
+        log_engine: LogEngine,
+        identity: AgentIdentity,
     ) -> Result<()>
     where
         S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -290,6 +293,21 @@ impl WebSocketTransport {
                                         &config_path,
                                     )
                                     .await;
+                                }
+                            }
+                            Some("process_kill") => {
+                                if let Some(payload) = parsed.get("payload") {
+                                    if let Some(pid) = payload.get("pid").and_then(|p| p.as_i64()) {
+                                        let req_id = payload.get("request_id").and_then(|r| r.as_i64());
+                                        info!("Received process_kill for pid {} (req {:?})", pid, req_id);
+                                        let result = Self::kill_process(pid as i32, &log_engine).await;
+                                        if let Err(e) = &result {
+                                            error!("process_kill failed for pid {}: {}", pid, e);
+                                        }
+                                        if let Err(e) = Self::send_kill_result(&agent_config, &identity, pid as i32, req_id, result.as_ref().err()).await {
+                                            warn!("Failed to send kill result for pid {}: {}", pid, e);
+                                        }
+                                    }
                                 }
                             }
                             _ => debug!("Server message: {}", &text[..text.len().min(120)]),
@@ -347,6 +365,34 @@ impl WebSocketTransport {
         }
     }
 
+    async fn kill_process(pid: i32, log_engine: &LogEngine) -> Result<()> {
+        // Use libc kill to send SIGKILL. Fall back to /bin/kill if needed.
+        unsafe {
+            let res = libc::kill(pid, libc::SIGKILL);
+            if res == 0 {
+                let _ = log_engine
+                    .info("process_kill", &format!("Killed pid {} via libc SIGKILL", pid))
+                    .await;
+                return Ok(());
+            }
+        }
+        // If libc kill failed, attempt shell kill
+        let status = std::process::Command::new("/bin/kill")
+            .arg("-9")
+            .arg(pid.to_string())
+            .status();
+        match status {
+            Ok(s) if s.success() => {
+                let _ = log_engine
+                    .info("process_kill", &format!("Killed pid {} via /bin/kill -9", pid))
+                    .await;
+                Ok(())
+            }
+            Ok(s) => Err(anyhow!("kill exited with status {:?}", s.code())),
+            Err(e) => Err(anyhow!("kill failed: {e}")),
+        }
+    }
+
     fn build_tls_connector(&self) -> Result<Connector> {
         use rustls::{ClientConfig, RootCertStore};
         use std::sync::Arc;
@@ -371,5 +417,44 @@ impl WebSocketTransport {
             .with_no_client_auth();
 
         Ok(Connector::Rustls(Arc::new(tls_config)))
+    }
+
+    async fn send_kill_result(
+        config: &AgentConfig,
+        identity: &AgentIdentity,
+        pid: i32,
+        request_id: Option<i64>,
+        error: Option<&anyhow::Error>,
+    ) -> Result<()> {
+        // Derive REST base from WS URL
+        let ws_url = url::Url::parse(&config.server_addr)?;
+        let scheme = match ws_url.scheme() {
+            "wss" => "https",
+            "ws" => "http",
+            other => other,
+        };
+        let host = ws_url.host_str().ok_or_else(|| anyhow!("Invalid server host"))?;
+        let port = ws_url.port().map(|p| format!(":{p}")).unwrap_or_default();
+        let base = format!("{}://{}{}", scheme, host, port);
+        let url = format!("{}/api/v1/agents/{}/kill_process_result/", base, identity.agent_id);
+
+        let client = reqwest::Client::new();
+        let mut payload = serde_json::json!({
+            "pid": pid,
+            "status": if error.is_some() { "failed" } else { "completed" },
+        });
+        if let Some(id) = request_id {
+            payload["request_id"] = serde_json::json!(id);
+        }
+        if let Some(err) = error {
+            payload["error"] = serde_json::json!(err.to_string());
+        }
+
+        client.post(url)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 }
