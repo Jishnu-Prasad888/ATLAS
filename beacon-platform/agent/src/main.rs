@@ -528,25 +528,82 @@ async fn ensure_system_install() -> bool {
         }
     }
 
+    if !ensure_user_and_dirs() {
+        warn!("Could not ensure service user/directories; skipping systemd handoff");
+        return false;
+    }
+
     // Enable and start via systemd; if this succeeds we can exit and let systemd own the process.
-    if Command::new("systemctl").arg("daemon-reload").status().map(|s| s.success()).unwrap_or(false)
-        && Command::new("systemctl")
-            .args(["enable", "beacon-agent"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-        && Command::new("systemctl")
-            .args(["start", "beacon-agent"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    {
+    let reloaded = run_cmd("systemctl daemon-reload", ["daemon-reload"]);
+    let enabled = reloaded && run_cmd("systemctl enable beacon-agent", ["enable", "beacon-agent"]);
+    let started = enabled && run_cmd("systemctl start beacon-agent", ["start", "beacon-agent"]);
+
+    if started {
         info!("Enabled and started beacon-agent via systemd (auto-start on boot)");
         return true;
     }
 
     warn!("Systemd enable/start failed or unavailable; continuing foreground run");
     false
+}
+
+fn ensure_user_and_dirs() -> bool {
+    // Check if user exists
+    let user_exists = Command::new("id").arg("-u").arg("beacon").status().map(|s| s.success()).unwrap_or(false);
+    if !user_exists {
+        let created = Command::new("useradd")
+            .args([
+                "--system",
+                "--home",
+                "/var/lib/beacon",
+                "--shell",
+                "/usr/sbin/nologin",
+                "beacon",
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            warn!("Failed to create service user 'beacon'");
+            return false;
+        }
+    }
+
+    for dir in ["/var/lib/beacon", "/var/log/beacon"] {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            warn!("Failed to create {dir}: {e}");
+            return false;
+        }
+        let chown_ok = Command::new("chown")
+            .args(["beacon:beacon", dir])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !chown_ok {
+            warn!("Failed to chown {dir} to beacon");
+            return false;
+        }
+    }
+
+    true
+}
+
+fn run_cmd<const N: usize>(label: &str, args: [&str; N]) -> bool {
+    let output = Command::new("systemctl").args(args).output();
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                return true;
+            }
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            warn!("{label} failed: {}", stderr.trim());
+            false
+        }
+        Err(e) => {
+            warn!("{label} failed to execute: {e}");
+            false
+        }
+    }
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
