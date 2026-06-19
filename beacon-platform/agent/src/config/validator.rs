@@ -17,7 +17,11 @@ impl ConfigValidator {
     pub fn validate(config: &AgentConfig) -> Result<()> {
         Self::check_server_addr(&config.server_addr)?;
         Self::check_interval(config.interval_seconds)?;
-        Self::check_queue(&config.queue.max_queue_size, &config.queue.max_retries)?;
+        Self::check_queue(
+            &config.queue.max_queue_size,
+            &config.queue.max_retries,
+            &config.queue.sent_retention_hours,
+        )?;
         Self::check_username(&config.username)?;
         Ok(())
     }
@@ -39,12 +43,15 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn check_queue(max_size: &usize, max_retries: &u32) -> Result<()> {
+    fn check_queue(max_size: &usize, max_retries: &u32, sent_retention_hours: &u64) -> Result<()> {
         if *max_size == 0 {
             bail!("queue.max_queue_size must be > 0");
         }
         if *max_retries == 0 {
             bail!("queue.max_retries must be > 0");
+        }
+        if *sent_retention_hours == 0 {
+            bail!("queue.sent_retention_hours must be > 0");
         }
         Ok(())
     }

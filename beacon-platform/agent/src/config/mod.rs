@@ -17,6 +17,9 @@ use tokio::sync::RwLock;
 pub use validator::ConfigValidator;
 
 fn default_true() -> bool { true }
+fn default_sent_retention_hours() -> u64 { 24 }
+fn default_warning_audit_retention_days() -> u64 { 10 }
+fn default_compress_warning_audit() -> bool { true }
 
 /// Shared runtime flags that control whether each collector is active.
 /// The Transport updates these when the server pushes a `config_update`.
@@ -101,6 +104,9 @@ pub struct QueueConfig {
     pub max_retries: u32,
     pub max_queue_size: usize,
     pub retry_backoff_ms: u64,
+    /// How long to retain sent queue rows locally before pruning
+    #[serde(default = "default_sent_retention_hours")]
+    pub sent_retention_hours: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +123,12 @@ pub struct LoggingConfig {
     pub log_to_file: bool,
     /// Log file path (if log_to_file is true)
     pub log_file_path: String,
+    /// Days to retain warnings and audit records locally after sync
+    #[serde(default = "default_warning_audit_retention_days")]
+    pub warning_audit_retention_days: u64,
+    /// Compress retained warning/audit rows to save space
+    #[serde(default = "default_compress_warning_audit")]
+    pub compress_warning_audit: bool,
 }
 
 impl Default for LoggingConfig {
@@ -125,6 +137,8 @@ impl Default for LoggingConfig {
             max_log_rate: 1000,
             log_to_file: false,
             log_file_path: "/var/log/beacon/agent.log".to_string(),
+            warning_audit_retention_days: 10,
+            compress_warning_audit: true,
         }
     }
 }
@@ -162,6 +176,7 @@ impl Default for AgentConfig {
                 max_retries: 5,
                 max_queue_size: 100_000,
                 retry_backoff_ms: 1_000,
+                sent_retention_hours: 24,
             },
             encryption: EncryptionConfig {
                 enabled: true,

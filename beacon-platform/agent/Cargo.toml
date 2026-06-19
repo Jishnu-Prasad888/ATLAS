@@ -26,6 +26,7 @@ sha2    = "0.10"
 rand    = "0.8"
 base64  = "0.22"
 hex     = "0.4"
+flate2  = "1"
 
 # TLS
 rustls              = "0.22"

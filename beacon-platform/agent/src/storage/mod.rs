@@ -3,9 +3,11 @@
 // All databases use WAL mode + NORMAL synchronous for durability with performance.
 
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{Duration, Utc};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rusqlite::{params, Connection};
 use serde_json;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -94,6 +96,8 @@ impl StorageManager {
                     schema_version  INTEGER NOT NULL DEFAULT 1,
                     sequence_number INTEGER NOT NULL DEFAULT 0,
                     extra           TEXT NOT NULL DEFAULT '{}',
+                    compressed      INTEGER NOT NULL DEFAULT 0,
+                    message_gzip    BLOB,
                     synced          INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_logs_agent_severity_ts
@@ -105,7 +109,9 @@ impl StorageManager {
                     timestamp TEXT NOT NULL,
                     action    TEXT NOT NULL,
                     resource  TEXT NOT NULL,
-                    details   TEXT NOT NULL DEFAULT '{}'
+                    details   TEXT NOT NULL DEFAULT '{}',
+                    compressed INTEGER NOT NULL DEFAULT 0,
+                    details_gzip BLOB
                 );
             "#,
             )?;
@@ -122,6 +128,8 @@ impl StorageManager {
             let _ = add_column("namespace", "TEXT");
             let _ = add_column("event_type", "TEXT");
             let _ = add_column("tags", "TEXT NOT NULL DEFAULT '[]'");
+            let _ = add_column("compressed", "INTEGER NOT NULL DEFAULT 0");
+            let _ = add_column("message_gzip", "BLOB");
 
             // Create indexes for new columns — must run AFTER migration
             let create_idx = |sql: &str| -> Result<()> {
@@ -130,6 +138,14 @@ impl StorageManager {
             };
             let _ = create_idx("CREATE INDEX IF NOT EXISTS idx_logs_log_id ON logs(log_id)");
             let _ = create_idx("CREATE INDEX IF NOT EXISTS idx_logs_execution ON logs(execution_id) WHERE execution_id IS NOT NULL");
+
+            let add_audit_column = |col: &str, def: &str| -> Result<()> {
+                let sql = format!("ALTER TABLE audit_logs ADD COLUMN {} {}", col, def);
+                let _ = db.execute_batch(&sql);
+                Ok(())
+            };
+            let _ = add_audit_column("compressed", "INTEGER NOT NULL DEFAULT 0");
+            let _ = add_audit_column("details_gzip", "BLOB");
         }
 
         // ── Queue ─────────────────────────────────────────────────────────────
@@ -189,6 +205,28 @@ impl StorageManager {
         }
 
         Ok(())
+    }
+
+    fn decompress_field(compressed: i64, blob: Option<Vec<u8>>, fallback: String) -> String {
+        if compressed == 0 {
+            return fallback;
+        }
+
+        if let Some(data) = blob {
+            let mut decoder = GzDecoder::new(&data[..]);
+            let mut out = String::new();
+            if decoder.read_to_string(&mut out).is_ok() {
+                return out;
+            }
+        }
+
+        fallback
+    }
+
+    fn compress_field(text: &str) -> Result<Vec<u8>> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(text.as_bytes())?;
+        Ok(encoder.finish()?)
     }
 
     // ── Metrics ───────────────────────────────────────────────────────────────
@@ -311,11 +349,14 @@ impl StorageManager {
     pub async fn get_unsynced_logs(&self, limit: usize) -> Result<Vec<LogRow>> {
         let db = self.logs_db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT id, log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number, extra
+            "SELECT id, log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number, extra, compressed, message_gzip
              FROM logs WHERE synced = 0 ORDER BY timestamp ASC LIMIT ?1",
         )?;
         let rows = stmt
             .query_map(params![limit as i64], |r| {
+                let message: String = r.get(6)?;
+                let compressed: i64 = r.get(15)?;
+                let message_gzip: Option<Vec<u8>> = r.get(16)?;
                 Ok(LogRow {
                     id: r.get(0)?,
                     log_id: r.get(1)?,
@@ -323,7 +364,7 @@ impl StorageManager {
                     hostname: r.get(3)?,
                     source: r.get(4)?,
                     severity: r.get(5)?,
-                    message: r.get(6)?,
+                    message: Self::decompress_field(compressed, message_gzip, message),
                     timestamp: r.get(7)?,
                     execution_id: r.get(8)?,
                     namespace: r.get(9)?,
@@ -352,7 +393,7 @@ impl StorageManager {
     pub async fn print_recent_logs(&self, n: usize) -> Result<()> {
         let db = self.logs_db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT timestamp, severity, source, message FROM logs ORDER BY timestamp DESC LIMIT ?1",
+            "SELECT timestamp, severity, source, message, compressed, message_gzip FROM logs ORDER BY timestamp DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![n as i64], |r| {
             Ok((
@@ -360,11 +401,14 @@ impl StorageManager {
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, Option<Vec<u8>>>(5)?,
             ))
         })?;
         for row in rows {
-            let (ts, sev, src, msg) = row?;
-            println!("[{ts}] [{sev}] ({src}) {msg}");
+            let (ts, sev, src, msg, compressed, blob) = row?;
+            let message = Self::decompress_field(compressed, blob, msg);
+            println!("[{ts}] [{sev}] ({src}) {message}");
         }
         Ok(())
     }
@@ -377,22 +421,30 @@ impl StorageManager {
 
     pub async fn search_logs(&self, query: &str, limit: usize) -> Result<Vec<LogRow>> {
         let db = self.logs_db.lock().await;
-        let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+        let lower_query = query.to_lowercase();
+        let scan_limit = (limit * 5).max(limit);
         let mut stmt = db.prepare(
-            "SELECT id, log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number, extra
-             FROM logs WHERE message LIKE ?1 ESCAPE '\\' OR source LIKE ?1 ESCAPE '\\'
-             ORDER BY timestamp DESC LIMIT ?2",
+            "SELECT id, log_id, agent_id, hostname, source, severity, message, timestamp, execution_id, namespace, event_type, tags, schema_version, sequence_number, extra, compressed, message_gzip
+             FROM logs ORDER BY timestamp DESC LIMIT ?1",
         )?;
-        let rows = stmt
-            .query_map(params![pattern, limit as i64], |r| {
-                Ok(LogRow {
+        let mut results = Vec::new();
+
+        let rows = stmt.query_map(params![scan_limit as i64], |r| {
+            let message: String = r.get(6)?;
+            let compressed: i64 = r.get(15)?;
+            let message_gzip: Option<Vec<u8>> = r.get(16)?;
+            let source: String = r.get(4)?;
+            let resolved = Self::decompress_field(compressed, message_gzip, message);
+
+            Ok((
+                LogRow {
                     id: r.get(0)?,
                     log_id: r.get(1)?,
                     agent_id: r.get(2)?,
                     hostname: r.get(3)?,
-                    source: r.get(4)?,
+                    source: source.clone(),
                     severity: r.get(5)?,
-                    message: r.get(6)?,
+                    message: resolved,
                     timestamp: r.get(7)?,
                     execution_id: r.get(8)?,
                     namespace: r.get(9)?,
@@ -401,10 +453,27 @@ impl StorageManager {
                     schema_version: r.get::<_, Option<i64>>(12)?.map(|v| v as u32).unwrap_or(0),
                     sequence_number: r.get::<_, Option<i64>>(13)?.map(|v| v as u64).unwrap_or(0),
                     extra: r.get(14)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+                },
+                source,
+            ))
+        })?;
+
+        for row in rows {
+            let (log, source) = row?;
+            if log
+                .message
+                .to_lowercase()
+                .contains(&lower_query)
+                || source.to_lowercase().contains(&lower_query)
+            {
+                results.push(log);
+            }
+            if results.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(results)
     }
 
     pub async fn delete_logs_by_severity(&self, severity: &str) -> Result<usize> {
@@ -428,7 +497,7 @@ impl StorageManager {
     pub async fn print_audit_logs(&self, n: usize) -> Result<()> {
         let db = self.logs_db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT timestamp, action, resource, details FROM audit_logs ORDER BY timestamp DESC LIMIT ?1",
+            "SELECT timestamp, action, resource, details, compressed, details_gzip FROM audit_logs ORDER BY timestamp DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![n as i64], |r| {
             Ok((
@@ -436,11 +505,14 @@ impl StorageManager {
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, Option<Vec<u8>>>(5)?,
             ))
         })?;
         for row in rows {
-            let (ts, action, resource, details) = row?;
-            println!("[{ts}] {action} | {resource} | {details}");
+            let (ts, action, resource, details, compressed, blob) = row?;
+            let msg = Self::decompress_field(compressed, blob, details);
+            println!("[{ts}] {action} | {resource} | {msg}");
         }
         Ok(())
     }
@@ -539,6 +611,96 @@ impl StorageManager {
         Ok(())
     }
 
+    pub async fn cleanup_after_sync(
+        &self,
+        retention_days: i64,
+        compress_retained: bool,
+        queue_sent_retention_hours: i64,
+    ) -> Result<CleanupStats> {
+        let mut stats = CleanupStats::default();
+
+        {
+            let db = self.metrics_db.lock().await;
+            stats.metrics_deleted = db.execute("DELETE FROM metrics", [])? as usize;
+        }
+
+        {
+            let db = self.queue_db.lock().await;
+            let cutoff = (Utc::now() - Duration::hours(queue_sent_retention_hours.max(1))).to_rfc3339();
+            stats.queue_pruned = db
+                .execute(
+                    "DELETE FROM queue WHERE state = 'Sent' AND created_at < ?1",
+                    params![cutoff],
+                )? as usize;
+        }
+
+        let cutoff_ts = (Utc::now() - Duration::days(retention_days.max(0))).to_rfc3339();
+
+        {
+            let db = self.logs_db.lock().await;
+            stats.logs_deleted = db
+                .execute("DELETE FROM logs WHERE severity != 'Warning'", [])?
+                as usize;
+            stats.warnings_deleted = db
+                .execute(
+                    "DELETE FROM logs WHERE severity = 'Warning' AND timestamp < ?1",
+                    params![cutoff_ts],
+                )? as usize;
+
+            if compress_retained {
+                let mut stmt = db
+                    .prepare("SELECT id, message FROM logs WHERE severity = 'Warning' AND compressed = 0")?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (id, message) in rows {
+                    let gz = Self::compress_field(&message)?;
+                    db.execute(
+                        "UPDATE logs SET compressed = 1, message_gzip = ?1, message = '' WHERE id = ?2",
+                        params![gz, id],
+                    )?;
+                    stats.warnings_compressed += 1;
+                }
+            }
+
+            stats.audits_deleted = db
+                .execute(
+                    "DELETE FROM audit_logs WHERE timestamp < ?1",
+                    params![cutoff_ts],
+                )? as usize;
+
+            if compress_retained {
+                let mut stmt = db.prepare("SELECT id, details FROM audit_logs WHERE compressed = 0")?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (id, details) in rows {
+                    let gz = Self::compress_field(&details)?;
+                    db.execute(
+                        "UPDATE audit_logs SET compressed = 1, details_gzip = ?1, details = '' WHERE id = ?2",
+                        params![gz, id],
+                    )?;
+                    stats.audits_compressed += 1;
+                }
+            }
+        }
+
+        if stats.total_modified() > 0 {
+            info!(
+                "cleanup_after_sync: metrics_deleted={}, logs_deleted={}, warnings_deleted={}, warnings_compressed={}, audits_deleted={}, audits_compressed={}, queue_pruned={}",
+                stats.metrics_deleted,
+                stats.logs_deleted,
+                stats.warnings_deleted,
+                stats.warnings_compressed,
+                stats.audits_deleted,
+                stats.audits_compressed,
+                stats.queue_pruned,
+            );
+        }
+
+        Ok(stats)
+    }
+
     pub async fn verify(&self) -> Result<()> {
         for db in [
             &self.metrics_db,
@@ -590,6 +752,29 @@ impl StorageManager {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct CleanupStats {
+    pub metrics_deleted: usize,
+    pub logs_deleted: usize,
+    pub warnings_deleted: usize,
+    pub warnings_compressed: usize,
+    pub audits_deleted: usize,
+    pub audits_compressed: usize,
+    pub queue_pruned: usize,
+}
+
+impl CleanupStats {
+    fn total_modified(&self) -> usize {
+        self.metrics_deleted
+            + self.logs_deleted
+            + self.warnings_deleted
+            + self.warnings_compressed
+            + self.audits_deleted
+            + self.audits_compressed
+            + self.queue_pruned
+    }
+}
+
 // ── Row types ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -621,4 +806,91 @@ pub struct LogRow {
     pub schema_version: u32,
     pub sequence_number: u64,
     pub extra: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::params;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn cleanup_purges_and_compresses_as_expected() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let storage = StorageManager::new(dir.path().to_str().unwrap()).await?;
+
+        storage
+            .store_metric("agent", "cpu", "{}")
+            .await?;
+        storage
+            .store_log("agent", "svc", "Info", "drop me", "{}")
+            .await?;
+        storage
+            .store_log("agent", "svc", "Warning", "keep me", "{}")
+            .await?;
+        storage.write_audit("create", "resource", "details text").await?;
+
+        let stats = storage.cleanup_after_sync(10, true, 24).await?;
+        assert!(stats.metrics_deleted >= 1);
+        assert_eq!(stats.logs_deleted, 1);
+        assert_eq!(stats.warnings_compressed, 1);
+        assert_eq!(stats.audits_compressed, 1);
+
+        let db = storage.logs_db.lock().await;
+        let (severity, compressed, message, blob): (String, i64, String, Option<Vec<u8>>) = db.query_row(
+            "SELECT severity, compressed, message, message_gzip FROM logs",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?;
+        assert_eq!(severity, "Warning");
+        let resolved = StorageManager::decompress_field(compressed, blob, message);
+        assert_eq!(resolved, "keep me");
+
+        let (compressed_audit, details_blob, details_text): (i64, Option<Vec<u8>>, String) = db
+            .query_row(
+                "SELECT compressed, details_gzip, details FROM audit_logs",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+        let audit_resolved = StorageManager::decompress_field(compressed_audit, details_blob, details_text);
+        assert!(audit_resolved.contains("details text"));
+        drop(db);
+
+        let qdb = storage.queue_db.lock().await;
+        let metrics_count: i64 = qdb.query_row("SELECT COUNT(*) FROM queue", [], |r| r.get(0))?;
+        assert_eq!(metrics_count, 0);
+        drop(qdb);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_prunes_old_sent_queue_rows() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let storage = StorageManager::new(dir.path().to_str().unwrap()).await?;
+
+        {
+            let db = storage.queue_db.lock().await;
+            let old_ts = (Utc::now() - Duration::hours(48)).to_rfc3339();
+            db.execute(
+                "INSERT INTO queue (message_id, payload, msg_type, state, retries, created_at, updated_at, checksum) VALUES (?1, ?2, ?3, 'Sent', 0, ?4, ?4, 'c')",
+                params!["m1", vec![0u8], "metrics", old_ts],
+            )?;
+            let recent = Utc::now().to_rfc3339();
+            db.execute(
+                "INSERT INTO queue (message_id, payload, msg_type, state, retries, created_at, updated_at, checksum) VALUES (?1, ?2, ?3, 'Pending', 0, ?4, ?4, 'c')",
+                params!["m2", vec![1u8], "metrics", recent],
+            )?;
+        }
+
+        let stats = storage.cleanup_after_sync(10, true, 24).await?;
+        assert_eq!(stats.queue_pruned, 1);
+
+        let db = storage.queue_db.lock().await;
+        let sent_remaining: i64 = db.query_row("SELECT COUNT(*) FROM queue WHERE state = 'Sent'", [], |r| r.get(0))?;
+        let pending_remaining: i64 = db.query_row("SELECT COUNT(*) FROM queue WHERE state = 'Pending'", [], |r| r.get(0))?;
+        assert_eq!(sent_remaining, 0);
+        assert_eq!(pending_remaining, 1);
+        Ok(())
+    }
 }

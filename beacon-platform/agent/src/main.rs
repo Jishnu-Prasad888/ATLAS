@@ -13,6 +13,9 @@ mod transport;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::process::Command;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -23,6 +26,8 @@ use engines::{
 };
 use storage::StorageManager;
 use transport::WebSocketTransport;
+
+const SERVICE_UNIT: &str = include_str!("../beacon-agent.service");
 
 #[derive(Parser)]
 #[command(
@@ -332,6 +337,12 @@ async fn main() -> Result<()> {
 // ─── Run daemon ───────────────────────────────────────────────────────────────
 
 async fn run_daemon(config_path: &str) -> Result<()> {
+    let handed_to_systemd = ensure_system_install().await;
+    if handed_to_systemd {
+        info!("Systemd service started; exiting current process to avoid double-run");
+        return Ok(());
+    }
+
     info!("Loading configuration from {}", config_path);
 
     let config = AgentConfig::load(config_path).await?;
@@ -477,6 +488,65 @@ async fn run_daemon(config_path: &str) -> Result<()> {
 
     info!("Beacon agent stopped.");
     Ok(())
+}
+
+async fn ensure_system_install() -> bool {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("Unable to determine current executable path: {e}");
+            return false;
+        }
+    };
+
+    let target = Path::new("/usr/local/bin/beacon-agent");
+    if !target.exists() {
+        match tokio::fs::copy(&exe, target).await {
+            Ok(_) => {
+                let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755));
+                info!("Installed beacon-agent to /usr/local/bin");
+            }
+            Err(e) => {
+                warn!("Skipping binary install to /usr/local/bin (permission/other error): {e}");
+                // Without a system install we cannot enable autostart.
+                return false;
+            }
+        }
+    }
+
+    let unit_path = Path::new("/etc/systemd/system/beacon-agent.service");
+    if !unit_path.exists() {
+        if let Some(parent) = unit_path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        match tokio::fs::write(unit_path, SERVICE_UNIT).await {
+            Ok(_) => info!("Installed systemd unit: /etc/systemd/system/beacon-agent.service"),
+            Err(e) => {
+                warn!("Skipping systemd unit install (permission/other error): {e}");
+                return false;
+            }
+        }
+    }
+
+    // Enable and start via systemd; if this succeeds we can exit and let systemd own the process.
+    if Command::new("systemctl").arg("daemon-reload").status().map(|s| s.success()).unwrap_or(false)
+        && Command::new("systemctl")
+            .args(["enable", "beacon-agent"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        && Command::new("systemctl")
+            .args(["start", "beacon-agent"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    {
+        info!("Enabled and started beacon-agent via systemd (auto-start on boot)");
+        return true;
+    }
+
+    warn!("Systemd enable/start failed or unavailable; continuing foreground run");
+    false
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

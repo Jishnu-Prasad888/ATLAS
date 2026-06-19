@@ -7,7 +7,7 @@ use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
@@ -168,6 +168,9 @@ impl WebSocketTransport {
         let config = self.config.clone();
         let config_path = self.config_path.clone();
         let log_engine = self.log_engine.clone();
+        let retention_days = self.config.logging.warning_audit_retention_days as i64;
+        let compress_retained = self.config.logging.compress_warning_audit;
+        let queue_sent_retention_hours = self.config.queue.sent_retention_hours as i64;
 
         // Wrap writer in Arc<Mutex> so heartbeat and flush loops can share it
         let writer = Arc::new(Mutex::new(writer));
@@ -175,7 +178,15 @@ impl WebSocketTransport {
         // Run all loops concurrently; abort all on first error
         tokio::select! {
             r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())            => r,
-            r = Self::flush_loop(Arc::clone(&writer), queue, enc, identity.clone())     => r,
+            r = Self::flush_loop(
+                Arc::clone(&writer),
+                queue,
+                enc,
+                identity.clone(),
+                retention_days,
+                compress_retained,
+                queue_sent_retention_hours,
+            )     => r,
             r = Self::read_loop(&mut reader, flags, config, config_path, log_engine, identity)    => r,
         }
     }
@@ -206,13 +217,46 @@ impl WebSocketTransport {
         queue: QueueEngine,
         enc: EncryptionEngine,
         identity: AgentIdentity,
+        retention_days: i64,
+        compress_retained: bool,
+        queue_sent_retention_hours: i64,
     ) -> Result<()>
     where
         S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
     {
+        let mut last_cleanup = Instant::now() - Duration::from_secs(15);
         loop {
             let batch = queue.dequeue_batch(FLUSH_BATCH_SIZE).await?;
             if batch.is_empty() {
+                if last_cleanup.elapsed() >= Duration::from_secs(10) {
+                    if let Ok(status) = queue.status().await {
+                        if status.pending == 0 && status.failed == 0 && status.processing == 0 {
+                            let storage = queue.storage();
+                            match storage
+                                .cleanup_after_sync(
+                                    retention_days,
+                                    compress_retained,
+                                    queue_sent_retention_hours,
+                                )
+                                .await
+                            {
+                                Ok(stats) => {
+                                    debug!(
+                                        "Cleanup complete (metrics_deleted={}, warnings_deleted={}, audits_deleted={}, queue_pruned={})",
+                                        stats.metrics_deleted,
+                                        stats.warnings_deleted,
+                                        stats.audits_deleted,
+                                        stats.queue_pruned,
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!("Cleanup after sync failed: {e}");
+                                }
+                            }
+                            last_cleanup = Instant::now();
+                        }
+                    }
+                }
                 sleep(Duration::from_millis(500)).await;
                 continue;
             }

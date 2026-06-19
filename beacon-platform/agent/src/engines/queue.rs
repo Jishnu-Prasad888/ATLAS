@@ -83,6 +83,10 @@ impl QueueEngine {
         self.log_engine = Some(Arc::new(log_engine));
     }
 
+    pub fn storage(&self) -> StorageManager {
+        self.storage.clone()
+    }
+
     // ─── Enqueue ──────────────────────────────────────────────────────────────
 
     pub async fn enqueue(&self, payload: Vec<u8>, msg_type: &str) -> Result<String> {
