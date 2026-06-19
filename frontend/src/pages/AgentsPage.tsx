@@ -200,7 +200,7 @@ export function AgentsPage() {
         </div>
 
         {/* Detail */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pt-20">
           {selectedId && (
             <button
               onClick={() => setSelectedId(null)}
