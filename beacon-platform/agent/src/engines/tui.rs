@@ -21,11 +21,28 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
+use std::time::Instant;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::AgentConfig;
 use crate::storage::StorageManager;
+
+const SPLASH_ART: &[&str] = &[
+    "",
+    "                @@@             @@@@@@@@@@@@@@      @@@                     @@@                @@@@@@@@@           ",
+    "               @@ @@                  @@            @@@                    @@ @@              @@                   ",
+    "               @@ @@                  @@            @@@                    @@ @@@            @@@                   ",
+    "              @@   @@                 @@            @@@                   @@   @@             @@@                  ",
+    "             @@     @@                @@            @@@                  @@     @@              @@@@@@@            ",
+    "            @@@     @@@               @@            @@@                 @@@     @@@                   @@@          ",
+    "            @@@@@@@@@@@               @@            @@@                 @@@@@@@@@@@                    @@          ",
+    "           @@         @@   @@@        @@     @@@    @@@          @@    @@         @@   @@@   @@       @@@          ",
+    "          @@@         @@@  @@@        @@     @@@    @@@@@@@@@@@  @@   @@@         @@@  @@@    @@@@@@@@@            ",
+    "",
+    "                            Autonomous Telemetry, Logging, Analysis, and Surveillance",
+    "",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
@@ -113,6 +130,8 @@ pub struct AppState {
     pub net_tx_history: Vec<f64>,
     pub queue_status: String,
     pub collectors: Vec<(String, String)>, // (name, status)
+    pub splash_visible: bool,
+    pub splash_started: Instant,
 }
 
 impl AppState {
@@ -146,6 +165,8 @@ impl AppState {
                 ("Process".to_string(), "Healthy".to_string()),
                 ("Systemd".to_string(), "Healthy".to_string()),
             ],
+            splash_visible: true,
+            splash_started: Instant::now(),
         }
     }
 
@@ -268,7 +289,10 @@ async fn run_event_loop(
 ) -> Result<()> {
     loop {
         {
-            let s = state.read().await;
+            let mut s = state.write().await;
+            if s.splash_visible && s.splash_started.elapsed().as_millis() > 2200 {
+                s.splash_visible = false;
+            }
             terminal.draw(|f| draw_ui(f, &s))?;
             if s.quit {
                 break;
@@ -287,6 +311,12 @@ async fn run_event_loop(
 }
 
 fn handle_key(state: &mut AppState, code: KeyCode, mods: KeyModifiers) {
+    if state.splash_visible {
+        // Any key dismisses splash
+        state.splash_visible = false;
+        return;
+    }
+
     if state.searching {
         match code {
             KeyCode::Esc => {
@@ -385,6 +415,11 @@ fn handle_key(state: &mut AppState, code: KeyCode, mods: KeyModifiers) {
 fn draw_ui(f: &mut Frame, state: &AppState) {
     let size = f.size();
 
+    if state.splash_visible {
+        draw_splash(f, size);
+        return;
+    }
+
     // Overall layout: header | tabs | content | footer
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -405,6 +440,37 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
     if state.searching {
         draw_search(f, size, state);
     }
+}
+
+fn draw_splash(f: &mut Frame, area: Rect) {
+    let max_width = SPLASH_ART.iter().map(|l| l.len() as u16).max().unwrap_or(0);
+    let height = SPLASH_ART.len() as u16;
+    let width = max_width + 4;
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height + 2) / 2;
+
+    let popup = Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: height + 2,
+    };
+
+    let lines: Vec<Line> = SPLASH_ART
+        .iter()
+        .map(|l| Line::from(Span::styled(*l, Style::default().fg(Color::Cyan))))
+        .collect();
+
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan));
+    let para = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false });
+    f.render_widget(para, popup);
 }
 
 fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {

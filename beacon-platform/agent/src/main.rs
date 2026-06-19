@@ -500,14 +500,15 @@ async fn ensure_system_install() -> bool {
     };
 
     let target = Path::new("/usr/local/bin/beacon-agent");
-    if !target.exists() {
+    let needs_copy = !target.exists() || exe != target;
+    if needs_copy {
         match tokio::fs::copy(&exe, target).await {
             Ok(_) => {
                 let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755));
-                info!("Installed beacon-agent to /usr/local/bin");
+                info!("Updated beacon-agent at /usr/local/bin");
             }
             Err(e) => {
-                warn!("Skipping binary install to /usr/local/bin (permission/other error): {e}");
+                warn!("Skipping binary install/update to /usr/local/bin (permission/other error): {e}");
                 // Without a system install we cannot enable autostart.
                 return false;
             }

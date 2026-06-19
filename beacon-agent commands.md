@@ -1,3 +1,5 @@
+Copies the binary to /usr/local/bin/beacon-agent (if missing) and installs /etc/systemd/system/beacon-agent.service.
+
 run with 
 
 `sudo beacon-agent <command>`
