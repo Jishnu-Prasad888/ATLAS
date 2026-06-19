@@ -1,4 +1,4 @@
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
@@ -12,6 +12,15 @@ interface NavItem {
   path: string
   label: string
   icon: React.ReactNode
+}
+
+type FleetStatus = 'ok' | 'warn' | 'down' | 'unknown'
+
+const STATUS_STYLE: Record<FleetStatus, { text: string; bar: string; dot: string }> = {
+  ok:      { text: 'text-emerald-400', bar: 'bg-emerald-400', dot: 'bg-emerald-400 atlas-pulse' },
+  warn:    { text: 'text-amber-400',   bar: 'bg-amber-400',   dot: 'bg-amber-400' },
+  down:    { text: 'text-red-400',     bar: 'bg-red-500',     dot: 'bg-red-400' },
+  unknown: { text: 'text-slate-500',   bar: 'bg-slate-600',   dot: 'bg-slate-600' },
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -62,7 +71,6 @@ const Icon = {
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
       <path d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.25"/>
       <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
-      <circle cx="11.5" cy="11.5" r="2" fill="currentColor" opacity="0"/>
       <path d="M7 12l1.5-1.5M8.5 10.5L10 9" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
     </svg>
   ),
@@ -87,8 +95,7 @@ const Icon = {
   SignOut: () => (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
       <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M14 8H6"
-        stroke="currentColor" strokeWidth="1.4"
-        strokeLinecap="round" strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
       />
     </svg>
   ),
@@ -97,9 +104,7 @@ const Icon = {
       width="14" height="14" viewBox="0 0 16 16" fill="none"
       className={clsx('transition-transform duration-200', rotated && 'rotate-180')}
     >
-      <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.4"
-        strokeLinecap="round" strokeLinejoin="round"
-      />
+      <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   ),
 }
@@ -107,12 +112,12 @@ const Icon = {
 // ─── Nav structure ────────────────────────────────────────────────────────────
 
 const CORE_NAV: NavItem[] = [
-  { path: '/',          label: 'Dashboard',  icon: <Icon.Dashboard /> },
-  { path: '/agents',    label: 'Agents',     icon: <Icon.Agents />   },
-  { path: '/operations', label: 'Operations', icon: <Icon.Operations /> },
-  { path: '/metrics',   label: 'Metrics',    icon: <Icon.Metrics />  },
-  { path: '/logs',      label: 'Logs',       icon: <Icon.Logs />     },
-  { path: '/health',    label: 'Health',     icon: <Icon.Health />   },
+  { path: '/',           label: 'Dashboard',  icon: <Icon.Dashboard /> },
+  { path: '/agents',     label: 'Agents',     icon: <Icon.Agents />    },
+  { path: '/operations', label: 'Operations', icon: <Icon.Operations />},
+  { path: '/metrics',    label: 'Metrics',    icon: <Icon.Metrics />   },
+  { path: '/logs',       label: 'Logs',       icon: <Icon.Logs />      },
+  { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
 ]
 
 const ADMIN_NAV: NavItem[] = [
@@ -125,17 +130,12 @@ const UTIL_NAV: NavItem[] = [
   { path: '/settings', label: 'Settings', icon: <Icon.Settings /> },
 ]
 
-function pathIsActive(itemPath: string, currentPath: string) {
-  return itemPath === '/' ? currentPath === '/' : currentPath.startsWith(itemPath)
-}
-
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const { isAdmin, user, refreshToken, logout } = useAuthStore()
   const { sidebarCollapsed, toggleSidebar, wsConnected } = useUiStore()
   const { data: health } = useFleetHealth()
-  const location = useLocation()
   const navigate = useNavigate()
 
   const handleLogout = async () => {
@@ -147,45 +147,27 @@ export function Sidebar() {
     navigate('/login', { replace: true })
   }
 
-  const totalAgents  = health?.agents.total   ?? 0
-  const onlineAgents = health?.agents.online  ?? 0
+  const totalAgents  = health?.agents.total    ?? 0
+  const onlineAgents = health?.agents.online   ?? 0
   const degraded     = health?.agents.degraded ?? 0
   const onlinePct    = totalAgents > 0 ? Math.round((onlineAgents / totalAgents) * 100) : 0
-  const fleetOk      = health && onlineAgents === totalAgents && degraded === 0
-  const fleetWarn    = health && degraded > 0
-  const fleetDead    = health && onlineAgents === 0
 
-  const statusColor = fleetDead
-    ? 'text-red-400'
-    : fleetWarn
-    ? 'text-amber-400'
-    : fleetOk
-    ? 'text-emerald-400'
-    : 'text-slate-500'
+  const fleetStatus: FleetStatus = !health
+    ? 'unknown'
+    : onlineAgents === 0
+    ? 'down'
+    : degraded > 0
+    ? 'warn'
+    : 'ok'
 
-  const barColor = fleetDead
-    ? 'bg-red-500'
-    : fleetWarn
-    ? 'bg-amber-400'
-    : 'bg-emerald-400'
+  const { text: statusColor, bar: barColor, dot: dotColor } = STATUS_STYLE[fleetStatus]
 
   return (
     <>
-      {/* Inject JetBrains Mono */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap');
 
         .atlas-sidebar * { font-family: 'JetBrains Mono', monospace; }
-
-        .atlas-sidebar .nav-item-active::before {
-          content: '';
-          position: absolute;
-          left: 0; top: 50%;
-          transform: translateY(-50%);
-          width: 2px; height: 60%;
-          border-radius: 0 2px 2px 0;
-          background: #F0A500;
-        }
 
         @keyframes atlas-pulse {
           0%, 100% { opacity: 1; }
@@ -205,8 +187,63 @@ export function Sidebar() {
           animation: atlas-scan 3s ease-in-out infinite;
         }
 
-        .atlas-sidebar .group:hover .group-hover-show { opacity: 1; }
-        .atlas-sidebar .group-hover-show { opacity: 0; transition: opacity 0.15s; }
+        /* Icon buttons (header toggle, sign out) */
+        .atlas-sidebar .icon-btn {
+          color: var(--color-text-dim);
+          transition: color 0.15s, background-color 0.15s;
+        }
+        .atlas-sidebar .icon-btn:hover { color: var(--color-text-muted); }
+        .atlas-sidebar .icon-btn:focus-visible {
+          outline: none;
+          box-shadow: inset 0 0 0 1px #F0A500;
+        }
+        .atlas-sidebar .icon-btn-danger:hover { color: #f87171; }
+
+        /* Nav links */
+        .atlas-sidebar .nav-link {
+          position: relative;
+          color: var(--color-text-dim);
+          background: transparent;
+          transition: color 0.15s, background-color 0.15s;
+        }
+        .atlas-sidebar .nav-link:hover:not(.nav-link-active) {
+          color: var(--color-text-muted);
+          background: color-mix(in srgb, var(--color-text) 4%, transparent);
+        }
+        .atlas-sidebar .nav-link-active {
+          color: var(--color-text);
+          background: color-mix(in srgb, #F0A500 7%, transparent);
+        }
+        .atlas-sidebar .nav-link:focus-visible {
+          outline: none;
+          box-shadow: inset 0 0 0 1px #F0A500;
+        }
+
+        /* Collapsed-state label tooltip */
+        .atlas-sidebar .nav-tooltip {
+          position: absolute;
+          left: calc(100% + 8px);
+          top: 50%;
+          transform: translate(-4px, -50%);
+          padding: 4px 8px;
+          font-size: 10.5px;
+          font-weight: 300;
+          letter-spacing: 0.03em;
+          white-space: nowrap;
+          border-radius: 3px;
+          background: var(--color-surface);
+          border: 1px solid var(--color-border);
+          color: var(--color-text);
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.12s ease, transform 0.12s ease;
+          z-index: 50;
+        }
+        .atlas-sidebar .nav-link:hover .nav-tooltip,
+        .atlas-sidebar .nav-link:focus-visible .nav-tooltip {
+          opacity: 1;
+          transform: translate(0, -50%);
+        }
       `}</style>
 
       <aside
@@ -215,93 +252,59 @@ export function Sidebar() {
           'transition-[width] duration-200 ease-in-out',
           sidebarCollapsed ? 'w-[52px]' : 'w-[192px]',
         )}
-        style={{
-          background: 'var(--color-surface)',
-          borderRight: '1px solid var(--color-border)',
-        }}
+        style={{ background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}
       >
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div
-          className="flex h-12 shrink-0 items-center justify-between overflow-hidden"
-          style={{ borderBottom: '1px solid var(--color-border)', padding: '0 14px' }}
+          className={clsx(
+            'flex shrink-0 items-center overflow-hidden',
+            sidebarCollapsed ? 'flex-col gap-2 py-3' : 'h-12 justify-between px-3.5',
+          )}
+          style={{ borderBottom: '1px solid var(--color-border)' }}
         >
-          {!sidebarCollapsed && (
+          {sidebarCollapsed ? (
+            <span className="text-[11px] font-semibold select-none" style={{ color: '#F0A500', letterSpacing: '0.15em' }}>
+              A
+            </span>
+          ) : (
             <div className="flex flex-col gap-px overflow-hidden">
-              <span
-                className="text-[13px] font-semibold tracking-[0.12em] uppercase select-none"
-                style={{ color: '#F0A500', letterSpacing: '0.14em' }}
-              >
+              <span className="text-[13px] font-semibold uppercase select-none" style={{ color: '#F0A500', letterSpacing: '0.14em' }}>
                 ATLAS
               </span>
-              <span
-                className="text-[9px] font-light tracking-[0.3em] uppercase select-none truncate"
-                style={{ color: 'var(--color-text-dim)' }}
-              >
+              <span className="text-[9px] font-light uppercase select-none truncate" style={{ color: 'var(--color-text-dim)', letterSpacing: '0.3em' }}>
                 central server
               </span>
             </div>
           )}
 
-          {sidebarCollapsed && (
-            <span
-              className="mx-auto text-[11px] font-semibold tracking-[0.15em] select-none"
-              style={{ color: '#F0A500' }}
-            >
-              A
-            </span>
-          )}
-
-          {!sidebarCollapsed && (
-            <button
-              onClick={toggleSidebar}
-              className="shrink-0 rounded transition-colors p-1"
-              style={{ color: 'var(--color-text-dim)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-dim)')}
-              aria-label="Collapse sidebar"
-            >
-              <Icon.ChevronLeft />
-            </button>
-          )}
-          {sidebarCollapsed && (
-            <button
-              onClick={toggleSidebar}
-              className="absolute bottom-0 left-0 right-0 flex justify-center py-1 opacity-0 hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--color-text-dim)' }}
-              aria-label="Expand sidebar"
-            >
-              <Icon.ChevronLeft rotated />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="icon-btn shrink-0 rounded p-1"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!sidebarCollapsed}
+          >
+            <Icon.ChevronLeft rotated={sidebarCollapsed} />
+          </button>
         </div>
 
         {/* ── Fleet health ─────────────────────────────────────────────── */}
         {health && (
           <div
             className="shrink-0 overflow-hidden"
-            style={{
-              borderBottom: '1px solid var(--color-border)',
-              padding: sidebarCollapsed ? '10px 14px' : '10px 14px 12px',
-            }}
+            style={{ borderBottom: '1px solid var(--color-border)', padding: sidebarCollapsed ? '10px 14px' : '10px 14px 12px' }}
+            role="status"
+            aria-label={`Fleet: ${onlineAgents} of ${totalAgents} agents online${degraded ? `, ${degraded} degraded` : ''}`}
           >
             {sidebarCollapsed ? (
-              /* Collapsed: just a colored dot */
               <div className="flex justify-center">
-                <span
-                  className={clsx(
-                    'w-2 h-2 rounded-full',
-                    fleetOk ? 'bg-emerald-400 atlas-pulse' : fleetWarn ? 'bg-amber-400' : 'bg-red-400',
-                  )}
-                />
+                <span className={clsx('w-2 h-2 rounded-full', dotColor)} />
               </div>
             ) : (
               <>
                 <div className="flex items-baseline justify-between mb-[7px]">
-                  <span
-                    className="text-[9px] font-medium tracking-[0.25em] uppercase"
-                    style={{ color: 'var(--color-text-dim)' }}
-                  >
+                  <span className="text-[9px] font-medium uppercase" style={{ color: 'var(--color-text-dim)', letterSpacing: '0.25em' }}>
                     Fleet
                   </span>
                   <span className={clsx('text-[11px] font-medium tabular-nums', statusColor)}>
@@ -311,11 +314,7 @@ export function Sidebar() {
                   </span>
                 </div>
 
-                {/* Bar */}
-                <div
-                  className="relative h-[3px] rounded-full overflow-hidden atlas-scan"
-                  style={{ background: 'var(--color-border)' }}
-                >
+                <div className="relative h-[3px] rounded-full overflow-hidden atlas-scan" style={{ background: 'var(--color-border)' }}>
                   <div
                     className={clsx('absolute left-0 top-0 h-full rounded-full transition-[width] duration-700', barColor)}
                     style={{ width: `${onlinePct}%` }}
@@ -324,12 +323,8 @@ export function Sidebar() {
 
                 {degraded > 0 && (
                   <div className="flex items-center justify-between mt-[6px]">
-                    <span className="text-[9px]" style={{ color: 'var(--color-text-dim)' }}>
-                      degraded
-                    </span>
-                    <span className="text-[10px] font-medium text-amber-400 tabular-nums">
-                      {degraded}
-                    </span>
+                    <span className="text-[9px]" style={{ color: 'var(--color-text-dim)' }}>degraded</span>
+                    <span className="text-[10px] font-medium text-amber-400 tabular-nums">{degraded}</span>
                   </div>
                 )}
               </>
@@ -338,97 +333,57 @@ export function Sidebar() {
         )}
 
         {/* ── Navigation ───────────────────────────────────────────────── */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden" style={{ padding: '6px 0' }}>
-
-          {/* Core */}
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden" style={{ padding: '6px 0' }} aria-label="Primary">
           <NavSection>
             {CORE_NAV.map(item => (
-              <NavRow
-                key={item.path}
-                item={item}
-                collapsed={sidebarCollapsed}
-                currentPath={location.pathname}
-              />
+              <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
             ))}
           </NavSection>
 
-          {/* Admin */}
           {isAdmin && (
             <>
               <SectionDivider label="Admin" collapsed={sidebarCollapsed} />
               <NavSection>
                 {ADMIN_NAV.map(item => (
-                  <NavRow
-                    key={item.path}
-                    item={item}
-                    collapsed={sidebarCollapsed}
-                    currentPath={location.pathname}
-                  />
+                  <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
                 ))}
               </NavSection>
             </>
           )}
 
-          {/* Utility */}
           <SectionDivider collapsed={sidebarCollapsed} />
           <NavSection>
             {UTIL_NAV.map(item => (
-              <NavRow
-                key={item.path}
-                item={item}
-                collapsed={sidebarCollapsed}
-                currentPath={location.pathname}
-              />
+              <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
             ))}
           </NavSection>
-
         </nav>
 
         {/* ── Footer ───────────────────────────────────────────────────── */}
-        <div
-          className="shrink-0"
-          style={{ borderTop: '1px solid var(--color-border)' }}
-        >
+        <div className="shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-3 py-3">
-              {/* WS dot */}
               <span
-                className={clsx(
-                  'w-1.5 h-1.5 rounded-full',
-                  wsConnected ? 'bg-emerald-500 atlas-pulse' : 'bg-slate-600',
-                )}
+                className={clsx('w-1.5 h-1.5 rounded-full', wsConnected ? 'bg-emerald-500 atlas-pulse' : 'bg-slate-600')}
+                role="status"
+                aria-label={wsConnected ? 'Connected' : 'Disconnected'}
               />
-              {/* Sign out */}
-              <button
-                onClick={handleLogout}
-                className="transition-colors"
-                style={{ color: 'var(--color-text-dim)' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-dim)')}
-                aria-label="Sign out"
-              >
+              <button type="button" onClick={handleLogout} className="icon-btn icon-btn-danger" aria-label="Sign out">
                 <Icon.SignOut />
               </button>
             </div>
           ) : (
             <div className="px-3.5 py-3 space-y-2">
-              {/* Connection row */}
               <div className="flex items-center gap-2">
                 <span
-                  className={clsx(
-                    'w-1.5 h-1.5 rounded-full shrink-0',
-                    wsConnected ? 'bg-emerald-500 atlas-pulse' : 'bg-slate-600',
-                  )}
+                  className={clsx('w-1.5 h-1.5 rounded-full shrink-0', wsConnected ? 'bg-emerald-500 atlas-pulse' : 'bg-slate-600')}
+                  role="status"
                 />
-                <span
-                  className="text-[10px] font-light"
-                  style={{ color: 'var(--color-text-dim)' }}
-                >
+                <span className="text-[10px] font-light" style={{ color: 'var(--color-text-dim)' }}>
                   {wsConnected ? 'connected' : 'disconnected'}
                 </span>
               </div>
 
-              {/* User + sign out */}
               <div className="flex items-center justify-between">
                 {user && (
                   <span
@@ -440,11 +395,9 @@ export function Sidebar() {
                   </span>
                 )}
                 <button
+                  type="button"
                   onClick={handleLogout}
-                  className="flex items-center gap-1.5 text-[10px] font-light transition-colors"
-                  style={{ color: 'var(--color-text-dim)' }}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-dim)')}
+                  className="icon-btn icon-btn-danger flex items-center gap-1.5 text-[10px] font-light"
                 >
                   <Icon.SignOut />
                   sign out
@@ -462,95 +415,67 @@ export function Sidebar() {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function NavSection({ children }: { children: React.ReactNode }) {
-  return <div>{children}</div>
+  return <ul className="space-y-px">{children}</ul>
 }
 
 function SectionDivider({ label, collapsed }: { label?: string; collapsed: boolean }) {
   if (collapsed) {
     return (
-      <div className="flex justify-center my-2">
+      <div className="flex justify-center my-2" aria-hidden="true">
         <div className="w-4 h-px" style={{ background: 'var(--color-border)' }} />
       </div>
     )
   }
   if (!label) {
-    return <div className="mx-3.5 my-2 h-px" style={{ background: 'var(--color-border)' }} />
+    return <div className="mx-3.5 my-2 h-px" style={{ background: 'var(--color-border)' }} aria-hidden="true" />
   }
   return (
     <div className="flex items-center gap-2.5 px-3.5 my-2">
-      <span
-        className="text-[8px] font-medium tracking-[0.3em] uppercase shrink-0"
-        style={{ color: 'var(--color-text-dim)' }}
-      >
+      <span className="text-[8px] font-medium uppercase shrink-0" style={{ color: 'var(--color-text-dim)', letterSpacing: '0.3em' }}>
         {label}
       </span>
-      <div className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+      <div className="flex-1 h-px" style={{ background: 'var(--color-border)' }} aria-hidden="true" />
     </div>
   )
 }
 
-function NavRow({
-  item,
-  collapsed,
-  currentPath,
-}: {
-  item: NavItem
-  collapsed: boolean
-  currentPath: string
-}) {
-  const active = pathIsActive(item.path, currentPath)
-
+function NavRow({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   return (
-    <NavLink
-      to={item.path}
-      end={item.path === '/'}
-      title={collapsed ? item.label : undefined}
-      className={clsx(
-        'relative flex h-8 items-center transition-colors select-none outline-none',
-        collapsed ? 'justify-center' : 'gap-2.5 px-3.5',
-        active ? 'nav-item-active' : '',
-      )}
-      style={({ isActive: _ }) => ({
-        color: active
-          ? 'var(--color-text)'
-          : 'var(--color-text-dim)',
-        background: active ? 'color-mix(in srgb, #F0A500 7%, transparent)' : 'transparent',
-      })}
-      onMouseEnter={e => {
-        if (!active) {
-          (e.currentTarget as HTMLElement).style.color = 'var(--color-text-muted)'
-          ;(e.currentTarget as HTMLElement).style.background = 'color-mix(in srgb, var(--color-text) 4%, transparent)'
+    <li>
+      <NavLink
+        to={item.path}
+        end={item.path === '/'}
+        aria-label={collapsed ? item.label : undefined}
+        className={({ isActive }) =>
+          clsx(
+            'nav-link flex h-8 items-center rounded-sm outline-none mx-2',
+            collapsed ? 'justify-center' : 'gap-2.5 px-2.5',
+            isActive && 'nav-link-active',
+          )
         }
-      }}
-      onMouseLeave={e => {
-        if (!active) {
-          (e.currentTarget as HTMLElement).style.color = 'var(--color-text-dim)'
-          ;(e.currentTarget as HTMLElement).style.background = 'transparent'
-        }
-      }}
-    >
-      {/* Amber left bar for active */}
-      {active && (
-        <span
-          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
-          style={{ width: 2, height: '55%', background: '#F0A500' }}
-        />
-      )}
-
-      {/* Icon */}
-      <span
-        className="shrink-0 transition-colors"
-        style={{ color: active ? '#F0A500' : 'currentColor' }}
       >
-        {item.icon}
-      </span>
-
-      {/* Label */}
-      {!collapsed && (
-        <span className="text-[11.5px] font-light tracking-wide leading-none">
-          {item.label}
-        </span>
-      )}
-    </NavLink>
+        {({ isActive }) => (
+          <>
+            {isActive && (
+              <span
+                aria-hidden="true"
+                className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
+                style={{ width: 2, height: '55%', background: '#F0A500' }}
+              />
+            )}
+            <span aria-hidden="true" className="shrink-0" style={{ color: isActive ? '#F0A500' : 'currentColor' }}>
+              {item.icon}
+            </span>
+            {collapsed ? (
+              <span className="nav-tooltip" role="tooltip">{item.label}</span>
+            ) : (
+              <span className="text-[11.5px] font-light tracking-wide leading-none truncate">
+                {item.label}
+              </span>
+            )}
+          </>
+        )}
+      </NavLink>
+    </li>
   )
 }
