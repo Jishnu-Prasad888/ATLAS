@@ -18,6 +18,7 @@ pub mod process;
 pub mod ram;
 pub mod storage;
 pub mod systemd;
+pub mod system_inventory;
 pub mod trait_collector;
 
 use anyhow::Result;
@@ -70,6 +71,7 @@ pub fn build_collectors(
     register!(c.network, network::NetworkCollector::new());
     register!(c.process, process::ProcessCollector::new(c.max_processes));
     register!(c.systemd, systemd::SystemdCollector::new());
+    register!(c.system_inventory, system_inventory::SystemInventoryCollector::new(identity.clone()));
 
     if c.docker {
         let collector = match log_engine {
@@ -188,6 +190,7 @@ mod tests {
                 network: true,
                 process: true,
                 systemd: true,
+                system_inventory: true,
                 docker: true,
                 kubernetes: true,
                 temperature: true,
@@ -207,6 +210,7 @@ mod tests {
                 network: false,
                 process: false,
                 systemd: false,
+                system_inventory: false,
                 docker: false,
                 kubernetes: false,
                 temperature: false,

@@ -55,6 +55,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       isAdmin: payload.role === 'administrator',
       accessToken: access,
       refreshToken: refresh,
+      isHydrating: false,
     })
 
     get().scheduleRefresh(payload.exp)
@@ -69,6 +70,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       isAdmin: false,
       accessToken: null,
       refreshToken: null,
+      isHydrating: false,
     })
   },
 

@@ -22,6 +22,7 @@ export type MetricType =
   | 'network'
   | 'process'
   | 'systemd'
+  | 'system_inventory'
   | 'docker'
   | 'kubernetes'
   | 'kernel'
@@ -279,6 +280,26 @@ export interface KernelData {
   cmdline: string
 }
 
+export interface SystemInventoryData {
+  identity?: KernelData
+  cpu_model?: string | null
+  shell?: string | null
+  displays?: {
+    monitors?: number
+    raw?: string
+    err?: string | null
+  }
+  users?: string[]
+  groups?: string[]
+  dns?: Record<string, unknown>
+  hosts?: Record<string, unknown>
+  startup_services?: { services?: string[]; err?: string | null }
+  runtimes?: Record<string, unknown>
+  network_profiles?: { profiles?: string[] }
+  bluetooth?: { paired?: string[]; err?: string | null }
+  battery?: { present?: boolean; capacity_pct?: number; status?: string | null }
+}
+
 export interface MetricConfig {
   agent_id: string
   cpu_enabled: boolean
@@ -287,6 +308,7 @@ export interface MetricConfig {
   network_enabled: boolean
   process_enabled: boolean
   systemd_enabled: boolean
+  system_inventory_enabled: boolean
   docker_enabled: boolean
   kubernetes_enabled: boolean
   temperature_enabled: boolean

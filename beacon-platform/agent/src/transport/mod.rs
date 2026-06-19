@@ -343,6 +343,7 @@ impl WebSocketTransport {
             ("network_enabled", "network"),
             ("process_enabled", "process"),
             ("systemd_enabled", "systemd"),
+            ("system_inventory_enabled", "system_inventory"),
             ("docker_enabled", "docker"),
             ("kubernetes_enabled", "kubernetes"),
             ("temperature_enabled", "temperature"),

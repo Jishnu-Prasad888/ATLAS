@@ -34,7 +34,8 @@ class MetricConfigSerializer(serializers.ModelSerializer):
         fields = [
             "agent_id",
             "cpu_enabled", "ram_enabled", "storage_enabled", "network_enabled",
-            "process_enabled", "systemd_enabled", "docker_enabled", "kubernetes_enabled",
+            "process_enabled", "systemd_enabled", "system_inventory_enabled",
+            "docker_enabled", "kubernetes_enabled",
             "temperature_enabled", "power_enabled",
             "interval_seconds", "retention_days", "updated_at",
         ]

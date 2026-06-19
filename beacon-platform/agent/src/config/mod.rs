@@ -16,6 +16,8 @@ use tokio::sync::RwLock;
 
 pub use validator::ConfigValidator;
 
+fn default_true() -> bool { true }
+
 /// Shared runtime flags that control whether each collector is active.
 /// The Transport updates these when the server pushes a `config_update`.
 /// Collectors check their flag on every `collect()` call.
@@ -32,6 +34,10 @@ pub fn create_collector_flags(config: &AgentConfig) -> CollectorFlags {
     flags.insert("network".to_string(), config.collectors.network);
     flags.insert("process".to_string(), config.collectors.process);
     flags.insert("systemd".to_string(), config.collectors.systemd);
+    flags.insert(
+        "system_inventory".to_string(),
+        config.collectors.system_inventory,
+    );
     flags.insert("docker".to_string(), config.collectors.docker);
     flags.insert("kubernetes".to_string(), config.collectors.kubernetes);
     flags.insert("temperature".to_string(), config.collectors.temperature);
@@ -73,6 +79,8 @@ pub struct CollectorConfig {
     pub network: bool,
     pub process: bool,
     pub systemd: bool,
+    #[serde(default = "default_true")]
+    pub system_inventory: bool,
     pub docker: bool,
     /// Enable k3s / Kubernetes metrics collection
     pub kubernetes: bool,
@@ -139,6 +147,7 @@ impl Default for AgentConfig {
                 network: true,
                 process: true,
                 systemd: true,
+                system_inventory: true,
                 docker: false,
                 kubernetes: false,
                 temperature: true,
@@ -206,6 +215,9 @@ impl AgentConfig {
         }
         if let Some(val) = payload.get("systemd_enabled").and_then(|v| v.as_bool()) {
             self.collectors.systemd = val;
+        }
+        if let Some(val) = payload.get("system_inventory_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.system_inventory = val;
         }
         if let Some(val) = payload.get("docker_enabled").and_then(|v| v.as_bool()) {
             self.collectors.docker = val;

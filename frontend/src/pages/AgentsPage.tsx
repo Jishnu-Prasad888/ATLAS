@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAgents, useAgentHealth, useAgentMutations, useMetricConfig, usePersistedState } from '@/hooks'
+import { useAgents, useAgentHealth, useAgentMutations, useMetricConfig, usePersistedState, useLatestMetrics } from '@/hooks'
 import { telemetryApi } from '@/api'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
@@ -19,8 +19,8 @@ import {
   Toggle,
   SectionHeader,
 } from '@/components/common'
-import { timeAgo, formatTimestamp, validateHostname } from '@/utils'
-import type { Agent, MetricConfig } from '@/types'
+import { timeAgo, formatTimestamp, validateHostname, formatUptime } from '@/utils'
+import type { Agent, MetricConfig, SystemInventoryData, KernelData } from '@/types'
 
 type ConfirmAction =
   | { type: 'delete'; agentId: string; hostname: string }
@@ -193,6 +193,10 @@ function AgentDetail({
 
   const { data: health } = useAgentHealth(agent.agent_id)
   const { data: config } = useMetricConfig(agent.agent_id)
+  const { data: latestMetrics } = useLatestMetrics(agent.agent_id)
+
+  const systemInventory = latestMetrics?.system_inventory?.data as unknown as SystemInventoryData | undefined
+  const kernelIdentity = systemInventory?.identity as KernelData | undefined
 
   const handleRename = () => {
     const err = validateHostname(newHostname)
@@ -284,6 +288,67 @@ function AgentDetail({
         )}
       </div>
 
+      {systemInventory && (
+        <Card>
+          <SectionHeader title="System Inventory" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <KvRow label="CPU Model" value={systemInventory.cpu_model ?? '—'} />
+            <KvRow label="Shell" value={systemInventory.shell ?? '—'} />
+            <KvRow label="Displays" value={systemInventory.displays?.monitors != null ? `${systemInventory.displays?.monitors}` : '—'} />
+            <KvRow label="Battery" value={
+              systemInventory.battery?.present
+                ? `${systemInventory.battery.capacity_pct ?? '—'}% ${systemInventory.battery.status ?? ''}`
+                : 'No battery'
+            } />
+            <KvRow label="Node" value={String(systemInventory.runtimes?.node ?? '—')} />
+            <KvRow label="Python" value={String(systemInventory.runtimes?.python ?? '—')} />
+            <KvRow label="Bun" value={String(systemInventory.runtimes?.bun ?? '—')} />
+            <KvRow label="Deno" value={String(systemInventory.runtimes?.deno ?? '—')} />
+            <KvRow label="Kernel" value={kernelIdentity?.kernel_version ?? '—'} />
+            <KvRow label="Uptime" value={kernelIdentity?.uptime_secs ? formatUptime(kernelIdentity.uptime_secs) : '—'} />
+          </div>
+
+          {(systemInventory.users?.length || systemInventory.groups?.length) && (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] font-mono text-[--color-text]">
+              {systemInventory.users?.length ? (
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-[--color-text-muted] mb-1">Users</p>
+                  <div className="space-y-0.5 max-h-32 overflow-auto">
+                    {systemInventory.users.slice(0, 12).map((u) => <div key={u}>{u}</div>)}
+                  </div>
+                </div>
+              ) : null}
+              {systemInventory.groups?.length ? (
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-[--color-text-muted] mb-1">Groups</p>
+                  <div className="space-y-0.5 max-h-32 overflow-auto">
+                    {systemInventory.groups.slice(0, 12).map((g) => <div key={g}>{g}</div>)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {systemInventory.network_profiles?.profiles?.length ? (
+            <div className="mt-3">
+              <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-[--color-text-muted] mb-1">Wi‑Fi Profiles</p>
+              <div className="flex flex-wrap gap-1 text-[11px] font-mono text-[--color-text]">
+                {systemInventory.network_profiles.profiles.slice(0, 12).map((p) => <Tag key={p}>{p}</Tag>)}
+              </div>
+            </div>
+          ) : null}
+
+          {systemInventory.bluetooth?.paired?.length ? (
+            <div className="mt-3">
+              <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-[--color-text-muted] mb-1">Bluetooth</p>
+              <div className="space-y-0.5 text-[11px] font-mono text-[--color-text]">
+                {systemInventory.bluetooth.paired.slice(0, 8).map((b) => <div key={b}>{b}</div>)}
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      )}
+
       {/* Collector health */}
       {health && Object.keys(health.collectors).length > 0 && (
         <Card>
@@ -358,6 +423,7 @@ function MetricConfigPanel({
     { key: 'network_enabled', label: 'Network' },
     { key: 'process_enabled', label: 'Processes' },
     { key: 'systemd_enabled', label: 'Systemd' },
+    { key: 'system_inventory_enabled', label: 'System Inventory' },
     { key: 'docker_enabled', label: 'Docker' },
     { key: 'kubernetes_enabled', label: 'Kubernetes' },
     { key: 'temperature_enabled', label: 'Temperature' },

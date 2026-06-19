@@ -1,0 +1,16 @@
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ("metrics", "0001_initial"),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name="metricconfig",
+            name="system_inventory_enabled",
+            field=models.BooleanField(default=True),
+        ),
+    ]

@@ -26,6 +26,7 @@ class MetricType(models.TextChoices):
     KERNEL      = "kernel",      "Kernel"
     TEMPERATURE = "temperature", "Temperature"
     POWER       = "power",       "Power"
+    SYSTEM_INVENTORY = "system_inventory", "System Inventory"
 
 
 class Metric(models.Model):
@@ -61,6 +62,7 @@ class MetricConfig(models.Model):
     network_enabled = models.BooleanField(default=True)
     process_enabled = models.BooleanField(default=True)
     systemd_enabled = models.BooleanField(default=True)
+    system_inventory_enabled = models.BooleanField(default=True)
     docker_enabled  = models.BooleanField(default=False)
     kubernetes_enabled = models.BooleanField(default=False)
     temperature_enabled = models.BooleanField(default=True)
@@ -80,6 +82,7 @@ class MetricConfig(models.Model):
             "network":     self.network_enabled,
             "process":     self.process_enabled,
             "systemd":     self.systemd_enabled,
+            "system_inventory": self.system_inventory_enabled,
             "docker":      self.docker_enabled,
             "kubernetes":  self.kubernetes_enabled,
             "temperature": self.temperature_enabled,
