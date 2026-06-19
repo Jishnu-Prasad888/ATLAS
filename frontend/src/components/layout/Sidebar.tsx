@@ -183,7 +183,7 @@ export function Sidebar() {
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, #F0A500 50%, transparent) 50%, transparent 100%);
+          background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-dim) 35%, transparent) 50%, transparent 100%);
           animation: atlas-scan 3s ease-in-out infinite;
         }
 
@@ -192,10 +192,10 @@ export function Sidebar() {
           color: var(--color-text-dim);
           transition: color 0.15s, background-color 0.15s;
         }
-        .atlas-sidebar .icon-btn:hover { color: var(--color-text-muted); }
+        .atlas-sidebar .icon-btn:hover { color: var(--color-text); background: var(--color-surface-2); }
         .atlas-sidebar .icon-btn:focus-visible {
           outline: none;
-          box-shadow: inset 0 0 0 1px #F0A500;
+          box-shadow: inset 0 0 0 1px var(--color-border);
         }
         .atlas-sidebar .icon-btn-danger:hover { color: #f87171; }
 
@@ -204,19 +204,20 @@ export function Sidebar() {
           position: relative;
           color: var(--color-text-dim);
           background: transparent;
-          transition: color 0.15s, background-color 0.15s;
+          transition: color 0.15s, background-color 0.15s, box-shadow 0.15s;
         }
         .atlas-sidebar .nav-link:hover:not(.nav-link-active) {
-          color: var(--color-text-muted);
-          background: color-mix(in srgb, var(--color-text) 4%, transparent);
+          color: var(--color-text);
+          background: var(--color-surface-2);
         }
         .atlas-sidebar .nav-link-active {
           color: var(--color-text);
-          background: color-mix(in srgb, #F0A500 7%, transparent);
+          background: var(--color-surface-2);
+          box-shadow: inset 0 0 0 1px var(--color-border);
         }
         .atlas-sidebar .nav-link:focus-visible {
           outline: none;
-          box-shadow: inset 0 0 0 1px #F0A500;
+          box-shadow: inset 0 0 0 1px var(--color-border);
         }
 
         /* Collapsed-state label tooltip */
@@ -230,8 +231,8 @@ export function Sidebar() {
           font-weight: 300;
           letter-spacing: 0.03em;
           white-space: nowrap;
-          border-radius: 3px;
-          background: var(--color-surface);
+          border-radius: 4px;
+          background: var(--color-surface-2);
           border: 1px solid var(--color-border);
           color: var(--color-text);
           opacity: 0;
@@ -252,7 +253,10 @@ export function Sidebar() {
           'transition-[width] duration-200 ease-in-out',
           sidebarCollapsed ? 'w-[52px]' : 'w-[192px]',
         )}
-        style={{ background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}
+        style={{
+          backgroundColor: 'var(--color-surface)',
+          borderRight: '1px solid var(--color-border)',
+        }}
       >
 
         {/* ── Header ──────────────────────────────────────────────────── */}
@@ -264,12 +268,12 @@ export function Sidebar() {
           style={{ borderBottom: '1px solid var(--color-border)' }}
         >
           {sidebarCollapsed ? (
-            <span className="text-[11px] font-semibold select-none" style={{ color: '#F0A500', letterSpacing: '0.15em' }}>
+            <span className="text-[11px] font-semibold select-none" style={{ color: 'var(--color-text)', letterSpacing: '0.15em' }}>
               A
             </span>
           ) : (
             <div className="flex flex-col gap-px overflow-hidden">
-              <span className="text-[13px] font-semibold uppercase select-none" style={{ color: '#F0A500', letterSpacing: '0.14em' }}>
+              <span className="text-[13px] font-semibold uppercase select-none" style={{ color: 'var(--color-text)', letterSpacing: '0.14em' }}>
                 ATLAS
               </span>
               <span className="text-[9px] font-light uppercase select-none truncate" style={{ color: 'var(--color-text-dim)', letterSpacing: '0.3em' }}>
@@ -293,7 +297,7 @@ export function Sidebar() {
         {health && (
           <div
             className="shrink-0 overflow-hidden"
-            style={{ borderBottom: '1px solid var(--color-border)', padding: sidebarCollapsed ? '10px 14px' : '10px 14px 12px' }}
+            style={{ borderBottom: '1px solid var(--color-border)', padding: sidebarCollapsed ? '10px 14px' : '12px 14px' }}
             role="status"
             aria-label={`Fleet: ${onlineAgents} of ${totalAgents} agents online${degraded ? `, ${degraded} degraded` : ''}`}
           >
@@ -302,9 +306,9 @@ export function Sidebar() {
                 <span className={clsx('w-2 h-2 rounded-full', dotColor)} />
               </div>
             ) : (
-              <>
-                <div className="flex items-baseline justify-between mb-[7px]">
-                  <span className="text-[9px] font-medium uppercase" style={{ color: 'var(--color-text-dim)', letterSpacing: '0.25em' }}>
+              <div className="rounded-md border border-[--color-border] bg-[--color-surface-2] px-2.5 py-2">
+                <div className="flex items-baseline justify-between mb-1">
+                  <span className="text-[9px] font-medium uppercase" style={{ color: 'var(--color-text-dim)', letterSpacing: '0.2em' }}>
                     Fleet
                   </span>
                   <span className={clsx('text-[11px] font-medium tabular-nums', statusColor)}>
@@ -314,20 +318,18 @@ export function Sidebar() {
                   </span>
                 </div>
 
-                <div className="relative h-[3px] rounded-full overflow-hidden atlas-scan" style={{ background: 'var(--color-border)' }}>
+                <div className="relative h-[4px] rounded-full overflow-hidden atlas-scan" style={{ background: 'var(--color-border)' }}>
                   <div
                     className={clsx('absolute left-0 top-0 h-full rounded-full transition-[width] duration-700', barColor)}
                     style={{ width: `${onlinePct}%` }}
                   />
                 </div>
 
-                {degraded > 0 && (
-                  <div className="flex items-center justify-between mt-[6px]">
-                    <span className="text-[9px]" style={{ color: 'var(--color-text-dim)' }}>degraded</span>
-                    <span className="text-[10px] font-medium text-amber-400 tabular-nums">{degraded}</span>
-                  </div>
-                )}
-              </>
+                <div className="flex items-center justify-between mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                  <span>{fleetStatus === 'ok' ? 'stable' : fleetStatus === 'warn' ? 'attention' : fleetStatus === 'down' ? 'offline' : 'checking'}</span>
+                  {degraded > 0 && <span className="tabular-nums" style={{ color: 'var(--color-text)' }}>{degraded}</span>}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -460,10 +462,10 @@ function NavRow({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
               <span
                 aria-hidden="true"
                 className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
-                style={{ width: 2, height: '55%', background: '#F0A500' }}
+                style={{ width: 2, height: '55%', background: 'var(--color-border)' }}
               />
             )}
-            <span aria-hidden="true" className="shrink-0" style={{ color: isActive ? '#F0A500' : 'currentColor' }}>
+            <span aria-hidden="true" className="shrink-0" style={{ color: isActive ? 'var(--color-text)' : 'currentColor' }}>
               {item.icon}
             </span>
             {collapsed ? (
