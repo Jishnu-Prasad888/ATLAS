@@ -231,52 +231,51 @@ fn runtime_versions() -> Value {
 
 fn detect_node_version() -> Option<String> {
     // 1) Direct PATH lookup
-    if let Ok(out) = Command::new("node").arg("--version").output() {
-        if out.status.success() {
-            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !v.is_empty() {
-                return Some(v);
-            }
-        }
+    if let Some(v) = try_node_at("node") {
+        return Some(v);
     }
 
-    // 2) Login shell — catches nvm / fnm / nodenv etc.
-    if let Ok(out) = Command::new("bash").args(["-lc"]).arg("node --version 2>/dev/null").output() {
-        if out.status.success() {
-            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !v.is_empty() {
-                return Some(v);
-            }
-        }
-    }
-    if let Ok(out) = Command::new("sh").args(["-c"]).arg("node --version 2>/dev/null").output() {
-        if out.status.success() {
-            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !v.is_empty() {
-                return Some(v);
-            }
-        }
-    }
-
-    // 3) Common absolute paths
+    // 2) Common absolute paths
     for path in ["/usr/local/bin/node", "/usr/bin/node", "/snap/bin/node"] {
-        if let Ok(out) = Command::new(path).arg("--version").output() {
-            if out.status.success() {
-                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !v.is_empty() {
-                    return Some(v);
-                }
-            }
+        if let Some(v) = try_node_at(path) {
+            return Some(v);
         }
     }
 
-    // 4) nvm installations
-    if let Some(nvm_node) = find_nvm_node() {
-        if let Ok(out) = Command::new(&nvm_node).arg("--version").output() {
-            if out.status.success() {
-                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !v.is_empty() {
-                    return Some(v);
+    // 3) User-scoped version managers (respect the invoking user even under sudo)
+    if let Some(home) = home_dir() {
+        if let Some(v) = find_nvm_node_in(&home).and_then(|p| try_node_at(&p)) {
+            return Some(v);
+        }
+        if let Some(v) = find_fnm_node_in(&home).and_then(|p| try_node_at(&p)) {
+            return Some(v);
+        }
+        let volta = home.join(".volta/bin/node");
+        if volta.exists() {
+            if let Some(v) = try_node_at(&volta.to_string_lossy()) {
+                return Some(v);
+            }
+        }
+        if let Some(v) = find_asdf_node_in(&home).and_then(|p| try_node_at(&p)) {
+            return Some(v);
+        }
+    }
+
+    // 4) Login shell as the original user (if invoked via sudo)
+    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        if !sudo_user.is_empty() && sudo_user != "root" {
+            if let Ok(out) = Command::new("sudo")
+                .args(["-u", &sudo_user, "-i", "--", "bash", "-lc", "command -v node && node --version"])
+                .output()
+            {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    if let Some(last) = text.lines().last() {
+                        let v = last.trim();
+                        if !v.is_empty() {
+                            return Some(v.to_string());
+                        }
+                    }
                 }
             }
         }
@@ -385,13 +384,57 @@ fn run_version_cmds(cmds: &[&[&'static str]]) -> Option<String> {
     None
 }
 
-fn find_nvm_node() -> Option<String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
-    let base = Path::new(&home).join(".nvm/versions/node");
+fn try_node_at(path: impl AsRef<str>) -> Option<String> {
+    let out = Command::new(path.as_ref()).arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if v.is_empty() { None } else { Some(v) }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        if !sudo_user.is_empty() && sudo_user != "root" {
+            if let Some(home) = home_from_passwd(&sudo_user) {
+                if home.exists() {
+                    return Some(home);
+                }
+            }
+        }
+    }
+
+    std::env::var("HOME").ok().map(PathBuf::from).filter(|p| p.exists())
+}
+
+fn home_from_passwd(user: &str) -> Option<PathBuf> {
+    let passwd = fs::read_to_string("/etc/passwd").ok()?;
+    for line in passwd.lines() {
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 6 && parts[0] == user {
+            return Some(PathBuf::from(parts[5]));
+        }
+    }
+    None
+}
+
+fn find_nvm_node_in(home: &Path) -> Option<String> {
+    latest_node_bin(&home.join(".nvm/versions/node"))
+}
+
+fn find_fnm_node_in(home: &Path) -> Option<String> {
+    latest_node_bin(&home.join(".fnm/node-versions"))
+}
+
+fn find_asdf_node_in(home: &Path) -> Option<String> {
+    latest_node_bin(&home.join(".asdf/installs/nodejs"))
+}
+
+fn latest_node_bin(base: &Path) -> Option<String> {
     if !base.exists() {
         return None;
     }
-    let mut versions: Vec<PathBuf> = fs::read_dir(&base)
+    let mut versions: Vec<PathBuf> = fs::read_dir(base)
         .ok()?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -403,6 +446,10 @@ fn find_nvm_node() -> Option<String> {
         let candidate = v.join("bin/node");
         if candidate.exists() {
             return Some(candidate.to_string_lossy().into());
+        }
+        let alt = v.join("installation/bin/node");
+        if alt.exists() {
+            return Some(alt.to_string_lossy().into());
         }
     }
     None
