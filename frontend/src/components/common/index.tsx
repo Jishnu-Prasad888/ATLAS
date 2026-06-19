@@ -1,10 +1,36 @@
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import type { AgentStatus, CollectorStatus, LogSeverity } from '@/types'
+import { useUiStore } from '@/store/uiStore'
+import logoDark from '@/assets/logo-dark-theme.png'
+import logoLight from '@/assets/logo-light-theme.png'
 import {
   agentStatusVariant,
   collectorStatusVariant,
 } from '@/utils'
+
+// ─── Logo ──────────────────────────────────────────────────────────────────────
+
+type BrandLogoProps = {
+  className?: string
+  height?: number
+  alt?: string
+}
+
+export function BrandLogo({ className, height = 32, alt = 'ATLAS logo' }: BrandLogoProps) {
+  const theme = useUiStore((s) => s.theme)
+  const src = theme === 'light' ? logoLight : logoDark
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={clsx('block select-none', className)}
+      style={{ height, width: 'auto' }}
+      loading="lazy"
+    />
+  )
+}
 
 // ─── Button ───────────────────────────────────────────────────────────────────
 
