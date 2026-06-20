@@ -1,9 +1,10 @@
 import React from 'react'
 import { View, Text } from 'react-native'
+import { useTheme } from '@/theme'
 
 export type TabId =
   | 'dashboard' | 'agents' | 'metrics' | 'logs'
-  | 'health' | 'operations' | 'audit' | 'users' | 'settings'
+  | 'health' | 'operations' | 'audit' | 'users' | 'settings' | 'config'
 
 export interface TabDef {
   id: TabId
@@ -14,6 +15,7 @@ export interface TabDef {
 }
 
 export function AppHeader({ tab }: { tab: TabDef }) {
+  const { palette: c } = useTheme()
   const accentMap: Record<string, string> = {
     dashboard: '#8b5cf6',
     agents: '#22c55e',
@@ -23,6 +25,7 @@ export function AppHeader({ tab }: { tab: TabDef }) {
     operations: '#06b6d4',
     audit: '#eab308',
     users: '#ec4899',
+    config: '#f59e0b',
     settings: '#64748b',
   }
 
@@ -35,9 +38,9 @@ export function AppHeader({ tab }: { tab: TabDef }) {
         paddingHorizontal: 18,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#111418',
+        backgroundColor: c.surface,
         borderBottomWidth: 1,
-        borderBottomColor: '#1f2937',
+        borderBottomColor: c.border,
       }}
     >
       <View
@@ -45,9 +48,9 @@ export function AppHeader({ tab }: { tab: TabDef }) {
           width: 42,
           height: 42,
           borderRadius: 14,
-          backgroundColor: '#1a2028',
+          backgroundColor: c.surface2,
           borderWidth: 1,
-          borderColor: '#2b3441',
+          borderColor: c.border,
           alignItems: 'center',
           justifyContent: 'center',
           marginRight: 14,
@@ -66,7 +69,7 @@ export function AppHeader({ tab }: { tab: TabDef }) {
       <View style={{ flex: 1 }}>
         <Text
           style={{
-            color: '#f8fafc',
+            color: c.text,
             fontSize: 18,
             fontWeight: '700',
             letterSpacing: -0.4,
@@ -77,7 +80,7 @@ export function AppHeader({ tab }: { tab: TabDef }) {
 
         <Text
           style={{
-            color: '#64748b',
+            color: c.textMuted,
             fontSize: 12,
             marginTop: 1,
           }}

@@ -11,6 +11,7 @@ import { resetApiClient } from '@/api/client'
 import { authApi } from '@/api/endpoints'
 import { AppSettings } from '@/types'
 import { Card, SectionHeader, MonoText, Divider } from '@/components/common'
+import { useTheme } from '@/theme'
 
 function SettingField({
   label, value, onChangeText, placeholder, secureTextEntry = false,
@@ -24,10 +25,11 @@ function SettingField({
   hint?: string
   keyboard?: 'default' | 'url' | 'email-address'
 }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ marginBottom: 14 }}>
       <Text style={{
-        fontSize: 10, color: '#5a6878', fontFamily: 'SpaceMono-Regular',
+        fontSize: 10, color: c.textMuted, fontFamily: 'SpaceMono-Regular',
         textTransform: 'uppercase', letterSpacing: 1, marginBottom: 5,
       }}>
         {label}
@@ -42,13 +44,13 @@ function SettingField({
         autoCapitalize="none"
         autoCorrect={false}
         style={{
-          backgroundColor: '#111418', borderWidth: 1, borderColor: '#1e252e',
-          borderRadius: 8, padding: 10, color: '#d4dae3',
+          backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder,
+          borderRadius: 8, padding: 10, color: c.text,
           fontSize: 12, fontFamily: 'SpaceMono-Regular',
         }}
       />
       {hint && (
-        <Text style={{ fontSize: 9, color: '#3a4555', fontFamily: 'SpaceMono-Regular', marginTop: 4 }}>
+        <Text style={{ fontSize: 9, color: c.textMuted, fontFamily: 'SpaceMono-Regular', marginTop: 4 }}>
           {hint}
         </Text>
       )}
@@ -59,6 +61,7 @@ function SettingField({
 export function SettingsScreen() {
   const { settings, save, reset } = useSettingsStore()
   const { user, role, logout } = useAuthStore()
+  const { palette: c, mode, setMode, resolvedMode } = useTheme()
 
   const [form, setForm] = useState<AppSettings>(settings)
   const [dirty, setDirty] = useState(false)
@@ -151,7 +154,7 @@ export function SettingsScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#0b0d0f' }}
+      style={{ flex: 1, backgroundColor: c.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={{ flex: 1 }}>
@@ -163,20 +166,20 @@ export function SettingsScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <View style={{
               width: 44, height: 44, borderRadius: 22,
-              backgroundColor: '#1e3a5f', alignItems: 'center', justifyContent: 'center',
-              borderWidth: 1, borderColor: '#2a3340',
+              backgroundColor: c.surface2, alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: c.border,
             }}>
-              <MonoText size={18} color="#3b82f6">{user?.username?.[0]?.toUpperCase() ?? '?'}</MonoText>
+              <MonoText size={18} color={c.primary}>{user?.username?.[0]?.toUpperCase() ?? '?'}</MonoText>
             </View>
             <View style={{ flex: 1 }}>
               <MonoText size={15} style={{ fontWeight: '700' }}>{user?.username ?? '—'}</MonoText>
-              <MonoText size={11} color="#5a6878">{user?.email ?? ''}</MonoText>
+              <MonoText size={11} color={c.textMuted}>{user?.email ?? ''}</MonoText>
               <View style={{
                 marginTop: 4, alignSelf: 'flex-start',
-                backgroundColor: '#1e2e42', borderRadius: 20,
+                backgroundColor: c.chipBg, borderRadius: 20,
                 paddingHorizontal: 8, paddingVertical: 2,
               }}>
-                <MonoText size={10} color="#3b82f6">{role ?? 'unknown'}</MonoText>
+                <MonoText size={10} color={c.primary}>{role ?? 'unknown'}</MonoText>
               </View>
             </View>
           </View>
@@ -217,24 +220,55 @@ export function SettingsScreen() {
               onPress={handleSave}
               disabled={!dirty || saving}
               style={{
-                flex: 1, backgroundColor: dirty ? '#3b82f6' : '#1e252e',
+                flex: 1, backgroundColor: dirty ? c.primary : c.border,
                 borderRadius: 8, padding: 12, alignItems: 'center',
               }}
             >
-              <MonoText size={13} color={dirty ? '#fff' : '#3a4555'}>
+              <MonoText size={13} color={dirty ? '#fff' : c.textMuted}>
                 {saving ? 'Saving…' : 'Save'}
               </MonoText>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleReset}
               style={{
-                borderWidth: 1, borderColor: '#1e252e', borderRadius: 8,
+                borderWidth: 1, borderColor: c.border, borderRadius: 8,
                 padding: 12, paddingHorizontal: 18, alignItems: 'center',
               }}
             >
-              <MonoText size={13} color="#5a6878">Reset</MonoText>
+              <MonoText size={13} color={c.textMuted}>Reset</MonoText>
             </TouchableOpacity>
           </View>
+        </Card>
+
+        <Card>
+          <SectionHeader title="Theme" />
+          <MonoText size={11} color={c.textMuted} style={{ marginBottom: 10 }}>Switch between light, dark, or follow system.</MonoText>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {(['light', 'dark', 'system'] as const).map(m => {
+              const active = mode === m
+              const label = m === 'system' ? 'System' : m.charAt(0).toUpperCase() + m.slice(1)
+              return (
+                <TouchableOpacity
+                  key={m}
+                  onPress={() => { setMode(m); Haptics.selectionAsync() }}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: active ? c.primary : c.border,
+                    backgroundColor: active ? c.primary + '22' : c.surface2,
+                    alignItems: 'center',
+                  }}
+                >
+                  <MonoText size={12} color={active ? c.primary : c.text}>{label}</MonoText>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+          <MonoText size={10} color={c.textMuted} style={{ marginTop: 8 }}>
+            Active: {resolvedMode}
+          </MonoText>
         </Card>
 
         {/* Change password */}
@@ -258,11 +292,11 @@ export function SettingsScreen() {
             onPress={handleChangePassword}
             disabled={changingPwd}
             style={{
-              backgroundColor: '#181c22', borderWidth: 1, borderColor: '#2a3340',
+              backgroundColor: c.surface2, borderWidth: 1, borderColor: c.border,
               borderRadius: 8, padding: 12, alignItems: 'center', marginTop: 2,
             }}
           >
-            <MonoText size={13} color="#d4dae3">
+            <MonoText size={13} color={c.text}>
               {changingPwd ? 'Updating…' : 'Update Password'}
             </MonoText>
           </TouchableOpacity>
@@ -279,8 +313,8 @@ export function SettingsScreen() {
               ['WS Path', settings.wsPath],
             ].map(([k, v]) => (
               <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <MonoText size={11} color="#5a6878">{k}</MonoText>
-                <MonoText size={11} color="#3a4555">{v}</MonoText>
+                <MonoText size={11} color={c.textMuted}>{k}</MonoText>
+                <MonoText size={11} color={c.textMuted}>{v}</MonoText>
               </View>
             ))}
           </View>
@@ -290,11 +324,11 @@ export function SettingsScreen() {
         <TouchableOpacity
           onPress={handleLogout}
           style={{
-            borderWidth: 1, borderColor: '#ef444430', borderRadius: 10,
-            padding: 14, alignItems: 'center', backgroundColor: '#2a0f0f',
+            borderWidth: 1, borderColor: c.danger + '30', borderRadius: 10,
+            padding: 14, alignItems: 'center', backgroundColor: c.danger + '15',
           }}
         >
-          <MonoText size={14} color="#ef4444">Sign Out</MonoText>
+          <MonoText size={14} color={c.danger}>Sign Out</MonoText>
         </TouchableOpacity>
       </ScrollView>
       </View>

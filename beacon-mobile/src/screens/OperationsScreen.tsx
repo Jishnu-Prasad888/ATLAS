@@ -13,6 +13,7 @@ import {
   Card, SectionHeader, MonoText, LoadingState, EmptyState, Badge, StatusDot,
 } from '@/components/common'
 import { statusColor, severityColor, timeAgo, formatTs, formatBytes, formatPct } from '@/utils/format'
+import { useTheme } from '@/theme'
 
 const DOCKER_SOURCES = new Set(['docker', 'docker_engine'])
 const K8S_SOURCES = new Set(['kubernetes', 'k3s_engine'])
@@ -152,6 +153,7 @@ export function OperationsScreen() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [logFilter, setLogFilter] = useState<'all' | 'docker' | 'k8s'>('all')
   const [refreshing, setRefreshing] = useState(false)
+  const { palette: c } = useTheme()
 
   const agentsQ = useQuery({
     queryKey: ['ops-agents'],
@@ -167,6 +169,7 @@ export function OperationsScreen() {
     queryFn: () => telemetryApi.latest(activeAgentId!).then(r => r.data),
     enabled: !!activeAgentId,
     refetchInterval: 15_000,
+    staleTime: 10_000,
   })
 
   const logsQ = useQuery({
@@ -174,6 +177,7 @@ export function OperationsScreen() {
     queryFn: () => logsApi.list({ agent_id: activeAgentId ?? undefined, limit: 200 }).then(r => r.data),
     enabled: !!activeAgentId,
     refetchInterval: 15_000,
+    staleTime: 10_000,
   })
 
   const dockerMetric = metricsQ.data?.docker as Metric | undefined
@@ -206,7 +210,7 @@ export function OperationsScreen() {
   }, [qc, activeAgentId, logFilter])
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}
         refreshControl={
@@ -217,18 +221,18 @@ export function OperationsScreen() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View>
             <MonoText size={16} style={{ fontWeight: '700' }}>operations</MonoText>
-            <MonoText size={11} color="#5a6878">Docker & Kubernetes</MonoText>
+            <MonoText size={11} color={c.textMuted}>Docker & Kubernetes</MonoText>
           </View>
           <TouchableOpacity
             onPress={handleRefresh}
             style={{
               paddingHorizontal: 12, paddingVertical: 8,
-              borderRadius: 8, borderWidth: 1, borderColor: '#1e252e',
+              borderRadius: 8, borderWidth: 1, borderColor: c.border,
               flexDirection: 'row', alignItems: 'center', gap: 6,
             }}
           >
-            <Text style={{ color: '#d4dae3', fontSize: 14 }}>⟳</Text>
-            <MonoText size={11} color="#d4dae3">Refresh</MonoText>
+            <Text style={{ color: c.text, fontSize: 14 }}>⟳</Text>
+            <MonoText size={11} color={c.text}>Refresh</MonoText>
           </TouchableOpacity>
         </View>
 
@@ -275,11 +279,11 @@ export function OperationsScreen() {
                     style={{
                       paddingHorizontal: 10, paddingVertical: 5,
                       borderRadius: 16, borderWidth: 1,
-                      borderColor: active ? '#f59e0b' : '#1e252e',
-                      backgroundColor: active ? '#f59e0b22' : 'transparent',
+                      borderColor: active ? c.warning : c.border,
+                      backgroundColor: active ? c.warning + '22' : 'transparent',
                     }}
                   >
-                    <MonoText size={10} color={active ? '#f59e0b' : '#5a6878'} style={{ textTransform: 'uppercase' }}>{f}</MonoText>
+                    <MonoText size={10} color={active ? c.warning : c.textMuted} style={{ textTransform: 'uppercase' }}>{f}</MonoText>
                   </TouchableOpacity>
                 )
               })}

@@ -7,6 +7,7 @@ import {
 } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useTheme } from '@/theme'
 
 export interface BottomTabItem<T extends string = string> {
   id: T
@@ -26,6 +27,7 @@ export function BottomTabBar<T extends string = string>({
   onSelect,
 }: BottomTabBarProps<T>) {
   const insets = useSafeAreaInsets()
+  const { palette: c } = useTheme()
   const [containerWidth, setContainerWidth] = React.useState(0)
   const [contentWidth, setContentWidth] = React.useState(0)
   const [scrollX, setScrollX] = React.useState(0)
@@ -49,7 +51,7 @@ export function BottomTabBar<T extends string = string>({
   return (
     <View
       style={{
-        backgroundColor: '#0B0F14',
+        backgroundColor: c.bg,
         paddingTop: 4,
         paddingBottom: Math.max(insets.bottom + 10, 0),
       }}
@@ -57,7 +59,7 @@ export function BottomTabBar<T extends string = string>({
       <View
         style={{
           marginHorizontal: 4,
-          backgroundColor: '#141A22',
+          backgroundColor: c.surface,
           borderRadius: 24,
           paddingVertical: 4,
           position: 'relative',
@@ -123,7 +125,7 @@ export function BottomTabBar<T extends string = string>({
                     paddingVertical: 6,
                     borderRadius: 14,
                     backgroundColor: isActive
-                      ? '#2563EB'
+                      ? c.primary
                       : 'transparent',
                   }}
                 >
@@ -132,7 +134,7 @@ export function BottomTabBar<T extends string = string>({
                       fontSize: 16,
                       color: isActive
                         ? '#FFFFFF'
-                        : '#7B8794',
+                        : c.textMuted,
                     }}
                   >
                     {tab.icon}
@@ -147,7 +149,7 @@ export function BottomTabBar<T extends string = string>({
                       fontWeight: '500',
                       color: isActive
                         ? '#FFFFFF'
-                        : '#7B8794',
+                        : c.textMuted,
                       textAlign: 'center',
                     }}
                   >
@@ -169,7 +171,7 @@ export function BottomTabBar<T extends string = string>({
               bottom: 2,
               height: 2,
               borderRadius: 1,
-              backgroundColor: 'rgba(255,255,255,0.16)',
+              backgroundColor: c.border,
               overflow: 'hidden',
             }}
           >
@@ -181,7 +183,7 @@ export function BottomTabBar<T extends string = string>({
                 bottom: 0,
                 width: indicatorWidth,
                 borderRadius: 1,
-                backgroundColor: '#ECEFF4',
+                backgroundColor: c.textDim,
                 transform: [
                   {
                     translateX: indicatorTranslate,

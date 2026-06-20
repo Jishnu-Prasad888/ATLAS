@@ -1,6 +1,7 @@
 import React from 'react'
 import { View, Text, ActivityIndicator, TouchableOpacity, ViewStyle } from 'react-native'
 import { clamp } from '@/utils/format'
+import { useTheme } from '@/theme'
 
 // ─── StatusDot ────────────────────────────────────────────────────────────────
 
@@ -48,8 +49,9 @@ interface MetricBarProps {
 }
 export function MetricBar({ value, color = '#3b82f6', height = 3, style }: MetricBarProps) {
   const pct = clamp(value, 0, 100)
+  const { palette: c } = useTheme()
   return (
-    <View style={[{ height, backgroundColor: '#1e252e', borderRadius: 999, overflow: 'hidden' }, style]}>
+    <View style={[{ height, backgroundColor: c.border, borderRadius: 999, overflow: 'hidden' }, style]}>
       <View
         style={{
           position: 'absolute',
@@ -71,15 +73,16 @@ interface CardProps {
   onPress?: () => void
 }
 export function Card({ children, style, onPress }: CardProps) {
+  const { palette: c } = useTheme()
   if (onPress) {
     return (
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.7}
         style={[{
-          backgroundColor: '#111418',
+          backgroundColor: c.surface,
           borderWidth: 1,
-          borderColor: '#1e252e',
+          borderColor: c.border,
           borderRadius: 10,
           padding: 14,
         }, style]}
@@ -91,9 +94,9 @@ export function Card({ children, style, onPress }: CardProps) {
   return (
     <View
       style={[{
-        backgroundColor: '#111418',
+        backgroundColor: c.surface,
         borderWidth: 1,
-        borderColor: '#1e252e',
+        borderColor: c.border,
         borderRadius: 10,
         padding: 14,
       }, style]}
@@ -112,20 +115,21 @@ interface SectionHeaderProps {
   color?: string
 }
 export function SectionHeader({ title, count, right, color = '#3a4555' }: SectionHeaderProps) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
       <Text style={{
-        fontSize: 10, color, fontFamily: 'SpaceMono-Regular',
+        fontSize: 10, color: color || c.textMuted, fontFamily: 'SpaceMono-Regular',
         textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700',
       }}>
         {title}
       </Text>
       {count != null && (
         <View style={{
-          marginLeft: 8, backgroundColor: '#181c22', borderWidth: 1,
-          borderColor: '#1e252e', borderRadius: 20, paddingHorizontal: 6, paddingVertical: 1,
+          marginLeft: 8, backgroundColor: c.surface2, borderWidth: 1,
+          borderColor: c.border, borderRadius: 20, paddingHorizontal: 6, paddingVertical: 1,
         }}>
-          <Text style={{ fontSize: 9, color: '#3a4555', fontFamily: 'SpaceMono-Regular' }}>{count}</Text>
+          <Text style={{ fontSize: 9, color: c.textMuted, fontFamily: 'SpaceMono-Regular' }}>{count}</Text>
         </View>
       )}
       {right && <View style={{ marginLeft: 'auto' }}>{right}</View>}
@@ -136,10 +140,11 @@ export function SectionHeader({ title, count, right, color = '#3a4555' }: Sectio
 // ─── LoadingState ─────────────────────────────────────────────────────────────
 
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-      <ActivityIndicator color="#3b82f6" />
-      <Text style={{ color: '#5a6878', fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>{label}</Text>
+      <ActivityIndicator color={c.primary} />
+      <Text style={{ color: c.textMuted, fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>{label}</Text>
     </View>
   )
 }
@@ -147,10 +152,11 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 // ─── EmptyState ───────────────────────────────────────────────────────────────
 
 export function EmptyState({ label = 'No data', icon = '○' }: { label?: string; icon?: string }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 32 }}>
-      <Text style={{ fontSize: 28, color: '#3a4555' }}>{icon}</Text>
-      <Text style={{ color: '#5a6878', fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>{label}</Text>
+      <Text style={{ fontSize: 28, color: c.textMuted }}>{icon}</Text>
+      <Text style={{ color: c.textMuted, fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>{label}</Text>
     </View>
   )
 }
@@ -158,10 +164,11 @@ export function EmptyState({ label = 'No data', icon = '○' }: { label?: string
 // ─── ErrorState ───────────────────────────────────────────────────────────────
 
 export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
-      <Text style={{ fontSize: 24, color: '#ef4444' }}>⚠</Text>
-      <Text style={{ color: '#ef4444', fontSize: 12, fontFamily: 'SpaceMono-Regular', textAlign: 'center' }}>
+      <Text style={{ fontSize: 24, color: c.danger }}>⚠</Text>
+      <Text style={{ color: c.danger, fontSize: 12, fontFamily: 'SpaceMono-Regular', textAlign: 'center' }}>
         {message || 'Something went wrong'}
       </Text>
       {onRetry && (
@@ -169,11 +176,11 @@ export function ErrorState({ message, onRetry }: { message?: string; onRetry?: (
           onPress={onRetry}
           style={{
             marginTop: 4,
-            borderWidth: 1, borderColor: '#2a3340', borderRadius: 8,
+            borderWidth: 1, borderColor: c.border, borderRadius: 8,
             paddingHorizontal: 16, paddingVertical: 8,
           }}
         >
-          <Text style={{ color: '#d4dae3', fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>Retry</Text>
+          <Text style={{ color: c.text, fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>Retry</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -188,9 +195,10 @@ interface MonoTextProps {
   color?: string
   style?: object
 }
-export function MonoText({ children, size = 12, color = '#d4dae3', style }: MonoTextProps) {
+export function MonoText({ children, size = 12, color, style }: MonoTextProps) {
+  const { palette: c } = useTheme()
   return (
-    <Text style={[{ fontSize: size, color, fontFamily: 'SpaceMono-Regular' }, style]}>
+    <Text style={[{ fontSize: size, color: color ?? c.text, fontFamily: 'SpaceMono-Regular' }, style]}>
       {children}
     </Text>
   )
@@ -199,5 +207,6 @@ export function MonoText({ children, size = 12, color = '#d4dae3', style }: Mono
 // ─── Divider ─────────────────────────────────────────────────────────────────
 
 export function Divider({ style }: { style?: ViewStyle }) {
-  return <View style={[{ height: 1, backgroundColor: '#1e252e' }, style]} />
+  const { palette: c } = useTheme()
+  return <View style={[{ height: 1, backgroundColor: c.border }, style]} />
 }

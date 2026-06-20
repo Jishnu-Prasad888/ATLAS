@@ -7,6 +7,7 @@ import { auditApi } from '@/api/endpoints'
 import { AuditLog } from '@/types'
 import { Card, LoadingState, ErrorState, EmptyState, MonoText, SectionHeader } from '@/components/common'
 import { formatTs, timeAgo } from '@/utils/format'
+import { useTheme } from '@/theme'
 
 function AuditRow({ log }: { log: AuditLog }) {
   const [expanded, setExpanded] = useState(false)
@@ -48,6 +49,7 @@ function AuditRow({ log }: { log: AuditLog }) {
 
 export function AuditScreen() {
   const [search, setSearch] = useState('')
+  const { palette: c } = useTheme()
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['audit', search],
     queryFn: () =>
@@ -66,7 +68,7 @@ export function AuditScreen() {
   const logs = data ?? []
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ padding: 16, paddingBottom: 8 }}>
         <TextInput
           value={search}
@@ -74,8 +76,8 @@ export function AuditScreen() {
           placeholder="Filter by user…"
           placeholderTextColor="#3a4555"
           style={{
-            backgroundColor: '#111418', borderWidth: 1, borderColor: '#1e252e',
-            borderRadius: 8, padding: 10, color: '#d4dae3',
+            backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder,
+            borderRadius: 8, padding: 10, color: c.text,
             fontSize: 12, fontFamily: 'SpaceMono-Regular',
           }}
         />

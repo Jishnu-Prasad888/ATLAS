@@ -11,6 +11,7 @@ import { User, Role } from '@/types'
 import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, MonoText, Badge } from '@/components/common'
 import { timeAgo } from '@/utils/format'
 import { useAuthStore } from '@/store/authStore'
+import { useTheme } from '@/theme'
 
 const ROLE_COLORS: Record<Role, string> = {
   administrator: '#a855f7',
@@ -60,6 +61,7 @@ export function UsersScreen() {
   const qc = useQueryClient()
   const isAdmin = myRole === 'administrator'
   const [actionUser, setActionUser] = useState<User | null>(null)
+  const { palette: c } = useTheme()
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['users'],
@@ -141,10 +143,10 @@ export function UsersScreen() {
 
   const users = data ?? []
   const filtered = useMemo(() => {
-    if (!search.trim()) return users
-    const term = search.toLowerCase()
+    const term = search.toLowerCase().trim()
     return users.filter(u =>
-      u.username.toLowerCase().includes(term)
+      !term
+      || u.username.toLowerCase().includes(term)
       || u.email.toLowerCase().includes(term)
       || u.role.toLowerCase().includes(term)
     )
@@ -228,11 +230,11 @@ export function UsersScreen() {
                     paddingVertical: 12,
                     borderRadius: 10,
                     borderWidth: 1,
-                    borderColor: '#2a1a1a',
-                    backgroundColor: '#1b1212',
+                    borderColor: c.border,
+                    backgroundColor: c.danger + '15',
                   }}
                 >
-                  <MonoText size={13} color="#f87171" style={{ textAlign: 'center', fontWeight: '600' }}>
+                  <MonoText size={13} color={c.danger} style={{ textAlign: 'center', fontWeight: '600' }}>
                     Delete User
                   </MonoText>
                 </TouchableOpacity>
@@ -245,11 +247,11 @@ export function UsersScreen() {
                   paddingVertical: 12,
                   borderRadius: 10,
                   borderWidth: 1,
-                  borderColor: '#1e252e',
-                  backgroundColor: '#0b0d0f',
+                  borderColor: c.border,
+                  backgroundColor: c.surface,
                 }}
               >
-                <MonoText size={13} color="#d4dae3" style={{ textAlign: 'center', fontWeight: '600' }}>
+                <MonoText size={13} color={c.text} style={{ textAlign: 'center', fontWeight: '600' }}>
                   Cancel
                 </MonoText>
               </TouchableOpacity>
@@ -258,16 +260,16 @@ export function UsersScreen() {
         </Modal>
       )}
 
-      <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
+      <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ padding: 16, paddingBottom: 8 }}>
         <TextInput
           value={search}
           onChangeText={setSearch}
           placeholder="Search users…"
-          placeholderTextColor="#3a4555"
+          placeholderTextColor={c.textMuted}
           style={{
-            backgroundColor: '#111418', borderWidth: 1, borderColor: '#1e252e',
-            borderRadius: 8, padding: 10, color: '#d4dae3',
+            backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder,
+            borderRadius: 8, padding: 10, color: c.text,
             fontSize: 13, fontFamily: 'SpaceMono-Regular',
           }}
         />

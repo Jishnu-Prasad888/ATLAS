@@ -7,12 +7,15 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import * as Haptics from 'expo-haptics'
 import { logsApi } from '@/api/endpoints'
-import { LogEntry, LogSeverity } from '@/types'
+import { LogEntry, LogSeverity, LogSource } from '@/types'
 import { LoadingState, ErrorState, EmptyState, MonoText, Divider } from '@/components/common'
 import { severityColor, formatTs } from '@/utils/format'
 import { useBeaconWs } from '@/ws/useBeaconWs'
+import { useTheme } from '@/theme'
+import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 
 const SEVERITIES: LogSeverity[] = ['Critical', 'Error', 'Warning', 'Info', 'Debug', 'Trace']
+const SOURCES: (LogSource | 'all')[] = ['all', 'systemd-journald', 'syslog', 'kernel', 'docker', 'kubernetes', 'internal']
 
 function SevChip({ sev, active, onPress }: { sev: string; active: boolean; onPress: () => void }) {
   const color = severityColor(sev)
@@ -26,7 +29,7 @@ function SevChip({ sev, active, onPress }: { sev: string; active: boolean; onPre
         backgroundColor: active ? color + '22' : 'transparent',
       }}
     >
-      <MonoText size={10} color={active ? color : '#5a6878'}>{sev}</MonoText>
+      <MonoText size={10} color={active ? color : undefined}>{sev}</MonoText>
     </TouchableOpacity>
   )
 }
@@ -52,14 +55,17 @@ function LogRow({ entry }: { entry: LogEntry }) {
 export function LogsScreen() {
   const [search, setSearch] = useState('')
   const [severity, setSeverity] = useState<LogSeverity | undefined>()
+  const [source, setSource] = useState<LogSource | 'all'>('all')
   const [liveLogs, setLiveLogs] = useState<LogEntry[]>([])
   const [liveMode, setLiveMode] = useState(false)
   const listRef = useRef<FlatList>(null)
+  const { palette: c } = useTheme()
+  const debouncedSearch = useDebouncedValue(search, 250)
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['logs', search, severity],
+    queryKey: ['logs', debouncedSearch, severity, source],
     queryFn: () =>
-      logsApi.list({ search: search || undefined, severity, limit: 1000 }).then(r => r.data),
+      logsApi.list({ search: debouncedSearch || undefined, severity, source: source === 'all' ? undefined : source, limit: 1000 }).then(r => r.data),
     enabled: !liveMode,
   })
 
@@ -90,9 +96,9 @@ export function LogsScreen() {
   const displayLogs = liveMode ? liveLogs : (data ?? [])
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       {/* Toolbar */}
-      <View style={{ backgroundColor: '#111418', borderBottomWidth: 1, borderBottomColor: '#1e252e', padding: 12, gap: 10 }}>
+      <View style={{ backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border, padding: 12, gap: 10 }}>
         {/* Search + live toggle */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TextInput
@@ -102,8 +108,8 @@ export function LogsScreen() {
             placeholderTextColor="#3a4555"
             editable={!liveMode}
             style={{
-              flex: 1, backgroundColor: '#0b0d0f', borderWidth: 1, borderColor: '#1e252e',
-              borderRadius: 8, padding: 8, color: '#d4dae3',
+              flex: 1, backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder,
+              borderRadius: 8, padding: 8, color: c.text,
               fontSize: 12, fontFamily: 'SpaceMono-Regular',
             }}
           />
@@ -112,16 +118,16 @@ export function LogsScreen() {
             style={{
               paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
               borderWidth: 1,
-              borderColor: liveMode ? '#22c55e' : '#1e252e',
-              backgroundColor: liveMode ? '#0f2e1a' : 'transparent',
+              borderColor: liveMode ? c.success : c.border,
+              backgroundColor: liveMode ? c.success + '22' : 'transparent',
               flexDirection: 'row', alignItems: 'center', gap: 6,
             }}
           >
             <View style={{
               width: 6, height: 6, borderRadius: 3,
-              backgroundColor: liveMode ? '#22c55e' : '#3a4555',
+              backgroundColor: liveMode ? c.success : c.textMuted,
             }} />
-            <MonoText size={11} color={liveMode ? '#22c55e' : '#5a6878'}>
+            <MonoText size={11} color={liveMode ? c.success : c.textMuted}>
               {liveMode ? (wsStatus === 'connected' ? 'live' : wsStatus) : 'live'}
             </MonoText>
           </TouchableOpacity>
@@ -143,12 +149,33 @@ export function LogsScreen() {
             />
           ))}
         </ScrollView>
+
+        {/* Source filters */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, flexDirection: 'row' }}>
+          {SOURCES.map(src => {
+            const active = source === src
+            const label = src === 'all' ? 'all sources' : src
+            return (
+              <TouchableOpacity
+                key={src}
+                onPress={() => { setSource(src); Haptics.selectionAsync() }}
+                style={{
+                  paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16,
+                  borderWidth: 1, borderColor: active ? c.primary : c.border,
+                  backgroundColor: active ? c.primary + '22' : 'transparent',
+                }}
+              >
+                <MonoText size={10} color={active ? c.primary : c.textMuted}>{label}</MonoText>
+              </TouchableOpacity>
+            )
+          })}
+        </ScrollView>
       </View>
 
       {/* Count row */}
       {!liveMode && data && (
         <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
-          <MonoText size={10} color="#3a4555">{data.length} entries</MonoText>
+          <MonoText size={10} color={c.textMuted}>{data.length} entries</MonoText>
         </View>
       )}
 

@@ -16,15 +16,22 @@ import { OperationsScreen } from '@/screens/OperationsScreen'
 import { AuditScreen } from '@/screens/AuditScreen'
 import { UsersScreen } from '@/screens/UsersScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
+import { ConfigScreen } from '@/screens/ConfigScreen'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BottomTabBar } from '@/components/navigation/BottomTabBar'
 import { AppHeader, TabDef, TabId } from './AppHeader'
+import { useTheme } from '@/theme'
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5_000,
-      retry: 2,
+      retry: 1,
+      retryDelay: 1_000,
+      refetchOnWindowFocus: false,
+    },
+    mutations: {
+      retry: 0,
     },
   },
 })
@@ -40,6 +47,7 @@ const TABS: TabDef[] = [
   { id: 'operations',  label: 'Ops',     icon: '⊙', operatorPlus: true },
   { id: 'users',       label: 'Users',   icon: '◈', adminOnly: true },
   { id: 'audit',       label: 'Audit',   icon: '◇', adminOnly: true },
+  { id: 'config',      label: 'Config',  icon: '◧', adminOnly: true },
   { id: 'settings',    label: 'Settings',icon: '⚙' },
 ]
 
@@ -53,6 +61,7 @@ function ScreenFor({ tab }: { tab: TabId }) {
     case 'operations':  return <OperationsScreen />
     case 'audit':       return <AuditScreen />
     case 'users':       return <UsersScreen />
+    case 'config':      return <ConfigScreen />
     case 'settings':    return <SettingsScreen />
     default:            return <DashboardScreen />
   }
@@ -65,6 +74,7 @@ function AppShell() {
   const { isAuthenticated, loaded, loadTokens, role } = useAuthStore()
   const { load: loadSettings } = useSettingsStore()
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
+  const { palette: c } = useTheme()
 
   useEffect(() => {
     loadSettings()
@@ -73,9 +83,9 @@ function AppShell() {
 
   if (!loaded) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#0b0d0f', alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ fontSize: 28, color: '#3a4555' }}>◈</Text>
-        <Text style={{ color: '#3a4555', fontFamily: 'SpaceMono-Regular', fontSize: 11, marginTop: 10 }}>
+      <View style={{ flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 28, color: c.textMuted }}>◈</Text>
+        <Text style={{ color: c.textMuted, fontFamily: 'SpaceMono-Regular', fontSize: 11, marginTop: 10 }}>
           beacon
         </Text>
       </View>
@@ -84,8 +94,8 @@ function AppShell() {
 
   if (!isAuthenticated) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
-        <StatusBar barStyle="light-content" backgroundColor="#0b0d0f" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+        <StatusBar barStyle={c.mode === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={c.bg} />
         <LoginScreen />
       </SafeAreaView>
     )
@@ -103,8 +113,8 @@ function AppShell() {
   const activeTabDef = visibleTabs.find(t => t.id === validTab) ?? visibleTabs[0]
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
-      <StatusBar barStyle="light-content" backgroundColor="#111418" />
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <StatusBar barStyle={c.mode === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={c.surface} />
       <View style={{ paddingTop: insets.top }}>
         <AppHeader tab={activeTabDef} />
       </View>

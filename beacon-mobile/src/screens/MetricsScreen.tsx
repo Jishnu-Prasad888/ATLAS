@@ -18,6 +18,7 @@ import {
 } from '@/components/common'
 import { ArrowDown, ArrowUp } from 'lucide-react-native'
 import { formatBytes, formatPct, formatTs, clamp } from '@/utils/format'
+import { useTheme } from '@/theme'
 
 const safeNumber = (v: unknown, fallback = 0) => (typeof v === 'number' && !Number.isNaN(v) ? v : fallback)
 
@@ -212,6 +213,7 @@ function StorageCard({ metric }: { metric: Metric }) {
 export function MetricsScreen() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [activePanel, setActivePanel] = useState<'network' | 'storage'>('network')
+  const { palette: c } = useTheme()
 
   const agentsQ = useQuery({
     queryKey: ['agents-brief'],
@@ -224,6 +226,7 @@ export function MetricsScreen() {
       telemetryApi.latest(selectedAgent!).then(r => r.data),
     enabled: !!selectedAgent,
     refetchInterval: 10_000,
+    staleTime: 8_000,
   })
 
   const onRefresh = useCallback(async () => {
@@ -242,9 +245,9 @@ export function MetricsScreen() {
   const byType = (type: string) => latestQ.data?.[type]
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       {/* Agent picker */}
-      <View style={{ backgroundColor: '#111418', borderBottomWidth: 1, borderBottomColor: '#1e252e' }}>
+      <View style={{ backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12, gap: 8, flexDirection: 'row' }}>
           {agents.map((a) => {
             const active = selectedAgent === a.agent_id
@@ -258,23 +261,23 @@ export function MetricsScreen() {
                 style={{
                   paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
                   borderWidth: 1,
-                  borderColor: active ? '#3b82f6' : '#1e252e',
-                  backgroundColor: active ? '#1e3a5f' : 'transparent',
+                  borderColor: active ? c.primary : c.border,
+                  backgroundColor: active ? c.primary + '22' : 'transparent',
                 }}
               >
-                <MonoText size={12} color={active ? '#3b82f6' : '#5a6878'}>{a.hostname}</MonoText>
+                <MonoText size={12} color={active ? c.primary : c.textMuted}>{a.hostname}</MonoText>
               </TouchableOpacity>
             )
           })}
           {agents.length === 0 && (
-            <MonoText size={11} color="#3a4555" style={{ paddingVertical: 6 }}>No agents</MonoText>
+            <MonoText size={11} color={c.textMuted} style={{ paddingVertical: 6 }}>No agents</MonoText>
           )}
         </ScrollView>
       </View>
 
       {!selectedAgent ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <MonoText size={13} color="#3a4555">Select an agent to view metrics</MonoText>
+          <MonoText size={13} color={c.textMuted}>Select an agent to view metrics</MonoText>
         </View>
       ) : latestQ.isLoading ? (
         <LoadingState label="Loading metrics…" />
@@ -300,12 +303,12 @@ export function MetricsScreen() {
             <View
               style={{
                 flexDirection: 'row',
-                backgroundColor: '#111418',
+                backgroundColor: c.surface,
                 borderRadius: 16,
                 padding: 4,
                 marginBottom: 14,
                 borderWidth: 1,
-                borderColor: '#1e252e',
+                borderColor: c.border,
                 overflow: 'hidden',
               }}
             >

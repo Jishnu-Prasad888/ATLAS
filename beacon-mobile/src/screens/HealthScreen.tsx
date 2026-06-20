@@ -7,6 +7,7 @@ import { healthApi, agentsApi } from '@/api/endpoints'
 import { Agent } from '@/types'
 import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, MonoText, StatusDot } from '@/components/common'
 import { statusColor, timeAgo } from '@/utils/format'
+import { useTheme } from '@/theme'
 
 function AgentCard({ agent }: { agent: Agent }) {
   const color = statusColor(agent.status)
@@ -66,16 +67,19 @@ function AgentCard({ agent }: { agent: Agent }) {
 }
 
 export function HealthScreen() {
+  const { palette: c } = useTheme()
   const overviewQ = useQuery({
     queryKey: ['fleet-health'],
     queryFn: () => healthApi.overview().then(r => r.data),
     refetchInterval: 15_000,
+    staleTime: 10_000,
   })
 
   const agentsQ = useQuery({
     queryKey: ['agents'],
     queryFn: () => agentsApi.list().then(r => r.data),
     refetchInterval: 15_000,
+    staleTime: 10_000,
   })
 
   const refreshing = overviewQ.isFetching || agentsQ.isFetching
@@ -90,26 +94,26 @@ export function HealthScreen() {
   const agents = agentsQ.data ?? []
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0d0f' }}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       {/* Fleet summary bar */}
-      {data && (
-        <View style={{
-          backgroundColor: '#111418', borderBottomWidth: 1, borderBottomColor: '#1e252e',
-          padding: 14, flexDirection: 'row', gap: 20,
-        }}>
-          {[
-            { label: 'Total', value: data.agents.total, color: '#d4dae3' },
-            { label: 'Online', value: data.agents.online, color: '#22c55e' },
-            { label: 'Degraded', value: data.agents.degraded, color: '#eab308' },
-            { label: 'Offline', value: data.agents.offline, color: '#ef4444' },
+          {data && (
+            <View style={{
+              backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border,
+              padding: 14, flexDirection: 'row', gap: 20,
+            }}>
+              {[
+            { label: 'Total', value: data.agents.total, color: c.text },
+            { label: 'Online', value: data.agents.online, color: c.success },
+            { label: 'Degraded', value: data.agents.degraded, color: c.warning },
+            { label: 'Offline', value: data.agents.offline, color: c.danger },
           ].map(({ label, value, color }) => (
             <View key={label} style={{ alignItems: 'center' }}>
               <MonoText size={18} color={color} style={{ fontWeight: '700' }}>{value}</MonoText>
-              <MonoText size={9} color="#3a4555">{label}</MonoText>
+              <MonoText size={9} color={c.textMuted}>{label}</MonoText>
             </View>
           ))}
-        </View>
-      )}
+            </View>
+          )}
 
       {agentsQ.isLoading ? (
         <LoadingState label="Loading health data…" />
