@@ -1,0 +1,57 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./App.{js,jsx,ts,tsx}",
+    "./index.{js,jsx,ts,tsx}",
+    "./src/**/*.{js,jsx,ts,tsx}",
+    "./app/**/*.{js,jsx,ts,tsx}",
+  ],
+  presets: [require("nativewind/preset")],
+  theme: {
+    extend: {
+      colors: {
+        bg: "#0b0d0f",
+        surface: "#111418",
+        "surface-2": "#181c22",
+        border: "#1e252e",
+        "border-strong": "#2a3340",
+        text: "#d4dae3",
+        "text-muted": "#5a6878",
+        "text-dim": "#3a4555",
+        accent: "#3b82f6",
+        "accent-dim": "#1e3a5f",
+        green: "#22c55e",
+        "green-dim": "#0f2e1a",
+        yellow: "#eab308",
+        "yellow-dim": "#2a2200",
+        red: "#ef4444",
+        "red-dim": "#2a0f0f",
+        orange: "#f97316",
+        purple: "#a855f7",
+        blue: "#3b82f6",
+        "blue-dim": "#1e2e42",
+        gray: "#6b7280",
+
+        // ── Light theme ──────────────────────────────────────────────────
+        "light-bg": "#f3f1eb",
+        "light-surface": "#fdfcf8",
+        "light-surface-2": "#ece6d9",
+        "light-border": "#cac1ad",
+        "light-border-strong": "#a1947c",
+        "light-text": "#1f2933",
+        "light-text-muted": "#5d6674",
+        "light-text-dim": "#7f8898",
+        "light-accent": "#1e5ed7",
+        "light-accent-dim": "#d7e4ff",
+        "light-green-dim": "#d7f3e3",
+        "light-yellow-dim": "#fff1c2",
+        "light-red-dim": "#ffe1dd",
+        "light-blue-dim": "#d7e4ff",
+      },
+      fontFamily: {
+        mono: ["SpaceMono-Regular"],
+      },
+    },
+  },
+  plugins: [],
+};

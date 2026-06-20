@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Beacon",
+    "slug": "beacon-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "beacon",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.beacon.monitor"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0d0f",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "package": "com.beacon.monitor",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
