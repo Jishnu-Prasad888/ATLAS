@@ -24,6 +24,7 @@ import type {
   CpuData,
   RamData,
   NetworkData,
+  Role,
 } from '@/types'
 
 // ─── Auth hooks ───────────────────────────────────────────────────────────────
@@ -237,6 +238,72 @@ export function useUserMutations() {
   })
 
   return { createUser, deleteUser, toggleUser, assignRole }
+}
+
+export function useRegistrations() {
+  return useQuery({ queryKey: queryKeys.registrations(), queryFn: usersApi.registrations, staleTime: 10_000 })
+}
+
+export function useRegistrationDecisions() {
+  const qc = useQueryClient()
+  const addNotification = useUiStore((s) => s.addNotification)
+  const invalidate = () => qc.invalidateQueries({ queryKey: queryKeys.registrations() })
+  return {
+    approve: useMutation({
+      mutationFn: (params: { id: number; role?: Role; access_all_agents?: boolean; agent_ids?: string[]; organization_ids?: number[] }) =>
+        usersApi.decideRegistration(params.id, { action: 'approve', ...params }),
+      onSuccess: () => {
+        invalidate()
+        qc.invalidateQueries({ queryKey: queryKeys.users() })
+        addNotification({ type: 'success', title: 'Registration approved' })
+      },
+      onError: (e: Error) => addNotification({ type: 'error', title: 'Failed to approve', message: e.message }),
+    }),
+    reject: useMutation({
+      mutationFn: (id: number) => usersApi.decideRegistration(id, { action: 'reject' }),
+      onSuccess: () => {
+        invalidate()
+        addNotification({ type: 'info', title: 'Registration rejected' })
+      },
+      onError: (e: Error) => addNotification({ type: 'error', title: 'Failed to reject', message: e.message }),
+    }),
+  }
+}
+
+export function useOrganizations() {
+  return useQuery({ queryKey: queryKeys.organizations(), queryFn: usersApi.organizations, staleTime: 15_000 })
+}
+
+export function useOrganizationMutations() {
+  const qc = useQueryClient()
+  const addNotification = useUiStore((s) => s.addNotification)
+  const invalidate = () => qc.invalidateQueries({ queryKey: queryKeys.organizations() })
+  return {
+    create: useMutation({
+      mutationFn: usersApi.createOrganization,
+      onSuccess: () => {
+        invalidate()
+        addNotification({ type: 'success', title: 'Organization created' })
+      },
+      onError: (e: Error) => addNotification({ type: 'error', title: 'Failed to create organization', message: e.message }),
+    }),
+    update: useMutation({
+      mutationFn: ({ id, data }: { id: number; data: { name?: string; description?: string; agent_ids?: string[] } }) => usersApi.updateOrganization(id, data),
+      onSuccess: () => {
+        invalidate()
+        addNotification({ type: 'success', title: 'Organization updated' })
+      },
+      onError: (e: Error) => addNotification({ type: 'error', title: 'Failed to update organization', message: e.message }),
+    }),
+    remove: useMutation({
+      mutationFn: usersApi.deleteOrganization,
+      onSuccess: () => {
+        invalidate()
+        addNotification({ type: 'success', title: 'Organization removed' })
+      },
+      onError: (e: Error) => addNotification({ type: 'error', title: 'Failed to delete organization', message: e.message }),
+    }),
+  }
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────

@@ -9,8 +9,9 @@ from rest_framework.response import Response
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from apps.auth_rbac.permissions import IsAdministrator, IsAdminOrReadOnly, IsViewer
+from apps.auth_rbac.permissions import IsAdministrator, IsAdminOrReadOnly, IsViewer, IsModeratorOrAdmin
 from apps.audit.utils import audit_log
+from apps.auth_rbac.models import UserAgentAccess, OrganizationAgent, UserOrganizationAccess
 from .models import Agent, AgentStatus, CollectorHealth, CollectorStatus, ProcessKillRequest
 from .serializers import (
     AgentSerializer,
@@ -25,12 +26,40 @@ channel_layer = get_channel_layer()
 VALID_STATUSES = [s.value for s in AgentStatus]
 
 
+def _allowed_agent_ids(user):
+    if not user or not getattr(user, "is_authenticated", False):
+        return set()
+
+    cached = getattr(user, "_allowed_agent_ids_cache", None)
+    if cached is not None:
+        return cached
+
+    if user.role == "administrator" or getattr(user, "access_all_agents", False):
+        user._allowed_agent_ids_cache = None
+        return None  # None means all
+
+    agent_ids = set(UserAgentAccess.objects.filter(user=user).values_list("agent_id", flat=True))
+    org_ids = UserOrganizationAccess.objects.filter(user=user).values_list("organization_id", flat=True)
+    if org_ids:
+        agent_ids.update(OrganizationAgent.objects.filter(organization_id__in=org_ids).values_list("agent_id", flat=True))
+
+    user._allowed_agent_ids_cache = agent_ids
+    return agent_ids
+
+
 class AgentListView(APIView):
     permission_classes = [IsViewer]
+
+    def _filter_by_scope(self, request, qs):
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is None:
+            return qs
+        return qs.filter(agent_id__in=allowed) if allowed else qs.none()
 
     def get(self, request):
         logger.debug("AgentListView GET — user=%s", request.user)
         agents = Agent.objects.prefetch_related("collector_health").all()
+        agents = self._filter_by_scope(request, agents)
         tag    = request.query_params.get("tag")
         if tag:
             logger.debug("AgentListView filtering by tag=%s", tag)
@@ -44,7 +73,7 @@ class AgentListView(APIView):
 
 
 class AgentDetailView(APIView):
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsViewer]
 
     def get_agent(self, agent_id):
         try:
@@ -58,10 +87,18 @@ class AgentDetailView(APIView):
         agent = self.get_agent(agent_id)
         if not agent:
             return Response({"detail": "Agent not found."}, status=404)
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is not None and agent_id not in allowed:
+            return Response({"detail": "Not authorized for this agent."}, status=403)
         return Response(AgentSerializer(agent).data)
 
     def delete(self, request, agent_id):
         logger.debug("AgentDetailView DELETE — agent_id=%s user=%s", agent_id, request.user)
+        if request.user.role not in ("administrator", "moderator"):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is not None and agent_id not in allowed:
+            return Response({"detail": "Not authorized for this agent."}, status=403)
         agent = self.get_agent(agent_id)
         if not agent:
             return Response({"detail": "Agent not found."}, status=404)
@@ -72,10 +109,13 @@ class AgentDetailView(APIView):
 
 
 class AgentEnableDisableView(APIView):
-    permission_classes = [IsAdministrator]
+    permission_classes = [IsModeratorOrAdmin]
 
     def post(self, request, agent_id, action):
         logger.debug("AgentEnableDisableView POST — agent_id=%s action=%s user=%s", agent_id, action, request.user)
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is not None and agent_id not in allowed:
+            return Response({"detail": "Not authorized for this agent."}, status=403)
         try:
             agent = Agent.objects.get(agent_id=agent_id)
         except Agent.DoesNotExist:
@@ -95,10 +135,13 @@ class AgentEnableDisableView(APIView):
 
 
 class AgentRenameView(APIView):
-    permission_classes = [IsAdministrator]
+    permission_classes = [IsModeratorOrAdmin]
 
     def post(self, request, agent_id):
         logger.debug("AgentRenameView POST — agent_id=%s user=%s", agent_id, request.user)
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is not None and agent_id not in allowed:
+            return Response({"detail": "Not authorized for this agent."}, status=403)
         try:
             agent = Agent.objects.get(agent_id=agent_id)
         except Agent.DoesNotExist:
@@ -116,10 +159,13 @@ class AgentRenameView(APIView):
 
 
 class AgentRegenerateIdView(APIView):
-    permission_classes = [IsAdministrator]
+    permission_classes = [IsModeratorOrAdmin]
 
     def post(self, request, agent_id):
         logger.debug("AgentRegenerateIdView POST — agent_id=%s user=%s", agent_id, request.user)
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is not None and agent_id not in allowed:
+            return Response({"detail": "Not authorized for this agent."}, status=403)
         try:
             agent = Agent.objects.get(agent_id=agent_id)
         except Agent.DoesNotExist:
@@ -213,10 +259,13 @@ class AgentKillProcessView(APIView):
     """POST /api/v1/agents/<agent_id>/kill_process/ { pid: int }
     Dispatches a kill command to the agent via WebSocket. Requires administrator.
     """
-    permission_classes = [IsAdministrator]
+    permission_classes = [IsModeratorOrAdmin]
 
     def post(self, request, agent_id):
         logger.debug("AgentKillProcessView POST — agent_id=%s user=%s", agent_id, request.user)
+        allowed = _allowed_agent_ids(request.user)
+        if allowed is not None and agent_id not in allowed:
+            return Response({"detail": "Not authorized for this agent."}, status=403)
         pid = request.data.get("pid")
         if pid is None:
             return Response({"error": "pid is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -291,40 +340,3 @@ class AgentKillProcessResultView(APIView):
                   details={"pid": pid, "request_id": req.id, "status": status_val, "error": error_msg})
 
         return Response({"status": req.status, "request_id": req.id})
-
-
-class AgentKillProcessView(APIView):
-    """POST /api/v1/agents/<agent_id>/kill_process/ { pid: int }
-    Dispatches a kill command to the agent via WebSocket. Requires administrator.
-    """
-    permission_classes = [IsAdministrator]
-
-    def post(self, request, agent_id):
-        logger.debug("AgentKillProcessView POST — agent_id=%s user=%s", agent_id, request.user)
-        pid = request.data.get("pid")
-        if pid is None:
-            return Response({"error": "pid is required"}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            pid_int = int(pid)
-        except (TypeError, ValueError):
-            return Response({"error": "pid must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
-
-        safe_id = agent_id.replace(":", "_").replace("#", "_").replace(" ", "_")
-        try:
-            async_to_sync(channel_layer.group_send)(
-                f"agent_{safe_id}",
-                {
-                    "type": "agent.command",
-                    "data": {
-                        "type": "process_kill",
-                        "payload": {"pid": pid_int},
-                    },
-                },
-            )
-            audit_log(request, action="AGENT_KILL_PROCESS", resource="agents", resource_id=agent_id,
-                      details={"pid": pid_int})
-        except Exception as exc:  # pragma: no cover
-            logger.warning("AgentKillProcessView failed to dispatch: %s", exc)
-            return Response({"error": "failed to dispatch"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        return Response({"status": "dispatched", "pid": pid_int}, status=status.HTTP_202_ACCEPTED)

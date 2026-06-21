@@ -211,7 +211,7 @@ export function LogsPage() {
   const [refreshing, setRefreshing] = useState(false)
   const { isAdmin, accessToken, canAccessAgent } = useAuthStore()
   const addNotification = useUiStore((s) => s.addNotification)
-  const { data: agents: agentsData } = useAgents()
+  const { data: agentsData } = useAgents()
   const agents = useMemo(() => agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agentsData, canAccessAgent])
 
   const [agentId,     setAgentId]     = usePersistedState<string>('logs_agent',    '')

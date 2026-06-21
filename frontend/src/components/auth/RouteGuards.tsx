@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/api'
 import { getRefreshToken } from '@/api'
@@ -85,6 +85,7 @@ export function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
 export function AuthEventHandler() {
   const { login, logout, setHydrated } = useAuthStore()
   const { setWsConnected } = useUiStore()
+  const navigate = useNavigate()
 
   // Restore session from persisted refresh token on mount
   useEffect(() => {
@@ -127,6 +128,7 @@ export function AuthEventHandler() {
     // Session fully expired (refresh token dead)
     const handleSessionExpired = () => {
       logout()
+      navigate('/unauthorized', { replace: true })
     }
 
     window.addEventListener('beacon:silent-refresh', handleSilentRefresh)
@@ -136,7 +138,7 @@ export function AuthEventHandler() {
       window.removeEventListener('beacon:silent-refresh', handleSilentRefresh)
       window.removeEventListener('beacon:session-expired', handleSessionExpired)
     }
-  }, [login, logout])
+  }, [login, logout, navigate])
 
   // Track WebSocket connection state
   useEffect(() => {
@@ -144,6 +146,7 @@ export function AuthEventHandler() {
     const offDisconnected = wsClient.on('disconnected', () => setWsConnected(false))
     const offExpired = wsClient.on('session-expired', () => {
       logout()
+      navigate('/unauthorized', { replace: true })
     })
 
     return () => {
@@ -151,7 +154,7 @@ export function AuthEventHandler() {
       offDisconnected()
       offExpired()
     }
-  }, [logout, setWsConnected])
+  }, [logout, setWsConnected, navigate])
 
   return null
 }

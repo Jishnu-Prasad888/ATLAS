@@ -1,3 +1,9 @@
+admin
+bluematrix
+
+viewer1
+veiwer1@test.com
+
 The issue: The agent is connecting to wss://localhost:8000 but the WebSocket endpoint is at wss://localhost:8000/ws/ingest/.
 
 Fix: Reconfigure the agent with the correct path:

@@ -8,6 +8,8 @@ import { LoginPage } from '@/pages/LoginPage'
 import { RecoverPage } from '@/pages/RecoverPage'
 import { AwaitingApprovalPage } from '@/pages/AwaitingApprovalPage'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
+import { UnauthorizedPage } from '@/pages/UnauthorizedPage'
+import { NotFoundPage } from '@/pages/NotFoundPage'
 import { OrganizationsPage } from '@/pages/OrganizationsPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import type { Role } from '@/types'
@@ -72,6 +74,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<RedirectIfAuthenticated><LoginPage /></RedirectIfAuthenticated>} />
           <Route path="/recover" element={<RedirectIfAuthenticated><RecoverPage /></RedirectIfAuthenticated>} />
+          <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="/awaiting-approval" element={<AuthedPage><AwaitingApprovalPage /></AuthedPage>} />
           <Route path="/forbidden" element={<AuthedPage><ForbiddenPage /></AuthedPage>} />
           <Route path="/" element={<AuthedPage><DashboardPage /></AuthedPage>} />
@@ -86,7 +89,7 @@ export default function App() {
           <Route path="/audit" element={<RolePage roles={[ 'administrator', 'moderator' ]}><AuditPage /></RolePage>} />
           <Route path="/users" element={<AdminPage><UsersPage /></AdminPage>} />
           <Route path="/config" element={<AdminPage><ConfigPage /></AdminPage>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<AuthedPage><NotFoundPage /></AuthedPage>} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

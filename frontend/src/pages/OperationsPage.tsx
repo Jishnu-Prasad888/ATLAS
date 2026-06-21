@@ -615,7 +615,7 @@ export function OperationsPage() {
   const [refreshing, setRefreshing] = useState(false)
   const { selectedAgentId, selectAgent } = useUiStore()
   const { canAccessAgent } = useAuthStore()
-  const { data: agents: agentsData, isLoading: agentsLoading } = useAgents()
+  const { data: agentsData, isLoading: agentsLoading } = useAgents()
   const agents = useMemo(() => agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agentsData, canAccessAgent])
 
   const activeAgentId = useMemo(

@@ -266,7 +266,7 @@ export function HealthPage() {
   const [refreshing, setRefreshing] = useState(false)
   const { data: health } = useFleetHealth()
   const { canAccessAgent } = useAuthStore()
-  const { data: agents: agentsData } = useAgents()
+  const { data: agentsData } = useAgents()
   const agents = agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? []
   const [selectedId, setSelectedId] = usePersistedState<string | null>('health_agent', null)
 

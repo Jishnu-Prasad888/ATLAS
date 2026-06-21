@@ -69,7 +69,7 @@ function isoAgo(hours: number): string {
 export function MetricsPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
-  const { data: agents: agentsData } = useAgents()
+  const { data: agentsData } = useAgents()
   const { canAccessAgent, isAdmin, isModerator } = useAuthStore()
   const agents = useMemo(() => agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agentsData, canAccessAgent])
   const [selectedAgentId, setSelectedAgentId] = usePersistedState<string>('metrics_agent', '')

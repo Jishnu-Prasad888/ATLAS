@@ -45,6 +45,11 @@ class AuditMiddleware:
                     resource_id = parts[-1] if len(parts) > 3 else "",
                     details     = {"path": request.path, "status": response.status_code},
                     success     = response.status_code < 400,
+                    user_agent  = request.META.get("HTTP_USER_AGENT", ""),
+                    device      = (request.META.get("HTTP_USER_AGENT", "")[:128]),
+                    path        = request.path,
+                    method      = request.method,
+                    session_id  = getattr(getattr(request, "session", None), "session_key", "") or "",
                 )
             except Exception as e:
                 logger.debug(f"Middleware audit skip: {e}")

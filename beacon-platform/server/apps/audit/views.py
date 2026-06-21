@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.http import JsonResponse
 
-from apps.auth_rbac.permissions import IsAdministrator, IsViewer
+from apps.auth_rbac.permissions import IsAdministrator, IsModeratorOrAdmin
 from .models import AuditLog
 
 logger = logging.getLogger("beacon")
@@ -16,11 +16,32 @@ logger = logging.getLogger("beacon")
 class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model  = AuditLog
-        fields = ["id", "timestamp", "user", "ip_address", "action", "resource", "resource_id", "details", "success"]
+        fields = [
+            "id",
+            "timestamp",
+            "user",
+            "ip_address",
+            "action",
+            "resource",
+            "resource_id",
+            "details",
+            "success",
+            "user_agent",
+            "device",
+            "country",
+            "region",
+            "city",
+            "latitude",
+            "longitude",
+            "path",
+            "method",
+            "session_id",
+            "approved_by",
+        ]
 
 
 class AuditLogListView(APIView):
-    permission_classes = [IsAdministrator]
+    permission_classes = [IsModeratorOrAdmin]
 
     def get(self, request):
         logger.debug("AuditLogListView GET — user=%s params=%s", request.user, request.query_params)
@@ -49,7 +70,7 @@ class AuditLogListView(APIView):
 
 
 class AuditLogExportView(APIView):
-    permission_classes = [IsAdministrator]
+    permission_classes = [IsModeratorOrAdmin]
 
     def get(self, request):
         logger.debug("AuditLogExportView GET — user=%s", request.user)

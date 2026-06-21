@@ -30,6 +30,14 @@ def audit_log(
             or request.META.get("REMOTE_ADDR", "")
         ) or None
 
+        ua = request.META.get("HTTP_USER_AGENT", "") if hasattr(request, "META") else ""
+        session_id = ""
+        try:
+            if hasattr(request, "session"):
+                session_id = request.session.session_key or ""
+        except Exception:
+            session_id = ""
+
         AuditLog.objects.create(
             user        = user,
             ip_address  = ip,
@@ -38,6 +46,12 @@ def audit_log(
             resource_id = resource_id,
             details     = details or {},
             success     = success,
+            user_agent  = ua,
+            device      = ua[:128],
+            path        = getattr(request, "path", ""),
+            method      = getattr(request, "method", ""),
+            session_id  = session_id,
+            approved_by = details.get("approved_by") if details else "",
         )
     except Exception as e:
         # Audit failures must never break the main flow

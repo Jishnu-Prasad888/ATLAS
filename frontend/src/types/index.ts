@@ -19,6 +19,19 @@ export interface Organization {
   updated_at?: string
 }
 
+export interface RegistrationRequest {
+  id: number
+  user_id: number
+  username: string
+  email: string
+  role_requested: Role
+  status: ApprovalStatus
+  reason?: string
+  decided_by?: string | null
+  decided_at?: string | null
+  created_at: string
+}
+
 export type AgentStatus =
   | 'BOOTING'
   | 'INITIALIZING'

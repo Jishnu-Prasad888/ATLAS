@@ -12,8 +12,10 @@ from django.utils import timezone
 
 
 class Role(models.TextChoices):
-    VIEWER        = "viewer",        "Viewer"
     ADMINISTRATOR = "administrator", "Administrator"
+    MODERATOR     = "moderator",     "Moderator"
+    VIEWER        = "viewer",        "Viewer"
+    GUEST         = "guest",         "Guest"
 
 
 class BeaconUserManager(BaseUserManager):
@@ -36,6 +38,24 @@ class BeaconUser(AbstractBaseUser, PermissionsMixin):
     username       = models.CharField(max_length=150, unique=True)
     email          = models.EmailField(blank=True)
     role           = models.CharField(max_length=32, choices=Role.choices, default=Role.VIEWER)
+
+    # Lifecycle & approval
+    approval_status = models.CharField(max_length=16, choices=[
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    ], default="approved")
+    approved_by    = models.CharField(max_length=150, blank=True)
+    approved_at    = models.DateTimeField(null=True, blank=True)
+    start_at       = models.DateTimeField(null=True, blank=True)
+    expires_at     = models.DateTimeField(null=True, blank=True)
+    invited_by     = models.CharField(max_length=150, blank=True)
+    created_via    = models.CharField(max_length=32, default="password", blank=True)
+    google_sub     = models.CharField(max_length=255, blank=True)
+
+    # Access scope
+    access_all_agents = models.BooleanField(default=False)
+
     is_active      = models.BooleanField(default=True)
     is_staff       = models.BooleanField(default=False)
     created_at     = models.DateTimeField(auto_now_add=True)
@@ -64,8 +84,16 @@ class BeaconUser(AbstractBaseUser, PermissionsMixin):
         return self.role == Role.ADMINISTRATOR
 
     @property
+    def is_moderator(self):
+        return self.role == Role.MODERATOR
+
+    @property
     def is_viewer(self):
         return self.role == Role.VIEWER
+
+    @property
+    def is_guest(self):
+        return self.role == Role.GUEST
 
     def is_locked(self):
         if self.locked_until and self.locked_until > timezone.now():
@@ -130,3 +158,70 @@ class RecoveryKey(models.Model):
         self.used_at     = timezone.now()
         self.invalidated = True
         self.save(update_fields=["used_at", "invalidated"])
+
+
+# ─── Access Control Models ─────────────────────────────────────────────────────
+
+
+class Organization(models.Model):
+    name        = models.CharField(max_length=150, unique=True)
+    description = models.TextField(blank=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "beacon_organizations"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class OrganizationAgent(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="agents")
+    agent_id     = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "beacon_organization_agents"
+        unique_together = [("organization", "agent_id")]
+
+
+class UserAgentAccess(models.Model):
+    user     = models.ForeignKey(BeaconUser, on_delete=models.CASCADE, related_name="agent_access")
+    agent_id = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "beacon_user_agent_access"
+        unique_together = [("user", "agent_id")]
+
+
+class UserOrganizationAccess(models.Model):
+    user          = models.ForeignKey(BeaconUser, on_delete=models.CASCADE, related_name="organization_access")
+    organization  = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="user_access")
+
+    class Meta:
+        db_table = "beacon_user_organization_access"
+        unique_together = [("user", "organization")]
+
+
+class RegistrationRequest(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    ]
+
+    user            = models.OneToOneField(BeaconUser, on_delete=models.CASCADE, related_name="registration_request")
+    role_requested  = models.CharField(max_length=32, choices=Role.choices, default=Role.VIEWER)
+    reason          = models.TextField(blank=True)
+    status          = models.CharField(max_length=16, choices=STATUS_CHOICES, default="pending")
+    decided_by      = models.CharField(max_length=150, blank=True)
+    decided_at      = models.DateTimeField(null=True, blank=True)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "beacon_registration_requests"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.role_requested} ({self.status})"

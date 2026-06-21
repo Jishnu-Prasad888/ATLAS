@@ -26,6 +26,8 @@ export const queryKeys = {
   // Users
   users: () => ['users'] as const,
   user: (id: number) => ['users', id] as const,
+  registrations: () => ['users', 'registrations'] as const,
+  organizations: () => ['organizations'] as const,
 
   // Config
   config: () => ['config'] as const,

@@ -11,23 +11,44 @@ class IsAdministrator(BasePermission):
     message = "Administrator role required."
 
     def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == Role.ADMINISTRATOR
-        )
+        user = getattr(request, "user", None)
+        return _is_active_and_approved(user) and user.role == Role.ADMINISTRATOR
+
+
+def _is_active_and_approved(user):
+    return (
+        user
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "is_active", False)
+        and getattr(user, "approval_status", "approved") == "approved"
+    )
+
+
+class IsModeratorOrAdmin(BasePermission):
+    """Allow moderators and administrators who are active and approved."""
+    message = "Moderator or administrator role required."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        return _is_active_and_approved(user) and user.role in (Role.ADMINISTRATOR, Role.MODERATOR)
 
 
 class IsViewer(BasePermission):
-    """Viewer or Administrator can access (read-only operations)."""
+    """Approved, active users with viewer/guest or higher roles."""
     message = "Authentication required."
 
     def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in (Role.VIEWER, Role.ADMINISTRATOR)
-        )
+        user = getattr(request, "user", None)
+        return _is_active_and_approved(user) and user.role in (Role.VIEWER, Role.ADMINISTRATOR, Role.MODERATOR, Role.GUEST)
+
+
+class IsApproved(BasePermission):
+    """Require approved users (pending/rejected blocked)."""
+    message = "Account pending approval."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        return _is_active_and_approved(user)
 
 
 class IsAdminOrReadOnly(BasePermission):
@@ -38,11 +59,11 @@ class IsAdminOrReadOnly(BasePermission):
     SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
     def has_permission(self, request, view):
-        if not (request.user and request.user.is_authenticated):
+        if not _is_active_and_approved(getattr(request, "user", None)):
             return False
         if request.method in self.SAFE_METHODS:
             return True
-        return request.user.role == Role.ADMINISTRATOR
+        return request.user.role in (Role.ADMINISTRATOR,)
 
 
 class IsAgentAuthenticated(BasePermission):

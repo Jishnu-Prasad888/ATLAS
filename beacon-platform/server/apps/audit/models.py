@@ -19,6 +19,19 @@ class AuditLog(models.Model):
     details     = models.JSONField(default=dict, blank=True)       # extra context
     success     = models.BooleanField(default=True)
 
+    # Enriched context
+    user_agent  = models.TextField(blank=True)
+    device      = models.CharField(max_length=128, blank=True)
+    country     = models.CharField(max_length=64, blank=True)
+    region      = models.CharField(max_length=64, blank=True)
+    city        = models.CharField(max_length=64, blank=True)
+    latitude    = models.FloatField(null=True, blank=True)
+    longitude   = models.FloatField(null=True, blank=True)
+    path        = models.CharField(max_length=255, blank=True)
+    method      = models.CharField(max_length=16, blank=True)
+    session_id  = models.CharField(max_length=128, blank=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+
     class Meta:
         db_table = "beacon_audit_log"
         ordering = ["-timestamp"]
