@@ -364,6 +364,8 @@ function CreateUserForm({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<Role>('viewer')
+  const [guestExpireDays, setGuestExpireDays] = useState(0)
+  const [guestExpireHours, setGuestExpireHours] = useState(0)
   const [accessAll, setAccessAll] = useState(true)
   const [agentIds, setAgentIds] = useState('')
   const [orgIds, setOrgIds] = useState('')
@@ -392,9 +394,22 @@ function CreateUserForm({
     const agent_ids = [...new Set([...agentSelections, ...parseAgentList(agentIds)])]
     const organization_ids = [...new Set([...orgSelections, ...parseOrgList(orgIds)])]
 
+    let expires_at: string | null | undefined = undefined
+    if (role === 'guest') {
+      const days = Number.isFinite(Number(guestExpireDays)) ? Math.max(0, Number(guestExpireDays)) : 0
+      const hoursRaw = Number.isFinite(Number(guestExpireHours)) ? Math.max(0, Number(guestExpireHours)) : 0
+      const hours = Math.min(23, hoursRaw)
+      const ms = days * 24 * 60 * 60 * 1000 + hours * 60 * 60 * 1000
+      if (ms > 0) {
+        expires_at = new Date(Date.now() + ms).toISOString()
+      } else {
+        expires_at = null
+      }
+    }
+
     setLoading(true)
     try {
-      await createUser.mutateAsync({ username, email, password, role, access_all_agents: accessAll, agent_ids, organization_ids })
+      await createUser.mutateAsync({ username, email, password, role, access_all_agents: accessAll, agent_ids, organization_ids, expires_at })
       onSuccess()
     } catch (err) {
       if (err instanceof ApiError && err.body) {
@@ -448,6 +463,28 @@ function CreateUserForm({
           <option value="administrator">administrator</option>
           <option value="guest">guest</option>
         </Select>
+        {role === 'guest' && (
+          <div className="grid grid-cols-2 gap-2 col-span-full">
+            <Input
+              label="Guest expires in (days)"
+              type="number"
+              min={0}
+              value={guestExpireDays}
+              onChange={(e) => setGuestExpireDays(Number(e.target.value))}
+              disabled={loading}
+            />
+            <Input
+              label="Guest expires in (hours)"
+              type="number"
+              min={0}
+              max={23}
+              value={guestExpireHours}
+              onChange={(e) => setGuestExpireHours(Number(e.target.value))}
+              disabled={loading}
+            />
+            <p className="col-span-full text-[10px] text-[--color-text-muted] font-mono">Guest access auto-revokes after this duration. Leave 0/0 for no expiry.</p>
+          </div>
+        )}
         <Toggle label="Access all agents" checked={accessAll} onChange={setAccessAll} disabled={loading} />
         <Input label="Agent IDs (comma separated)" value={agentIds} onChange={(e) => setAgentIds(e.target.value)} disabled={loading} />
         <div className="col-span-full space-y-2">
