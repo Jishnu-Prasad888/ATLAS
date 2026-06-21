@@ -460,10 +460,7 @@ impl StorageManager {
 
         for row in rows {
             let (log, source) = row?;
-            if log
-                .message
-                .to_lowercase()
-                .contains(&lower_query)
+            if log.message.to_lowercase().contains(&lower_query)
                 || source.to_lowercase().contains(&lower_query)
             {
                 results.push(log);
@@ -626,30 +623,29 @@ impl StorageManager {
 
         {
             let db = self.queue_db.lock().await;
-            let cutoff = (Utc::now() - Duration::hours(queue_sent_retention_hours.max(1))).to_rfc3339();
-            stats.queue_pruned = db
-                .execute(
-                    "DELETE FROM queue WHERE state = 'Sent' AND created_at < ?1",
-                    params![cutoff],
-                )? as usize;
+            let cutoff =
+                (Utc::now() - Duration::hours(queue_sent_retention_hours.max(1))).to_rfc3339();
+            stats.queue_pruned = db.execute(
+                "DELETE FROM queue WHERE state = 'Sent' AND created_at < ?1",
+                params![cutoff],
+            )? as usize;
         }
 
         let cutoff_ts = (Utc::now() - Duration::days(retention_days.max(0))).to_rfc3339();
 
         {
             let db = self.logs_db.lock().await;
-            stats.logs_deleted = db
-                .execute("DELETE FROM logs WHERE severity != 'Warning'", [])?
-                as usize;
-            stats.warnings_deleted = db
-                .execute(
-                    "DELETE FROM logs WHERE severity = 'Warning' AND timestamp < ?1",
-                    params![cutoff_ts],
-                )? as usize;
+            stats.logs_deleted =
+                db.execute("DELETE FROM logs WHERE severity != 'Warning'", [])? as usize;
+            stats.warnings_deleted = db.execute(
+                "DELETE FROM logs WHERE severity = 'Warning' AND timestamp < ?1",
+                params![cutoff_ts],
+            )? as usize;
 
             if compress_retained {
-                let mut stmt = db
-                    .prepare("SELECT id, message FROM logs WHERE severity = 'Warning' AND compressed = 0")?;
+                let mut stmt = db.prepare(
+                    "SELECT id, message FROM logs WHERE severity = 'Warning' AND compressed = 0",
+                )?;
                 let rows = stmt
                     .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -663,14 +659,14 @@ impl StorageManager {
                 }
             }
 
-            stats.audits_deleted = db
-                .execute(
-                    "DELETE FROM audit_logs WHERE timestamp < ?1",
-                    params![cutoff_ts],
-                )? as usize;
+            stats.audits_deleted = db.execute(
+                "DELETE FROM audit_logs WHERE timestamp < ?1",
+                params![cutoff_ts],
+            )? as usize;
 
             if compress_retained {
-                let mut stmt = db.prepare("SELECT id, details FROM audit_logs WHERE compressed = 0")?;
+                let mut stmt =
+                    db.prepare("SELECT id, details FROM audit_logs WHERE compressed = 0")?;
                 let rows = stmt
                     .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -819,16 +815,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let storage = StorageManager::new(dir.path().to_str().unwrap()).await?;
 
-        storage
-            .store_metric("agent", "cpu", "{}")
-            .await?;
+        storage.store_metric("agent", "cpu", "{}").await?;
         storage
             .store_log("agent", "svc", "Info", "drop me", "{}")
             .await?;
         storage
             .store_log("agent", "svc", "Warning", "keep me", "{}")
             .await?;
-        storage.write_audit("create", "resource", "details text").await?;
+        storage
+            .write_audit("create", "resource", "details text")
+            .await?;
 
         let stats = storage.cleanup_after_sync(10, true, 24).await?;
         assert!(stats.metrics_deleted >= 1);
@@ -837,11 +833,12 @@ mod tests {
         assert_eq!(stats.audits_compressed, 1);
 
         let db = storage.logs_db.lock().await;
-        let (severity, compressed, message, blob): (String, i64, String, Option<Vec<u8>>) = db.query_row(
-            "SELECT severity, compressed, message, message_gzip FROM logs",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )?;
+        let (severity, compressed, message, blob): (String, i64, String, Option<Vec<u8>>) = db
+            .query_row(
+                "SELECT severity, compressed, message, message_gzip FROM logs",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
         assert_eq!(severity, "Warning");
         let resolved = StorageManager::decompress_field(compressed, blob, message);
         assert_eq!(resolved, "keep me");
@@ -852,7 +849,8 @@ mod tests {
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )?;
-        let audit_resolved = StorageManager::decompress_field(compressed_audit, details_blob, details_text);
+        let audit_resolved =
+            StorageManager::decompress_field(compressed_audit, details_blob, details_text);
         assert!(audit_resolved.contains("details text"));
         drop(db);
 
@@ -887,8 +885,15 @@ mod tests {
         assert_eq!(stats.queue_pruned, 1);
 
         let db = storage.queue_db.lock().await;
-        let sent_remaining: i64 = db.query_row("SELECT COUNT(*) FROM queue WHERE state = 'Sent'", [], |r| r.get(0))?;
-        let pending_remaining: i64 = db.query_row("SELECT COUNT(*) FROM queue WHERE state = 'Pending'", [], |r| r.get(0))?;
+        let sent_remaining: i64 =
+            db.query_row("SELECT COUNT(*) FROM queue WHERE state = 'Sent'", [], |r| {
+                r.get(0)
+            })?;
+        let pending_remaining: i64 = db.query_row(
+            "SELECT COUNT(*) FROM queue WHERE state = 'Pending'",
+            [],
+            |r| r.get(0),
+        )?;
         assert_eq!(sent_remaining, 0);
         assert_eq!(pending_remaining, 1);
         Ok(())

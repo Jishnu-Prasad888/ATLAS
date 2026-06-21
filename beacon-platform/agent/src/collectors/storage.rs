@@ -3,7 +3,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::{collections::{HashMap, HashSet}, fs, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    sync::Mutex,
+};
 use sysinfo::Disks;
 
 use super::trait_collector::Collector;
@@ -61,7 +65,10 @@ pub fn collect_from(
             let device = disk.name().to_string_lossy().to_string();
             let mount_point = disk.mount_point().to_string_lossy().to_string();
             let base = base_device(&device);
-            if mount_point.starts_with("/var/lib/docker") || base == "overlay" || device == "overlay" {
+            if mount_point.starts_with("/var/lib/docker")
+                || base == "overlay"
+                || device == "overlay"
+            {
                 return None;
             }
             let total = disk.total_space();
@@ -187,10 +194,7 @@ pub fn collect_from(
 }
 
 fn base_device(name: &str) -> String {
-    let basename = name
-        .rsplit_once('/')
-        .map(|(_, tail)| tail)
-        .unwrap_or(name);
+    let basename = name.rsplit_once('/').map(|(_, tail)| tail).unwrap_or(name);
 
     if basename.starts_with("nvme") || basename.starts_with("mmcblk") {
         if let Some(pos) = basename.rfind('p') {

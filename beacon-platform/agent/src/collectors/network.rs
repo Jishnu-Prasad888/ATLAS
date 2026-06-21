@@ -43,9 +43,7 @@ pub fn collect_from(networks: &Networks) -> Value {
         .map(|(name, net)| {
             let meta = ip_meta.get(name);
             let sys_meta = read_sysfs_iface_meta(name);
-            let addresses = meta
-                .map(|m| m.addresses.clone())
-                .unwrap_or_else(Vec::new);
+            let addresses = meta.map(|m| m.addresses.clone()).unwrap_or_else(Vec::new);
 
             json!({
                 "name":          name,
@@ -149,7 +147,9 @@ struct ProcInfo {
 fn read_ip_addr_meta() -> HashMap<String, IpAddrInfo> {
     let mut map = HashMap::new();
     let output = Command::new("ip").args(["-j", "addr"]).output();
-    let Ok(output) = output else { return map; };
+    let Ok(output) = output else {
+        return map;
+    };
     if !output.status.success() {
         return map;
     }
@@ -159,15 +159,34 @@ fn read_ip_addr_meta() -> HashMap<String, IpAddrInfo> {
 }
 
 fn parse_ip_addr_json(content: &str, target: &mut HashMap<String, IpAddrInfo>) {
-    let Ok(value) = serde_json::from_str::<Value>(content) else { return; };
-    let Some(arr) = value.as_array() else { return; };
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return;
+    };
+    let Some(arr) = value.as_array() else {
+        return;
+    };
     for iface in arr {
-        let name = iface.get("ifname").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if name.is_empty() { continue; }
+        let name = iface
+            .get("ifname")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
         let mtu = iface.get("mtu").and_then(|v| v.as_u64()).map(|v| v as u32);
-        let state = iface.get("operstate").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let qdisc = iface.get("qdisc").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let qlen = iface.get("txqlen").and_then(|v| v.as_u64()).map(|v| v as u32);
+        let state = iface
+            .get("operstate")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let qdisc = iface
+            .get("qdisc")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let qlen = iface
+            .get("txqlen")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
         let flags = iface
             .get("flags")
             .and_then(|v| v.as_array())
@@ -197,7 +216,17 @@ fn parse_ip_addr_json(content: &str, target: &mut HashMap<String, IpAddrInfo>) {
             })
             .unwrap_or_else(Vec::new);
 
-        target.insert(name, IpAddrInfo { addresses, mtu, state, qdisc, qlen, flags });
+        target.insert(
+            name,
+            IpAddrInfo {
+                addresses,
+                mtu,
+                state,
+                qdisc,
+                qlen,
+                flags,
+            },
+        );
     }
 }
 
@@ -221,7 +250,10 @@ fn read_u32(path: impl AsRef<Path>) -> Option<u32> {
 }
 
 fn read_string(path: impl AsRef<Path>) -> Option<String> {
-    fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn collect_kernel_sockets() -> Vec<SocketEntry> {
@@ -234,7 +266,9 @@ fn collect_kernel_sockets() -> Vec<SocketEntry> {
 }
 
 fn parse_socket_table(path: &str, proto: &str, is_v6: bool) -> Vec<SocketEntry> {
-    let Ok(content) = fs::read_to_string(path) else { return Vec::new(); };
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
     content
         .lines()
         .skip(1)
@@ -325,25 +359,41 @@ fn decode_ipv6(hex: &str) -> Option<std::net::Ipv6Addr> {
 
 fn build_inode_process_map(max_pids: usize, max_fds_per_pid: usize) -> HashMap<u64, ProcInfo> {
     let mut map = HashMap::new();
-    let Ok(entries) = fs::read_dir("/proc") else { return map; };
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return map;
+    };
 
     for (idx, entry) in entries.flatten().enumerate() {
-        if idx >= max_pids { break; }
+        if idx >= max_pids {
+            break;
+        }
         let filename = entry.file_name();
         let pid_str = filename.to_string_lossy();
         if !pid_str.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        let pid: u32 = match pid_str.parse() { Ok(p) => p, Err(_) => continue };
+        let pid: u32 = match pid_str.parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
         let base = entry.path();
-        let name = fs::read_to_string(base.join("comm")).unwrap_or_default().trim().to_string();
-        let exe = fs::read_link(base.join("exe")).ok().map(|p| p.display().to_string());
+        let name = fs::read_to_string(base.join("comm"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let exe = fs::read_link(base.join("exe"))
+            .ok()
+            .map(|p| p.display().to_string());
 
         let fd_dir = fs::read_dir(base.join("fd"));
-        let Ok(fd_iter) = fd_dir else { continue; };
+        let Ok(fd_iter) = fd_dir else {
+            continue;
+        };
 
         for (fd_idx, fd_entry) in fd_iter.flatten().enumerate() {
-            if fd_idx >= max_fds_per_pid { break; }
+            if fd_idx >= max_fds_per_pid {
+                break;
+            }
             if let Ok(link) = fs::read_link(fd_entry.path()) {
                 if let Some(inode) = link.to_string_lossy().strip_prefix("socket:[") {
                     if let Some(inode) = inode.strip_suffix(']') {
@@ -363,7 +413,10 @@ fn build_inode_process_map(max_pids: usize, max_fds_per_pid: usize) -> HashMap<u
     map
 }
 
-fn build_process_connections(sockets: &[SocketEntry], inode_map: &HashMap<u64, ProcInfo>) -> Vec<Value> {
+fn build_process_connections(
+    sockets: &[SocketEntry],
+    inode_map: &HashMap<u64, ProcInfo>,
+) -> Vec<Value> {
     sockets
         .iter()
         .filter_map(|s| {

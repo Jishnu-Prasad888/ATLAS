@@ -38,11 +38,13 @@ import type {
   StoragePartition,
   KernelData,
   ProcessData,
+  GpuData,
 } from '@/types'
 
 const METRIC_OPTIONS: Array<{ value: MetricType; label: string }> = [
   { value: 'cpu', label: 'CPU' },
   { value: 'ram', label: 'RAM' },
+  { value: 'gpu', label: 'GPU' },
   { value: 'network', label: 'Network' },
   { value: 'storage', label: 'Storage' },
 ]
@@ -57,6 +59,7 @@ const TIME_RANGES = [
 
 const STORAGE_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316', '#e11d48', '#0ea5e9', '#84cc16', '#f59e0b', '#14b8a6']
 const NETWORK_COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#14b8a6', '#e11d48', '#0ea5e9', '#84cc16', '#f59e0b']
+const GPU_COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#0ea5e9', '#e11d48', '#14b8a6', '#84cc16', '#f59e0b']
 
 function isoAgo(hours: number): string {
   return new Date(Date.now() - hours * 3600 * 1000).toISOString()
@@ -75,6 +78,7 @@ export function MetricsPage() {
   const [killTarget, setKillTarget] = useState<{ pid: number; name: string } | null>(null)
   const [killLogs, setKillLogs] = useState<string[]>([])
   const [procGrouping, setProcGrouping] = usePersistedState<'flat' | 'byExe'>('metrics_proc_grouping', 'flat')
+  const [gpuView, setGpuView] = usePersistedState<'combined' | 'per'>('metrics_gpu_view', 'combined')
   const timeRange = TIME_RANGES[timeRangeIdx]
   const addNotification = useUiStore((s) => s.addNotification)
 
@@ -172,7 +176,7 @@ export function MetricsPage() {
   }, [qc, queryParams, shouldFallbackToRaw, rawFallbackParams])
 
   const baseChartData = useMemo(() => {
-    if (!effectiveSeries.length || metricType === 'storage') return []
+    if (!effectiveSeries.length || metricType === 'storage' || metricType === 'gpu') return []
 
     const sorted = [...effectiveSeries].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
@@ -252,6 +256,7 @@ export function MetricsPage() {
   const ram = latest.ram?.data as unknown as RamData | undefined
   const network = latest.network?.data as unknown as NetworkData | undefined
   const storage = latest.storage?.data as unknown as StorageData | undefined
+  const gpu = latest.gpu?.data as unknown as GpuData | undefined
   const processData = latest.process?.data as unknown as ProcessData | undefined
   const storagePartitions = useMemo<StoragePartition[]>(() => {
     if (!storage) return []
@@ -539,10 +544,96 @@ export function MetricsPage() {
     return { ingress, egress }
   }, [effectiveSeries, metricType, networkSeries, timeRange.hours])
 
+  const gpuSeries = useMemo(() => {
+    if (metricType !== 'gpu' || !effectiveSeries.length) return [] as Array<{ key: string; label: string }>
+    const map = new Map<string, string>()
+    effectiveSeries.forEach((m) => {
+      const d = m.data as unknown as GpuData
+      d.gpus?.forEach((g, idx) => {
+        const key = g.uuid || `gpu-${g.index ?? idx}`
+        if (!map.has(key)) map.set(key, g.name || `GPU ${g.index ?? idx}`)
+      })
+    })
+    return Array.from(map.entries()).map(([key, label]) => ({ key, label }))
+  }, [effectiveSeries, metricType])
+
+  const gpuSeriesColors = useMemo(() => {
+    const map: Record<string, string> = {}
+    gpuSeries.forEach((s, idx) => {
+      map[s.key] = GPU_COLORS[idx % GPU_COLORS.length]
+    })
+    return map
+  }, [gpuSeries])
+
+  const gpuChartData = useMemo(() => {
+    if (metricType !== 'gpu' || !effectiveSeries.length || !gpuSeries.length) return [] as Array<Record<string, number | string | null>>
+
+    const sorted = [...effectiveSeries].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    )
+
+    let prevTs: number | null = null
+    const diffs: number[] = []
+    for (const metric of sorted) {
+      const ts = new Date(metric.timestamp).getTime()
+      if (prevTs !== null) {
+        const diff = ts - prevTs
+        if (diff > 0) diffs.push(diff)
+      }
+      prevTs = ts
+    }
+
+    const baseGap = diffs.length ? Math.min(...diffs) : null
+    const showDate = timeRange.hours >= 24
+    const formatTimestamp = (date: Date) => showDate
+      ? date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      : date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+    const data: Array<Record<string, number | string | null>> = []
+    prevTs = null
+
+    const pushGapMarker = (gapMs: number) => {
+      if (!gapMs || !baseGap) return
+      const label = formatTimestamp(new Date(gapMs))
+      const row: Record<string, number | string | null> = { t: label }
+      gpuSeries.forEach((s) => { row[s.key] = null })
+      data.push(row)
+    }
+
+    for (const metric of sorted) {
+      const ts = new Date(metric.timestamp)
+      const tsMs = ts.getTime()
+
+      if (prevTs !== null && baseGap && tsMs - prevTs > baseGap * 2) {
+        pushGapMarker(prevTs + baseGap)
+      }
+
+      const payload = metric.data as unknown as GpuData
+      const row: Record<string, number | string | null> = { t: formatTimestamp(ts) }
+      gpuSeries.forEach((s) => { row[s.key] = null })
+      payload.gpus?.forEach((g, idx) => {
+        const key = g.uuid || `gpu-${g.index ?? idx}`
+        row[key] = g.utilization_pct ?? 0
+      })
+
+      data.push(row)
+      prevTs = tsMs
+    }
+
+    return data
+  }, [effectiveSeries, gpuSeries, metricType, timeRange.hours])
+
   const hasData = metricType === 'storage'
     ? storageChartData.length > 0
     : metricType === 'network'
       ? networkChartData.ingress.length > 0 || networkChartData.egress.length > 0
+      : metricType === 'gpu'
+        ? gpuChartData.length > 0
       : baseChartData.length > 0
 
   const kernel = latest.kernel?.data as unknown as KernelData | undefined
@@ -729,6 +820,16 @@ export function MetricsPage() {
               )}
             </Card>
           )}
+          {gpu && !gpu.collector_disabled && gpu.gpus.length > 0 && (
+            <Card>
+              <p className="text-xs text-[--color-text-muted] font-mono mb-2">GPU</p>
+              <GaugeBar label="Avg util" value={gpu.summary?.avg_utilization_pct ?? 0} />
+              <div className="text-xs font-mono text-[--color-text-dim] mt-2 space-y-1">
+                <p>{gpu.gpus.length} device{gpu.gpus.length > 1 ? 's' : ''}</p>
+                <p>Mem avg {Math.round(gpu.summary?.avg_mem_utilization_pct ?? 0)}%</p>
+              </div>
+            </Card>
+          )}
           {primaryInterface && (
             <Card>
               <p className="text-xs text-[--color-text-muted] font-mono mb-2">Network ({primaryInterface.name})</p>
@@ -890,6 +991,106 @@ export function MetricsPage() {
               </div>
             )}
 
+          </div>
+        ) : metricType === 'gpu' ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-mono text-[--color-text-dim] uppercase tracking-wide mb-0">View</p>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant={gpuView === 'combined' ? 'primary' : 'ghost'} onClick={() => setGpuView('combined')}>
+                  Combined
+                </Button>
+                <Button size="sm" variant={gpuView === 'per' ? 'primary' : 'ghost'} onClick={() => setGpuView('per')}>
+                  Per GPU
+                </Button>
+              </div>
+            </div>
+
+            {gpuView === 'combined' ? (
+              <div style={{ width: '100%', height: 260 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={gpuChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                    <XAxis dataKey="t" tick={{ fontSize: 10, fontFamily: 'IBM Plex Mono', fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10, fontFamily: 'IBM Plex Mono', fill: 'var(--color-text-muted)' }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 4, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+                      labelStyle={{ color: 'var(--color-text-muted)' }}
+                      formatter={(value: unknown, name: unknown) => {
+                        const num = typeof value === 'number' ? value : Number(value ?? 0)
+                        const label = gpuSeries.find((s) => s.key === name)?.label ?? String(name)
+                        return [`${num.toFixed(1)}%`, label] as [string, string]
+                      }}
+                    />
+                    {gpuSeries.map((s) => (
+                      <Area
+                        key={s.key}
+                        type="monotone"
+                        dataKey={s.key}
+                        stroke={gpuSeriesColors[s.key] ?? '#3b82f6'}
+                        fill="none"
+                        strokeWidth={1.5}
+                        dot={false}
+                        connectNulls={false}
+                        name={s.label}
+                      />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {gpuSeries.map((s) => {
+                  const seriesData = gpuChartData.map((row) => ({ t: row.t, value: (row as Record<string, number | string | null>)[s.key] }))
+                  return (
+                    <Card key={s.key} padding={false} className="overflow-hidden">
+                      <div className="px-3 pt-2 pb-1 flex items-center justify-between">
+                        <span className="text-xs font-mono text-[--color-text] truncate">{s.label}</span>
+                        <span className="h-2 w-2 rounded-sm" style={{ background: gpuSeriesColors[s.key] ?? '#3b82f6' }} />
+                      </div>
+                      <div style={{ width: '100%', height: 140 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={seriesData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                            <XAxis dataKey="t" hide interval="preserveStartEnd" />
+                            <YAxis hide domain={[0, 100]} />
+                            <Tooltip
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 4, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+                              labelStyle={{ color: 'var(--color-text-muted)' }}
+                              formatter={(value: unknown) => {
+                                const num = typeof value === 'number' ? value : Number(value ?? 0)
+                                return [`${num.toFixed(1)}%`] as [string]
+                              }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="value"
+                              stroke={gpuSeriesColors[s.key] ?? '#3b82f6'}
+                              fill="none"
+                              strokeWidth={1.5}
+                              dot={false}
+                              connectNulls={false}
+                              name={s.label}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+
+            {gpuSeries.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 mt-1">
+                {gpuSeries.map((s) => (
+                  <div key={s.key} className="flex items-center gap-2 text-[11px] font-mono text-[--color-text-dim]">
+                    <span className="h-2 w-2 rounded-sm" style={{ background: gpuSeriesColors[s.key] ?? '#3b82f6' }} />
+                    <span>{s.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <>

@@ -202,7 +202,10 @@ impl Collector for DockerCollector {
         // ── images (throttled to 300s) ───────────────────────────────────
         let images_val = {
             let mut last_img_ts = self.last_images_ts.lock().await;
-            if last_img_ts.map(|t| now_ts - t < IMAGES_INTERVAL as i64).unwrap_or(false) {
+            if last_img_ts
+                .map(|t| now_ts - t < IMAGES_INTERVAL as i64)
+                .unwrap_or(false)
+            {
                 json!({ "interval_seconds": IMAGES_INTERVAL, "images": [] })
             } else {
                 let result = query_docker_images().await.unwrap_or_default();
@@ -369,7 +372,11 @@ fn build_inspect_status_str(state: &Value) -> String {
         "exited" => format!(
             "Exited ({}) {}",
             exit,
-            if finished.len() > 10 { &finished[..10] } else { finished }
+            if finished.len() > 10 {
+                &finished[..10]
+            } else {
+                finished
+            }
         ),
         "restarting" => format!("Restarting"),
         "paused" => format!("Paused"),
@@ -383,25 +390,35 @@ fn build_inspect_status_str(state: &Value) -> String {
 
 fn build_inventory_item(c: &Value) -> Value {
     let cid = c["Id"].as_str().unwrap_or("").to_string();
-    let name = c["Name"].as_str().unwrap_or("").trim_start_matches('/').to_string();
+    let name = c["Name"]
+        .as_str()
+        .unwrap_or("")
+        .trim_start_matches('/')
+        .to_string();
     let image = c["Config"]["Image"].as_str().unwrap_or("").to_string();
     let image_id = c["Image"].as_str().unwrap_or("").to_string();
     let created_at = normalize_ts(c["Created"].as_str());
     let state_obj = &c["State"];
     let started_at = normalize_ts(state_obj["StartedAt"].as_str());
     let finished_at = normalize_ts(state_obj["FinishedAt"].as_str());
-    let state = state_obj["Status"].as_str().unwrap_or("unknown").to_lowercase();
+    let state = state_obj["Status"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_lowercase();
     let status = build_inspect_status_str(state_obj);
     let restart_count = state_obj["RestartCount"].as_i64().unwrap_or(0);
     let pid_val = state_obj["Pid"].as_i64().unwrap_or(0);
 
-    let labels = c["Config"]["Labels"].as_object().map(|obj| {
-        let mut m = serde_json::Map::new();
-        for (k, v) in obj {
-            m.insert(k.clone(), v.as_str().unwrap_or("").to_string().into());
-        }
-        Value::Object(m)
-    }).unwrap_or(json!({}));
+    let labels = c["Config"]["Labels"]
+        .as_object()
+        .map(|obj| {
+            let mut m = serde_json::Map::new();
+            for (k, v) in obj {
+                m.insert(k.clone(), v.as_str().unwrap_or("").to_string().into());
+            }
+            Value::Object(m)
+        })
+        .unwrap_or(json!({}));
 
     let env: Vec<Value> = c["Config"]["Env"]
         .as_array()
@@ -410,7 +427,10 @@ fn build_inventory_item(c: &Value) -> Value {
 
     let hostname = c["Config"]["Hostname"].as_str().unwrap_or("").to_string();
     let platform = c["Platform"].as_str().unwrap_or("").to_string();
-    let runtime = c["HostConfig"]["Runtime"].as_str().unwrap_or("").to_string();
+    let runtime = c["HostConfig"]["Runtime"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
 
     json!({
         "container_id": cid,
@@ -570,10 +590,15 @@ fn parse_byte_quantity(input: &str) -> Option<u64> {
         "TB" => 1_000_000_000_000.0,
         "PB" => 1_000_000_000_000_000.0,
         _ => {
-            if unit == "MI" { 1024.0_f64.powi(2) }
-            else if unit == "GI" { 1024.0_f64.powi(3) }
-            else if unit == "KI" { 1024.0 }
-            else { return None; }
+            if unit == "MI" {
+                1024.0_f64.powi(2)
+            } else if unit == "GI" {
+                1024.0_f64.powi(3)
+            } else if unit == "KI" {
+                1024.0
+            } else {
+                return None;
+            }
         }
     };
 
@@ -588,7 +613,9 @@ fn find_stats_for_container<'a>(
     if !container_id.is_empty() {
         let id_lower = container_id.to_ascii_lowercase();
         for stat in stats {
-            if stat.id.is_empty() { continue; }
+            if stat.id.is_empty() {
+                continue;
+            }
             let stat_id_lower = stat.id.to_ascii_lowercase();
             if stat_id_lower == id_lower
                 || id_lower.starts_with(&stat_id_lower)
@@ -611,10 +638,14 @@ fn find_stats_for_container<'a>(
 async fn query_docker_events(since: i64, until: i64) -> Result<Vec<Value>> {
     let (stdout, _) = run_cmd(&[
         "events",
-        "--since", &since.to_string(),
-        "--until", &until.to_string(),
-        "--format", "{{json .}}",
-    ]).await?;
+        "--since",
+        &since.to_string(),
+        "--until",
+        &until.to_string(),
+        "--format",
+        "{{json .}}",
+    ])
+    .await?;
 
     let events: Vec<Value> = stdout
         .lines()
@@ -626,29 +657,32 @@ async fn query_docker_events(since: i64, until: i64) -> Result<Vec<Value>> {
 }
 
 fn build_events_array(raw_events: &[Value]) -> Value {
-    let items: Vec<Value> = raw_events.iter().map(|e| {
-        json!({
-            "timestamp": e["time"].as_i64()
-                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|| Utc::now().to_rfc3339()),
-            "container_id": e["id"].as_str().unwrap_or("").to_string(),
-            "event": e["action"].as_str().unwrap_or("").to_string(),
-            "actor": e["actor"]["attributes"]["name"].as_str()
-                .or_else(|| e["id"].as_str())
-                .unwrap_or("")
-                .to_string(),
-            "attributes": e["actor"]["attributes"].as_object()
-                .map(|attrs| {
-                    let mut m = serde_json::Map::new();
-                    for (k, v) in attrs {
-                        m.insert(k.clone(), v.clone());
-                    }
-                    Value::Object(m)
-                })
-                .unwrap_or(json!({}))
+    let items: Vec<Value> = raw_events
+        .iter()
+        .map(|e| {
+            json!({
+                "timestamp": e["time"].as_i64()
+                    .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|| Utc::now().to_rfc3339()),
+                "container_id": e["id"].as_str().unwrap_or("").to_string(),
+                "event": e["action"].as_str().unwrap_or("").to_string(),
+                "actor": e["actor"]["attributes"]["name"].as_str()
+                    .or_else(|| e["id"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                "attributes": e["actor"]["attributes"].as_object()
+                    .map(|attrs| {
+                        let mut m = serde_json::Map::new();
+                        for (k, v) in attrs {
+                            m.insert(k.clone(), v.clone());
+                        }
+                        Value::Object(m)
+                    })
+                    .unwrap_or(json!({}))
+            })
         })
-    }).collect();
+        .collect();
 
     json!(items)
 }
@@ -659,11 +693,15 @@ async fn query_docker_processes(containers: &[Value]) -> Vec<Value> {
     let mut samples = Vec::new();
     for c in containers {
         let cid = c["container_id"].as_str().unwrap_or("");
-        if cid.is_empty() { continue; }
+        if cid.is_empty() {
+            continue;
+        }
         match run_cmd(&["top", cid, "axo", "pid,ppid,pcpu,rss,state,cmd"]).await {
             Ok((stdout, _)) => {
                 let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
-                if lines.len() < 2 { continue; }
+                if lines.len() < 2 {
+                    continue;
+                }
                 let processes: Vec<Value> = lines[1..]
                     .iter()
                     .filter_map(|line| {
@@ -700,18 +738,32 @@ async fn query_docker_logs(containers: &[Value]) -> Vec<Value> {
     let mut samples = Vec::new();
     for c in containers {
         let cid = c["container_id"].as_str().unwrap_or("");
-        if cid.is_empty() { continue; }
+        if cid.is_empty() {
+            continue;
+        }
         match run_cmd(&[
-            "logs", "--tail", &LOGS_TAIL.to_string(), "--timestamps", cid,
-        ]).await {
+            "logs",
+            "--tail",
+            &LOGS_TAIL.to_string(),
+            "--timestamps",
+            cid,
+        ])
+        .await
+        {
             Ok((stdout, _)) => {
                 let mut entries = Vec::new();
                 for line in stdout.lines().filter(|l| !l.is_empty()) {
                     let timestamp = if line.len() > 30 {
                         let ts_end = line[..30].rfind(' ').unwrap_or(30);
                         line[..ts_end].trim().to_string()
-                    } else { String::new() };
-                    let message = if line.len() > 31 { line[31..].to_string() } else { line.to_string() };
+                    } else {
+                        String::new()
+                    };
+                    let message = if line.len() > 31 {
+                        line[31..].to_string()
+                    } else {
+                        line.to_string()
+                    };
                     entries.push(json!({
                         "timestamp": timestamp,
                         "stream": "stdout",
@@ -735,9 +787,7 @@ async fn query_docker_logs(containers: &[Value]) -> Vec<Value> {
 // ─── Images via `docker images` ────────────────────────────────────────────
 
 async fn query_docker_images() -> Result<Value> {
-    let (stdout, _) = run_cmd(&[
-        "images", "--format", "{{json .}}", "--no-trunc",
-    ]).await?;
+    let (stdout, _) = run_cmd(&["images", "--format", "{{json .}}", "--no-trunc"]).await?;
 
     let images: Vec<Value> = stdout
         .lines()
@@ -770,9 +820,13 @@ async fn query_docker_images() -> Result<Value> {
 
 fn parse_image_size(s: &str) -> u64 {
     let s = s.trim();
-    if s.is_empty() || s == "0B" { return 0; }
+    if s.is_empty() || s == "0B" {
+        return 0;
+    }
     let (num_part, unit_part) = s.split_at(
-        s.chars().position(|c| !c.is_ascii_digit() && c != '.').unwrap_or(s.len())
+        s.chars()
+            .position(|c| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(s.len()),
     );
     let val = num_part.parse::<f64>().unwrap_or(0.0);
     let unit = unit_part.trim().to_uppercase();
@@ -842,7 +896,11 @@ fn read_proc_stat() -> (f64, f64, f64, f64, u64) {
         let idle: u64 = parts[4].parse().unwrap_or(0);
         let total = user + nice + system + idle;
         let busy = user + nice + system;
-        let pct = if total > 0 { (busy as f64 / total as f64) * 100.0 } else { 0.0 };
+        let pct = if total > 0 {
+            (busy as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
         (pct, load_1, load_5, load_15, uptime)
     } else {
         (0.0, load_1, load_5, load_15, uptime)
@@ -855,9 +913,19 @@ fn read_proc_meminfo() -> (u64, u64) {
     let mut available = 0u64;
     for line in content.lines() {
         if line.starts_with("MemTotal:") {
-            total = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0) * 1024;
+            total = line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0)
+                * 1024;
         } else if line.starts_with("MemAvailable:") {
-            available = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0) * 1024;
+            available = line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0)
+                * 1024;
         }
     }
     let used = total.saturating_sub(available);
@@ -891,22 +959,26 @@ fn read_disk_usage() -> (u64, u64) {
 // ─── cgroup mappings ──────────────────────────────────────────────────────
 
 fn collect_cgroup_mappings(raw_inspect: &[Value]) -> Value {
-    let mappings: Vec<Value> = raw_inspect.iter().map(|c| {
-        let cid = c["Id"].as_str().unwrap_or("").to_string();
-        let pid = c["State"]["Pid"].as_i64().unwrap_or(0);
-        let cgroup_path = if pid > 0 {
-            let path = format!("/proc/{pid}/cgroup");
-            std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|content| {
-                    content.lines()
+    let mappings: Vec<Value> = raw_inspect
+        .iter()
+        .map(|c| {
+            let cid = c["Id"].as_str().unwrap_or("").to_string();
+            let pid = c["State"]["Pid"].as_i64().unwrap_or(0);
+            let cgroup_path = if pid > 0 {
+                let path = format!("/proc/{pid}/cgroup");
+                std::fs::read_to_string(&path).ok().and_then(|content| {
+                    content
+                        .lines()
                         .filter_map(|line| line.rsplit(':').next())
                         .map(|s| s.trim().to_string())
                         .find(|s| !s.is_empty())
                 })
-        } else { None };
-        json!({ "container_id": cid, "cgroup_path": cgroup_path })
-    }).collect();
+            } else {
+                None
+            };
+            json!({ "container_id": cid, "cgroup_path": cgroup_path })
+        })
+        .collect();
 
     json!({ "mappings": mappings })
 }
@@ -929,7 +1001,16 @@ fn build_payload(
 ) -> Value {
     // state counts & summary
     let mut state_counts: HashMap<String, usize> = HashMap::new();
-    for s in &["created", "running", "paused", "restarting", "exited", "dead", "removing", "unknown"] {
+    for s in &[
+        "created",
+        "running",
+        "paused",
+        "restarting",
+        "exited",
+        "dead",
+        "removing",
+        "unknown",
+    ] {
         state_counts.insert(s.to_string(), 0);
     }
 
@@ -944,7 +1025,9 @@ fn build_payload(
         *state_counts.entry(state.clone()).or_insert(0) += 1;
         match state.as_str() {
             "running" => running += 1,
-            "exited" | "dead" => { stopped += 1; },
+            "exited" | "dead" => {
+                stopped += 1;
+            }
             "paused" => paused += 1,
             "restarting" => restarting += 1,
             _ => {}
@@ -979,19 +1062,61 @@ fn build_payload(
         let cid = get_container_id(c);
         let name = get_container_name(c);
         let state = get_container_state(c);
-        let health = c.get("Health").and_then(|h| h.as_str()).unwrap_or("").to_string();
-        let restart_count: u64 = c.get("RestartCount")
-            .and_then(|r| r.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0);
-        let exit_code: i64 = c.get("ExitCode")
-            .and_then(|e| e.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0);
-        let ports = c.get("Ports").and_then(|p| p.as_str()).unwrap_or("").to_string();
-        let image = c.get("Image").and_then(|i| i.as_str()).unwrap_or("").to_string();
-        let command = c.get("Command").and_then(|cmd| cmd.as_str()).unwrap_or("").to_string();
-        let created = c.get("CreatedAt").and_then(|t| t.as_str()).unwrap_or("").to_string();
-        let mounts = c.get("Mounts").and_then(|m| m.as_str()).unwrap_or("").to_string();
-        let networks = c.get("Networks").and_then(|n| n.as_str()).unwrap_or("").to_string();
-        let labels = c.get("Labels").and_then(|l| l.as_str()).unwrap_or("").to_string();
-        let platform = c.get("Platform").and_then(|p| p.as_str()).unwrap_or("").to_string();
+        let health = c
+            .get("Health")
+            .and_then(|h| h.as_str())
+            .unwrap_or("")
+            .to_string();
+        let restart_count: u64 = c
+            .get("RestartCount")
+            .and_then(|r| r.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let exit_code: i64 = c
+            .get("ExitCode")
+            .and_then(|e| e.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let ports = c
+            .get("Ports")
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_string();
+        let image = c
+            .get("Image")
+            .and_then(|i| i.as_str())
+            .unwrap_or("")
+            .to_string();
+        let command = c
+            .get("Command")
+            .and_then(|cmd| cmd.as_str())
+            .unwrap_or("")
+            .to_string();
+        let created = c
+            .get("CreatedAt")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string();
+        let mounts = c
+            .get("Mounts")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        let networks = c
+            .get("Networks")
+            .and_then(|n| n.as_str())
+            .unwrap_or("")
+            .to_string();
+        let labels = c
+            .get("Labels")
+            .and_then(|l| l.as_str())
+            .unwrap_or("")
+            .to_string();
+        let platform = c
+            .get("Platform")
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_string();
 
         if let Some(stat) = find_stats_for_container(stats, &cid, &name) {
             cpu_sum += stat.cpu_percent;
@@ -1048,27 +1173,30 @@ fn build_payload(
     }
 
     // health statuses from raw inspect
-    let health_statuses: Vec<Value> = raw_inspect.iter().map(|c| {
-        let cid = c["Id"].as_str().unwrap_or("");
-        let state = &c["State"];
-        let health = &state["Health"];
-        let log_entries = health["Log"].as_array();
-        let last_log = log_entries.and_then(|logs| logs.last());
+    let health_statuses: Vec<Value> = raw_inspect
+        .iter()
+        .map(|c| {
+            let cid = c["Id"].as_str().unwrap_or("");
+            let state = &c["State"];
+            let health = &state["Health"];
+            let log_entries = health["Log"].as_array();
+            let last_log = log_entries.and_then(|logs| logs.last());
 
-        json!({
-            "container_id": cid,
-            "health_status": health["Status"].as_str().unwrap_or("none").to_string(),
-            "failing_streak": health["FailingStreak"].as_u64().unwrap_or(0),
-            "last_check": last_log.and_then(|l| {
-                let s = l["End"].as_str().unwrap_or("");
-                if s.is_empty() || s.starts_with("0001") { None } else { Some(s.to_string()) }
-            }),
-            "last_output": last_log.and_then(|l| {
-                let s = l["Output"].as_str().unwrap_or("");
-                if s.is_empty() { None } else { Some(s.to_string()) }
-            }),
+            json!({
+                "container_id": cid,
+                "health_status": health["Status"].as_str().unwrap_or("none").to_string(),
+                "failing_streak": health["FailingStreak"].as_u64().unwrap_or(0),
+                "last_check": last_log.and_then(|l| {
+                    let s = l["End"].as_str().unwrap_or("");
+                    if s.is_empty() || s.starts_with("0001") { None } else { Some(s.to_string()) }
+                }),
+                "last_output": last_log.and_then(|l| {
+                    let s = l["Output"].as_str().unwrap_or("");
+                    if s.is_empty() { None } else { Some(s.to_string()) }
+                }),
+            })
         })
-    }).collect();
+        .collect();
 
     // security profiles from raw inspect
     let security_profiles: Vec<Value> = raw_inspect.iter().map(|c| {
@@ -1149,28 +1277,37 @@ fn build_payload(
     }).collect();
 
     // filesystem from raw inspect mounts
-    let fs_samples: Vec<Value> = raw_inspect.iter().map(|c| {
-        let cid = c["Id"].as_str().unwrap_or("");
-        let mounts_arr = c["Mounts"].as_array().map(|a| a.clone()).unwrap_or_default();
-        let volumes: Vec<Value> = mounts_arr.iter().map(|m| {
-            json!({
-                "name": m["Name"].as_str().unwrap_or("vol").to_string(),
-                "destination": m["Destination"].as_str().unwrap_or("").to_string(),
-                "source": m["Source"].as_str().map(|s| s.to_string()),
-                "total_bytes": null,
-                "used_bytes": null,
-                "inode_usage": null,
-            })
-        }).collect();
+    let fs_samples: Vec<Value> = raw_inspect
+        .iter()
+        .map(|c| {
+            let cid = c["Id"].as_str().unwrap_or("");
+            let mounts_arr = c["Mounts"]
+                .as_array()
+                .map(|a| a.clone())
+                .unwrap_or_default();
+            let volumes: Vec<Value> = mounts_arr
+                .iter()
+                .map(|m| {
+                    json!({
+                        "name": m["Name"].as_str().unwrap_or("vol").to_string(),
+                        "destination": m["Destination"].as_str().unwrap_or("").to_string(),
+                        "source": m["Source"].as_str().map(|s| s.to_string()),
+                        "total_bytes": null,
+                        "used_bytes": null,
+                        "inode_usage": null,
+                    })
+                })
+                .collect();
 
-        json!({
-            "container_id": cid,
-            "writable_layer_size": c["SizeRw"],
-            "total_volume_usage": null,
-            "inode_usage": null,
-            "volumes": volumes,
+            json!({
+                "container_id": cid,
+                "writable_layer_size": c["SizeRw"],
+                "total_volume_usage": null,
+                "inode_usage": null,
+                "volumes": volumes,
+            })
         })
-    }).collect();
+        .collect();
 
     // inventory items (rich version)
     let inventory_val = json!({
@@ -1185,60 +1322,72 @@ fn build_payload(
     });
 
     // metrics (from docker stats)
-    let cpu_samples: Vec<Value> = stats.iter().map(|s| {
-        json!({
-            "container_id": s.id,
-            "cpu_total_usage": 0,
-            "cpu_system_usage": 0,
-            "cpu_online_cores": 0,
-            "cpu_percent": s.cpu_percent,
-            "cpu_user_time": 0,
-            "cpu_kernel_time": 0,
-            "cpu_throttled_periods": 0,
-            "cpu_throttled_time": 0,
+    let cpu_samples: Vec<Value> = stats
+        .iter()
+        .map(|s| {
+            json!({
+                "container_id": s.id,
+                "cpu_total_usage": 0,
+                "cpu_system_usage": 0,
+                "cpu_online_cores": 0,
+                "cpu_percent": s.cpu_percent,
+                "cpu_user_time": 0,
+                "cpu_kernel_time": 0,
+                "cpu_throttled_periods": 0,
+                "cpu_throttled_time": 0,
+            })
         })
-    }).collect();
+        .collect();
 
-    let mem_samples: Vec<Value> = stats.iter().map(|s| {
-        json!({
-            "container_id": s.id,
-            "memory_usage": s.memory_usage_bytes,
-            "memory_limit": s.memory_limit_bytes,
-            "memory_percent": s.memory_percent,
-            "memory_cache": 0,
-            "memory_rss": 0,
-            "memory_swap": 0,
-            "memory_failcnt": 0,
-            "oom_events": 0,
+    let mem_samples: Vec<Value> = stats
+        .iter()
+        .map(|s| {
+            json!({
+                "container_id": s.id,
+                "memory_usage": s.memory_usage_bytes,
+                "memory_limit": s.memory_limit_bytes,
+                "memory_percent": s.memory_percent,
+                "memory_cache": 0,
+                "memory_rss": 0,
+                "memory_swap": 0,
+                "memory_failcnt": 0,
+                "oom_events": 0,
+            })
         })
-    }).collect();
+        .collect();
 
-    let disk_samples: Vec<Value> = stats.iter().map(|s| {
-        json!({
-            "container_id": s.id,
-            "read_bytes": s.block_read_bytes,
-            "write_bytes": s.block_write_bytes,
-            "read_ops": 0,
-            "write_ops": 0,
+    let disk_samples: Vec<Value> = stats
+        .iter()
+        .map(|s| {
+            json!({
+                "container_id": s.id,
+                "read_bytes": s.block_read_bytes,
+                "write_bytes": s.block_write_bytes,
+                "read_ops": 0,
+                "write_ops": 0,
+            })
         })
-    }).collect();
+        .collect();
 
-    let net_samples: Vec<Value> = stats.iter().map(|s| {
-        json!({
-            "container_id": s.id,
-            "interfaces": [{
-                "name": "eth0",
-                "rx_bytes": s.network_rx_bytes,
-                "tx_bytes": s.network_tx_bytes,
-                "rx_packets": 0,
-                "tx_packets": 0,
-                "rx_errors": 0,
-                "tx_errors": 0,
-                "rx_dropped": 0,
-                "tx_dropped": 0,
-            }],
+    let net_samples: Vec<Value> = stats
+        .iter()
+        .map(|s| {
+            json!({
+                "container_id": s.id,
+                "interfaces": [{
+                    "name": "eth0",
+                    "rx_bytes": s.network_rx_bytes,
+                    "tx_bytes": s.network_tx_bytes,
+                    "rx_packets": 0,
+                    "tx_packets": 0,
+                    "rx_errors": 0,
+                    "tx_errors": 0,
+                    "rx_dropped": 0,
+                    "tx_dropped": 0,
+                }],
+            })
         })
-    }).collect();
+        .collect();
 
     let metrics = json!({
         "cpu": { "interval_seconds": CPU_INTERVAL, "samples": cpu_samples },
@@ -1303,14 +1452,23 @@ fn get_container_state(container: &Value) -> String {
 
 fn parse_state_from_status(status: &str) -> String {
     let lower = status.to_lowercase();
-    if lower.starts_with("up") { "running".to_string() }
-    else if lower.starts_with("exited") { "exited".to_string() }
-    else if lower.starts_with("restarting") { "restarting".to_string() }
-    else if lower.starts_with("paused") { "paused".to_string() }
-    else if lower.starts_with("created") || lower.starts_with("créé") { "created".to_string() }
-    else if lower.starts_with("dead") { "dead".to_string() }
-    else if lower.contains("removal") || lower.contains("removing") { "removing".to_string() }
-    else { "unknown".to_string() }
+    if lower.starts_with("up") {
+        "running".to_string()
+    } else if lower.starts_with("exited") {
+        "exited".to_string()
+    } else if lower.starts_with("restarting") {
+        "restarting".to_string()
+    } else if lower.starts_with("paused") {
+        "paused".to_string()
+    } else if lower.starts_with("created") || lower.starts_with("créé") {
+        "created".to_string()
+    } else if lower.starts_with("dead") {
+        "dead".to_string()
+    } else if lower.contains("removal") || lower.contains("removing") {
+        "removing".to_string()
+    } else {
+        "unknown".to_string()
+    }
 }
 
 fn get_container_name(container: &Value) -> String {
@@ -1415,30 +1573,55 @@ impl DockerCollector {
 
         info!("[docker] {} state change(s) detected", diffs.len());
         let _ = log_engine
-            .info("docker_engine", &format!("{} state change(s) detected", diffs.len()))
+            .info(
+                "docker_engine",
+                &format!("{} state change(s) detected", diffs.len()),
+            )
             .await;
 
         for action in diffs {
             match action {
-                LogAction::StateChange { cid, name, status, old_state, new_state } => {
+                LogAction::StateChange {
+                    cid,
+                    name,
+                    status,
+                    old_state,
+                    new_state,
+                } => {
                     let short_id = &cid[..cid.len().min(12)];
                     let msg = format!("Container {name} ({short_id}) state changed: {old_state} -> {new_state} ({status})");
                     let (severity, event_type) = classify_state_change(&new_state, &status);
-                    if let Err(e) = log_engine.log_event("docker", severity, event_type, &msg).await {
+                    if let Err(e) = log_engine
+                        .log_event("docker", severity, event_type, &msg)
+                        .await
+                    {
                         warn!("[docker] log_event failed for state change: {e}");
                     }
                 }
-                LogAction::NewContainer { cid, name, state, status } => {
+                LogAction::NewContainer {
+                    cid,
+                    name,
+                    state,
+                    status,
+                } => {
                     let short_id = &cid[..cid.len().min(12)];
-                    let msg = format!("New container detected: {name} ({short_id}) — {status} (state={state})");
-                    if let Err(e) = log_engine.log_event("docker", "Info", "container_created", &msg).await {
+                    let msg = format!(
+                        "New container detected: {name} ({short_id}) — {status} (state={state})"
+                    );
+                    if let Err(e) = log_engine
+                        .log_event("docker", "Info", "container_created", &msg)
+                        .await
+                    {
                         warn!("[docker] log_event failed for new container: {e}");
                     }
                 }
                 LogAction::Removed { cid, name } => {
                     let short_id = &cid[..cid.len().min(12)];
                     let msg = format!("Container removed: {name} ({short_id})");
-                    if let Err(e) = log_engine.log_event("docker", "Info", "container_removed", &msg).await {
+                    if let Err(e) = log_engine
+                        .log_event("docker", "Info", "container_removed", &msg)
+                        .await
+                    {
                         warn!("[docker] log_event failed for removal: {e}");
                     }
                 }
@@ -1448,9 +1631,23 @@ impl DockerCollector {
 }
 
 enum LogAction {
-    StateChange { cid: String, name: String, status: String, old_state: String, new_state: String },
-    NewContainer { cid: String, name: String, state: String, status: String },
-    Removed { cid: String, name: String },
+    StateChange {
+        cid: String,
+        name: String,
+        status: String,
+        old_state: String,
+        new_state: String,
+    },
+    NewContainer {
+        cid: String,
+        name: String,
+        state: String,
+        status: String,
+    },
+    Removed {
+        cid: String,
+        name: String,
+    },
 }
 
 fn classify_state_change<'a>(state: &str, status: &str) -> (&'a str, &'a str) {
@@ -1523,8 +1720,14 @@ mod tests {
         assert_eq!(parse_state_from_status("Up 2 hours"), "running");
         assert_eq!(parse_state_from_status("Up 2 days"), "running");
         assert_eq!(parse_state_from_status("Exited (0) 1 hour ago"), "exited");
-        assert_eq!(parse_state_from_status("Exited (137) 5 minutes ago"), "exited");
-        assert_eq!(parse_state_from_status("Restarting (1) 5 seconds ago"), "restarting");
+        assert_eq!(
+            parse_state_from_status("Exited (137) 5 minutes ago"),
+            "exited"
+        );
+        assert_eq!(
+            parse_state_from_status("Restarting (1) 5 seconds ago"),
+            "restarting"
+        );
         assert_eq!(parse_state_from_status("Paused"), "paused");
         assert_eq!(parse_state_from_status("Created"), "created");
         assert_eq!(parse_state_from_status("Dead"), "dead");

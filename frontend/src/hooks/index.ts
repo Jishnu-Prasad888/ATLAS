@@ -268,6 +268,7 @@ export interface LiveMetrics {
     ram: number[]
     netRx: number[]
     netTx: number[]
+    gpu: number[]
     timestamps: string[]
   }
 }
@@ -275,18 +276,18 @@ export interface LiveMetrics {
 export function useLiveMetrics(agentId: string | null): LiveMetrics {
   const [state, setState] = useState<LiveMetrics>({
     latest: {},
-    history: { cpu: [], ram: [], netRx: [], netTx: [], timestamps: [] },
+    history: { cpu: [], ram: [], netRx: [], netTx: [], gpu: [], timestamps: [] },
   })
 
   useEffect(() => {
     if (!agentId) {
-      setState({ latest: {}, history: { cpu: [], ram: [], netRx: [], netTx: [], timestamps: [] } })
+      setState({ latest: {}, history: { cpu: [], ram: [], netRx: [], netTx: [], gpu: [], timestamps: [] } })
       return
     }
 
     let active = true
 
-    const resetHistory = () => ({ cpu: [], ram: [], netRx: [], netTx: [], timestamps: [] })
+    const resetHistory = () => ({ cpu: [], ram: [], netRx: [], netTx: [], gpu: [], timestamps: [] })
 
     setState({ latest: {}, history: resetHistory() })
 
@@ -322,6 +323,10 @@ export function useLiveMetrics(agentId: string | null): LiveMetrics {
             h.netRx = append(h.netRx, iface.rx_bytes_rate)
             h.netTx = append(h.netTx, iface.tx_bytes_rate)
           }
+        } else if (metric.metric_type === 'gpu') {
+          const d = metric.data as unknown as { summary?: { avg_utilization_pct?: number } }
+          const util = d.summary?.avg_utilization_pct ?? 0
+          h.gpu = append(h.gpu, util)
         }
 
         return { latest, history: h }

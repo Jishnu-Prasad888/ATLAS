@@ -550,7 +550,12 @@ async fn ensure_system_install() -> bool {
 
 fn ensure_user_and_dirs() -> bool {
     // Check if user exists
-    let user_exists = Command::new("id").arg("-u").arg("beacon").status().map(|s| s.success()).unwrap_or(false);
+    let user_exists = Command::new("id")
+        .arg("-u")
+        .arg("beacon")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
     if !user_exists {
         let created = Command::new("useradd")
             .args([

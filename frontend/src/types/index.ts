@@ -28,6 +28,7 @@ export type MetricType =
   | 'kernel'
   | 'temperature'
   | 'power'
+  | 'gpu'
 
 export type MetricResolution = 'raw' | '1min' | '1hour'
 
@@ -313,9 +314,40 @@ export interface MetricConfig {
   kubernetes_enabled: boolean
   temperature_enabled: boolean
   power_enabled: boolean
+  gpu_enabled: boolean
   interval_seconds: number
   retention_days: number
   updated_at: string
+}
+
+export interface GpuDevice {
+  index: number
+  uuid: string
+  name: string
+  utilization_pct: number
+  memory_total_mb: number
+  memory_used_mb: number
+  memory_utilization_pct: number
+  temperature_c: number
+  fan_speed_pct?: number | null
+  power_draw_w?: number | null
+  power_limit_w?: number | null
+  graphics_clock_mhz?: number | null
+  sm_clock_mhz?: number | null
+  mem_clock_mhz?: number | null
+  pci_bus?: string | null
+}
+
+export interface GpuData {
+  gpus: GpuDevice[]
+  summary: {
+    count: number
+    avg_utilization_pct: number
+    avg_mem_utilization_pct: number
+    avg_temperature_c: number
+  }
+  collector_disabled?: boolean
+  error?: string | null
 }
 
 // ─── Logs ─────────────────────────────────────────────────────────────────────

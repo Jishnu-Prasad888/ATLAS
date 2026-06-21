@@ -44,6 +44,8 @@ docker      = false
 kubernetes  = false
 temperature = true
 power       = false
+# Collect NVIDIA GPU metrics (NVML or nvidia-smi).
+gpu         = true
 # Maximum number of processes to track per collection
 max_processes = 512
 

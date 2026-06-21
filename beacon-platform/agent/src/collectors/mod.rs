@@ -10,6 +10,7 @@
 pub mod cpu;
 pub mod docker;
 pub mod enqueue_adapter;
+pub mod gpu;
 pub mod k3s;
 pub mod kernel;
 pub mod network;
@@ -17,8 +18,8 @@ pub mod payload;
 pub mod process;
 pub mod ram;
 pub mod storage;
-pub mod systemd;
 pub mod system_inventory;
+pub mod systemd;
 pub mod trait_collector;
 
 use anyhow::Result;
@@ -71,7 +72,11 @@ pub fn build_collectors(
     register!(c.network, network::NetworkCollector::new());
     register!(c.process, process::ProcessCollector::new(c.max_processes));
     register!(c.systemd, systemd::SystemdCollector::new());
-    register!(c.system_inventory, system_inventory::SystemInventoryCollector::new(identity.clone()));
+    register!(
+        c.system_inventory,
+        system_inventory::SystemInventoryCollector::new(identity.clone())
+    );
+    register!(c.gpu, gpu::GpuCollector::new(collector_flags.clone()));
 
     if c.docker {
         let collector = match log_engine {
@@ -195,6 +200,7 @@ mod tests {
                 kubernetes: true,
                 temperature: true,
                 power: false,
+                gpu: true,
                 max_processes: 10,
             },
             ..AgentConfig::default()
@@ -215,6 +221,7 @@ mod tests {
                 kubernetes: false,
                 temperature: false,
                 power: false,
+                gpu: false,
                 max_processes: 10,
             },
             ..AgentConfig::default()

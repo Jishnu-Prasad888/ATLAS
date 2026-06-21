@@ -15,7 +15,7 @@ import {
 } from '@/utils'
 import { configApi, usersApi } from '@/api'
 import type {
-  CpuData, RamData, StorageData, NetworkData, KernelData, LogEntry,
+  CpuData, RamData, StorageData, NetworkData, KernelData, LogEntry, GpuData,
 } from '@/types'
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -513,6 +513,11 @@ const MetricPanel = memo(function MetricPanel({
   const storage = latest.storage?.data as unknown as StorageData | undefined
   const network = latest.network?.data as unknown as NetworkData | undefined
   const kernel  = latest.kernel?.data  as unknown as KernelData  | undefined
+  const gpu     = latest.gpu?.data     as unknown as GpuData     | undefined
+  const gpuHistory = useMemo(() => history.gpu, [history.gpu])
+  const hasGpuMetric = Boolean(latest.gpu)
+  const hasGpuDevices = Boolean(gpu && gpu.gpus && gpu.gpus.length > 0)
+  const showGpuGauge = hasGpuMetric
 
   const storagePartitions = storage?.partitions?.length ? storage.partitions : storage?.filesystems ?? []
   const storageDisks = storage?.disks ?? []
@@ -553,7 +558,7 @@ const MetricPanel = memo(function MetricPanel({
 
       <div className="panel-body">
         {/* Arc gauges */}
-        {(cpu || ram || osDisk) ? (
+        {(cpu || ram || osDisk || showGpuGauge) ? (
           <div className="metric-grid">
             {cpu && (
               <ArcGauge
@@ -577,10 +582,31 @@ const MetricPanel = memo(function MetricPanel({
                 detail={`${formatBytes(osDisk.used_bytes)} / ${formatBytes(osDisk.total_bytes)}`}
               />
             )}
+            {showGpuGauge && (
+              <ArcGauge
+                label="GPU"
+                value={gpu?.summary?.avg_utilization_pct ?? 0}
+                detail={hasGpuDevices
+                  ? `${gpu?.gpus.length ?? 0} GPU${(gpu?.gpus.length ?? 0) > 1 ? 's' : ''} · ${Math.round(gpu?.summary?.avg_mem_utilization_pct ?? 0)}% mem`
+                  : gpu?.collector_disabled
+                    ? 'Collector disabled'
+                    : 'No GPUs detected'}
+                history={gpuHistory}
+              />
+            )}
           </div>
         ) : (
           <div style={{ padding: '24px 0' }}>
             <EmptyState message="Waiting for metrics..." />
+          </div>
+        )}
+
+        {/* GPU availability note */}
+        {agentId && !showGpuGauge && gpuHistory.length === 0 && (
+          <div className="info-row">
+            <div className="mini-chip" style={{ width: '100%' }}>
+              GPU metrics not received yet via live feed. Ensure GPU collector is enabled and WebSocket is connected.
+            </div>
           </div>
         )}
 
@@ -601,6 +627,28 @@ const MetricPanel = memo(function MetricPanel({
                 <Sparkline values={netTxHistory} color="#60a5fa" width={130} height={26} />
               )}
             </div>
+          </div>
+        )}
+
+        {/* GPUs */}
+        {hasGpuDevices && gpu && (
+          <div className="info-row" style={{ rowGap: 10 }}>
+            {gpu.gpus.map((g) => {
+              const memTotal = g.memory_total_mb * 1024 * 1024
+              const memUsed = g.memory_used_mb * 1024 * 1024
+              return (
+                <div key={g.uuid} className="mini-chip" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4, width: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', gap: 8 }}>
+                    <span style={{ color: 'var(--color-text)' }}>{g.name || `GPU ${g.index}`}</span>
+                    <span style={{ fontSize: 10, color: 'var(--color-text-dim)' }}>{g.utilization_pct.toFixed(0)}%</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                    <span>Mem {Math.round(g.memory_utilization_pct)}%</span>
+                    <span>{formatBytes(memUsed)} / {formatBytes(memTotal)}</span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 

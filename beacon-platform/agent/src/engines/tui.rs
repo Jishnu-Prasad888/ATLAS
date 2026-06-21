@@ -21,8 +21,8 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
-use std::time::Instant;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 use crate::config::AgentConfig;

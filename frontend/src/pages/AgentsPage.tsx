@@ -19,9 +19,10 @@ import {
   Tag,
   Toggle,
   SectionHeader,
+  GaugeBar,
 } from '@/components/common'
-import { timeAgo, formatTimestamp, validateHostname, formatUptime } from '@/utils'
-import type { Agent, MetricConfig, SystemInventoryData, KernelData } from '@/types'
+import { timeAgo, formatTimestamp, validateHostname, formatUptime, formatBytes } from '@/utils'
+import type { Agent, MetricConfig, SystemInventoryData, KernelData, GpuData } from '@/types'
 
 type ConfirmAction =
   | { type: 'delete'; agentId: string; hostname: string }
@@ -334,6 +335,7 @@ function AgentDetail({
 
   const systemInventory = latestMetrics?.system_inventory?.data as unknown as SystemInventoryData | undefined
   const kernelIdentity = systemInventory?.identity as KernelData | undefined
+  const gpuData = latestMetrics?.gpu?.data as unknown as GpuData | undefined
 
   const handleRename = () => {
     const err = validateHostname(newHostname)
@@ -428,7 +430,7 @@ function AgentDetail({
           <Stat label="Architecture" value={agent.architecture} />
           <Stat label="Version" value={agent.version} />
           <Stat label="Registered" value={formatTimestamp(agent.registered_at)} />
-          <Stat label="Last seen" value={timeAgo(agent.last_seen)} title={formatTimestamp(agent.last_seen)} />
+          <Stat label="Last seen" value={agent.last_seen ? timeAgo(agent.last_seen) : 'never'} title={agent.last_seen ? formatTimestamp(agent.last_seen) : '—'} />
           <Stat label="Status" value={agent.is_stale ? 'Stale' : 'Healthy'} />
         </div>
         {agent.tags.length > 0 && (
@@ -440,6 +442,53 @@ function AgentDetail({
       </Card>
 
       {config && <MetricConfigPanel config={config} isAdmin={isAdmin} agentId={agent.agent_id} />}
+
+      {gpuData && (
+        <Card>
+          <SectionHeader title="GPU" />
+          {gpuData.collector_disabled ? (
+            <p className="text-xs font-mono text-[--color-text-dim]">Collector disabled</p>
+          ) : gpuData.gpus.length === 0 ? (
+            <p className="text-xs font-mono text-[--color-text-dim]">No GPUs detected</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {gpuData.gpus.map((gpu) => {
+                const memTotalBytes = gpu.memory_total_mb * 1024 * 1024
+                const memUsedBytes = gpu.memory_used_mb * 1024 * 1024
+                return (
+                  <div key={gpu.uuid} className="rounded border border-[--color-border] bg-[--color-surface-2] p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-mono text-[--color-text] truncate">{gpu.name || `GPU ${gpu.index}`}</p>
+                        <p className="text-[10px] font-mono text-[--color-text-dim] truncate">{gpu.pci_bus || `idx ${gpu.index}`}</p>
+                      </div>
+                      <span className="text-[11px] font-mono text-[--color-text-muted]">{gpu.uuid.slice(0, 8)}</span>
+                    </div>
+
+                    <GaugeBar label="Utilization" value={gpu.utilization_pct} />
+                    <GaugeBar label="Memory" value={gpu.memory_utilization_pct} />
+
+                    <div className="grid grid-cols-2 gap-x-2 text-[11px] font-mono text-[--color-text-dim]">
+                      <span>Temp</span>
+                      <span className="text-right text-[--color-text]">{gpu.temperature_c.toFixed(0)}°C</span>
+                      <span>Memory</span>
+                      <span className="text-right text-[--color-text]">{formatBytes(memUsedBytes)} / {formatBytes(memTotalBytes)}</span>
+                      {gpu.power_draw_w != null && (
+                        <>
+                          <span>Power</span>
+                          <span className="text-right text-[--color-text]">
+                            {gpu.power_draw_w.toFixed(0)}W{gpu.power_limit_w ? ` / ${gpu.power_limit_w.toFixed(0)}W` : ''}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+      )}
 
       {systemInventory && (
         <SystemInventorySection systemInventory={systemInventory} kernelIdentity={kernelIdentity} />
@@ -466,8 +515,8 @@ function AgentDetail({
                     <td className="py-2 px-1">
                       <CollectorStatusBadge status={ch.status} />
                     </td>
-                    <td className="py-2 px-1 text-[--color-text-muted]" title={formatTimestamp(ch.last_run)}>
-                      {timeAgo(ch.last_run)}
+                    <td className="py-2 px-1 text-[--color-text-muted]" title={ch.last_run ? formatTimestamp(ch.last_run) : '—'}>
+                      {ch.last_run ? timeAgo(ch.last_run) : 'never'}
                     </td>
                     <td className="py-2 px-1 rounded-r">
                       <span
@@ -601,6 +650,7 @@ const COLLECTOR_GROUPS: Array<{ title: string; items: Array<{ key: keyof MetricC
       { key: 'storage_enabled', label: 'Storage' },
       { key: 'network_enabled', label: 'Network' },
       { key: 'process_enabled', label: 'Processes' },
+      { key: 'gpu_enabled', label: 'GPU' },
     ],
   },
   {

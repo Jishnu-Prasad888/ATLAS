@@ -342,14 +342,30 @@ impl WebSocketTransport {
                             Some("process_kill") => {
                                 if let Some(payload) = parsed.get("payload") {
                                     if let Some(pid) = payload.get("pid").and_then(|p| p.as_i64()) {
-                                        let req_id = payload.get("request_id").and_then(|r| r.as_i64());
-                                        info!("Received process_kill for pid {} (req {:?})", pid, req_id);
-                                        let result = Self::kill_process(pid as i32, &log_engine).await;
+                                        let req_id =
+                                            payload.get("request_id").and_then(|r| r.as_i64());
+                                        info!(
+                                            "Received process_kill for pid {} (req {:?})",
+                                            pid, req_id
+                                        );
+                                        let result =
+                                            Self::kill_process(pid as i32, &log_engine).await;
                                         if let Err(e) = &result {
                                             error!("process_kill failed for pid {}: {}", pid, e);
                                         }
-                                        if let Err(e) = Self::send_kill_result(&agent_config, &identity, pid as i32, req_id, result.as_ref().err()).await {
-                                            warn!("Failed to send kill result for pid {}: {}", pid, e);
+                                        if let Err(e) = Self::send_kill_result(
+                                            &agent_config,
+                                            &identity,
+                                            pid as i32,
+                                            req_id,
+                                            result.as_ref().err(),
+                                        )
+                                        .await
+                                        {
+                                            warn!(
+                                                "Failed to send kill result for pid {}: {}",
+                                                pid, e
+                                            );
                                         }
                                     }
                                 }
@@ -392,6 +408,7 @@ impl WebSocketTransport {
             ("kubernetes_enabled", "kubernetes"),
             ("temperature_enabled", "temperature"),
             ("power_enabled", "power"),
+            ("gpu_enabled", "gpu"),
         ];
         for (field, key) in &mappings {
             if let Some(val) = payload.get(*field).and_then(|v| v.as_bool()) {
@@ -416,7 +433,10 @@ impl WebSocketTransport {
             let res = libc::kill(pid, libc::SIGKILL);
             if res == 0 {
                 let _ = log_engine
-                    .info("process_kill", &format!("Killed pid {} via libc SIGKILL", pid))
+                    .info(
+                        "process_kill",
+                        &format!("Killed pid {} via libc SIGKILL", pid),
+                    )
                     .await;
                 return Ok(());
             }
@@ -429,7 +449,10 @@ impl WebSocketTransport {
         match status {
             Ok(s) if s.success() => {
                 let _ = log_engine
-                    .info("process_kill", &format!("Killed pid {} via /bin/kill -9", pid))
+                    .info(
+                        "process_kill",
+                        &format!("Killed pid {} via /bin/kill -9", pid),
+                    )
                     .await;
                 Ok(())
             }
@@ -478,10 +501,15 @@ impl WebSocketTransport {
             "ws" => "http",
             other => other,
         };
-        let host = ws_url.host_str().ok_or_else(|| anyhow!("Invalid server host"))?;
+        let host = ws_url
+            .host_str()
+            .ok_or_else(|| anyhow!("Invalid server host"))?;
         let port = ws_url.port().map(|p| format!(":{p}")).unwrap_or_default();
         let base = format!("{}://{}{}", scheme, host, port);
-        let url = format!("{}/api/v1/agents/{}/kill_process_result/", base, identity.agent_id);
+        let url = format!(
+            "{}/api/v1/agents/{}/kill_process_result/",
+            base, identity.agent_id
+        );
 
         let client = reqwest::Client::new();
         let mut payload = serde_json::json!({
@@ -495,7 +523,8 @@ impl WebSocketTransport {
             payload["error"] = serde_json::json!(err.to_string());
         }
 
-        client.post(url)
+        client
+            .post(url)
             .json(&payload)
             .send()
             .await?

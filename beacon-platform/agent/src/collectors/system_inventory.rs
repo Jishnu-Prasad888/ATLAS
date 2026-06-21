@@ -118,7 +118,13 @@ fn detect_displays() -> Value {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let monitor_count = stdout
                 .lines()
-                .filter(|l| l.trim().chars().next().map(|c| c.is_numeric()).unwrap_or(false))
+                .filter(|l| {
+                    l.trim()
+                        .chars()
+                        .next()
+                        .map(|c| c.is_numeric())
+                        .unwrap_or(false)
+                })
                 .count();
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             return json!({
@@ -197,7 +203,14 @@ fn read_hosts() -> Value {
 }
 
 fn list_enabled_services() -> Value {
-    if let Ok((stdout, stderr)) = run_cmd(["systemctl", "list-unit-files", "--type=service", "--state=enabled", "--no-legend", "--no-pager"]) {
+    if let Ok((stdout, stderr)) = run_cmd([
+        "systemctl",
+        "list-unit-files",
+        "--type=service",
+        "--state=enabled",
+        "--no-legend",
+        "--no-pager",
+    ]) {
         return json!({
             "services": stdout.lines().take(200).map(|l| l.trim().to_string()).collect::<Vec<_>>(),
             "err": non_empty(stderr),
@@ -265,7 +278,15 @@ fn detect_node_version() -> Option<String> {
     if let Ok(sudo_user) = std::env::var("SUDO_USER") {
         if !sudo_user.is_empty() && sudo_user != "root" {
             if let Ok(out) = Command::new("sudo")
-                .args(["-u", &sudo_user, "-i", "--", "bash", "-lc", "command -v node && node --version"])
+                .args([
+                    "-u",
+                    &sudo_user,
+                    "-i",
+                    "--",
+                    "bash",
+                    "-lc",
+                    "command -v node && node --version",
+                ])
                 .output()
             {
                 if out.status.success() {
@@ -324,7 +345,9 @@ fn bluetooth_devices() -> Value {
     if let Ok(adapters) = base.read_dir() {
         for ad in adapters.flatten() {
             let ad_path = ad.path();
-            if !ad_path.is_dir() { continue; }
+            if !ad_path.is_dir() {
+                continue;
+            }
             if let Ok(devs) = ad_path.read_dir() {
                 for dev in devs.flatten() {
                     let info = dev.path().join("info");
@@ -336,7 +359,11 @@ fn bluetooth_devices() -> Value {
                                 break;
                             }
                         }
-                        let entry = format!("{} ({})", name.unwrap_or_else(|| "unknown".into()), dev.file_name().to_string_lossy());
+                        let entry = format!(
+                            "{} ({})",
+                            name.unwrap_or_else(|| "unknown".into()),
+                            dev.file_name().to_string_lossy()
+                        );
                         devices.push(entry);
                     }
                 }
@@ -357,7 +384,8 @@ fn battery_status() -> Value {
             let name = entry.file_name();
             if let Some(n) = name.to_str() {
                 if n.starts_with("BAT") {
-                    let capacity = read_file_trimmed(entry.path().join("capacity"), 32).and_then(|s| s.parse::<u8>().ok());
+                    let capacity = read_file_trimmed(entry.path().join("capacity"), 32)
+                        .and_then(|s| s.parse::<u8>().ok());
                     let status = read_file_trimmed(entry.path().join("status"), 64);
                     return json!({
                         "present": true,
@@ -390,7 +418,11 @@ fn try_node_at(path: impl AsRef<str>) -> Option<String> {
         return None;
     }
     let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if v.is_empty() { None } else { Some(v) }
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -404,7 +436,10 @@ fn home_dir() -> Option<PathBuf> {
         }
     }
 
-    std::env::var("HOME").ok().map(PathBuf::from).filter(|p| p.exists())
+    std::env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
 }
 
 fn home_from_passwd(user: &str) -> Option<PathBuf> {
@@ -477,5 +512,9 @@ fn read_file_trimmed<P: AsRef<Path>>(path: P, max_len: usize) -> Option<String> 
 }
 
 fn non_empty(s: String) -> Option<String> {
-    if s.trim().is_empty() { None } else { Some(s) }
+    if s.trim().is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }

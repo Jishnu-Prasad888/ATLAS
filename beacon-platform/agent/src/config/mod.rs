@@ -16,10 +16,18 @@ use tokio::sync::RwLock;
 
 pub use validator::ConfigValidator;
 
-fn default_true() -> bool { true }
-fn default_sent_retention_hours() -> u64 { 24 }
-fn default_warning_audit_retention_days() -> u64 { 10 }
-fn default_compress_warning_audit() -> bool { true }
+fn default_true() -> bool {
+    true
+}
+fn default_sent_retention_hours() -> u64 {
+    24
+}
+fn default_warning_audit_retention_days() -> u64 {
+    10
+}
+fn default_compress_warning_audit() -> bool {
+    true
+}
 
 /// Shared runtime flags that control whether each collector is active.
 /// The Transport updates these when the server pushes a `config_update`.
@@ -45,6 +53,7 @@ pub fn create_collector_flags(config: &AgentConfig) -> CollectorFlags {
     flags.insert("kubernetes".to_string(), config.collectors.kubernetes);
     flags.insert("temperature".to_string(), config.collectors.temperature);
     flags.insert("power".to_string(), config.collectors.power);
+    flags.insert("gpu".to_string(), config.collectors.gpu);
     Arc::new(RwLock::new(flags))
 }
 
@@ -89,6 +98,8 @@ pub struct CollectorConfig {
     pub kubernetes: bool,
     pub temperature: bool,
     pub power: bool,
+    #[serde(default)]
+    pub gpu: bool,
     /// Max processes to track per collection cycle
     pub max_processes: usize,
 }
@@ -166,6 +177,7 @@ impl Default for AgentConfig {
                 kubernetes: false,
                 temperature: true,
                 power: false,
+                gpu: true,
                 max_processes: 512,
             },
             tls: TlsConfig {
@@ -231,7 +243,10 @@ impl AgentConfig {
         if let Some(val) = payload.get("systemd_enabled").and_then(|v| v.as_bool()) {
             self.collectors.systemd = val;
         }
-        if let Some(val) = payload.get("system_inventory_enabled").and_then(|v| v.as_bool()) {
+        if let Some(val) = payload
+            .get("system_inventory_enabled")
+            .and_then(|v| v.as_bool())
+        {
             self.collectors.system_inventory = val;
         }
         if let Some(val) = payload.get("docker_enabled").and_then(|v| v.as_bool()) {
@@ -245,6 +260,9 @@ impl AgentConfig {
         }
         if let Some(val) = payload.get("power_enabled").and_then(|v| v.as_bool()) {
             self.collectors.power = val;
+        }
+        if let Some(val) = payload.get("gpu_enabled").and_then(|v| v.as_bool()) {
+            self.collectors.gpu = val;
         }
         if let Some(val) = payload.get("interval_seconds").and_then(|v| v.as_u64()) {
             self.interval_seconds = val;

@@ -26,6 +26,7 @@ class MetricType(models.TextChoices):
     KERNEL      = "kernel",      "Kernel"
     TEMPERATURE = "temperature", "Temperature"
     POWER       = "power",       "Power"
+    GPU         = "gpu",         "GPU"
     SYSTEM_INVENTORY = "system_inventory", "System Inventory"
 
 
@@ -67,6 +68,7 @@ class MetricConfig(models.Model):
     kubernetes_enabled = models.BooleanField(default=False)
     temperature_enabled = models.BooleanField(default=True)
     power_enabled   = models.BooleanField(default=False)
+    gpu_enabled     = models.BooleanField(default=True)
     interval_seconds = models.PositiveIntegerField(default=5)
     retention_days   = models.PositiveIntegerField(default=30)
     updated_at       = models.DateTimeField(auto_now=True)
@@ -87,6 +89,7 @@ class MetricConfig(models.Model):
             "kubernetes":  self.kubernetes_enabled,
             "temperature": self.temperature_enabled,
             "power":       self.power_enabled,
+            "gpu":         self.gpu_enabled,
             "interval_seconds": self.interval_seconds,
             "retention_days":   self.retention_days,
         }

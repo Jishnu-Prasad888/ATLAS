@@ -41,6 +41,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 
 # System metrics
 sysinfo = "0.30"
+nvml-wrapper = "0.8"
 
 # CLI & Config
 clap = { version = "4", features = ["derive", "env"] }
