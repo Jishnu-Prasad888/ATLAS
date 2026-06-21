@@ -74,6 +74,8 @@
 | POST   | `/agents/<agent_id>/disable/`           | IsAdministrator   | —                                                                                |
 | POST   | `/agents/<agent_id>/collectors/health/` | None              | `{ collector, status, last_run?, last_success?, last_failure?, failure_count? }` |
 
+**Agent deletion behavior:** Removing an agent also purges all associated metrics, metric configs, logs, collector health, process-kill requests, and cached latest telemetry for that agent. Audit logs remain intact by design.
+
 ## Agent Object
 
 ```json
