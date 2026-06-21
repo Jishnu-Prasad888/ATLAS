@@ -2625,25 +2625,19 @@ cargo build --release
 sudo cp target/release/beacon-agent /usr/local/bin/
 sudo chmod 755 /usr/local/bin/beacon-agent
 
-# 4. Create system user
-sudo useradd --system --no-create-home --shell /bin/false beacon
-
-# 5. Create directories
+# 4. Create directories
 sudo mkdir -p /etc/beacon /var/lib/beacon/agent /var/log/beacon
-sudo chown -R beacon:beacon /var/lib/beacon /var/log/beacon
 
-# 6. Initialize configuration
+# 5. Initialize configuration (requires sudo/root)
 sudo beacon-agent init --config /etc/beacon/agent.toml
 # Enter: server address, username, collection interval
 
-# 7. Install systemd service
-sudo cp beacon-agent.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now beacon-agent
+# 6. Run now (foreground)
+sudo beacon-agent start --config /etc/beacon/agent.toml
 
-# 8. Check status
-sudo systemctl status beacon-agent
-sudo journalctl -u beacon-agent -f
+# 7. Start on boot via cron (@reboot)
+sudo beacon-agent cron install
+# Remove: sudo beacon-agent cron remove
 ```
 
 ### 26.3 Server Initialization Command

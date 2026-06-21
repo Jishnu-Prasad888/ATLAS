@@ -61,19 +61,20 @@ cargo build --release
 
 # Install
 sudo cp target/release/beacon-agent /usr/local/bin/
-sudo mkdir -p /etc/beacon /var/lib/beacon/agent
+sudo mkdir -p /etc/beacon /var/lib/beacon/agent /var/log/beacon
 
 # First-time init
 sudo beacon-agent init
 
-# Run as daemon
-sudo cp beacon-agent.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now beacon-agent
+# Run in foreground (must be sudo/root)
+sudo beacon-agent start --config /etc/beacon/agent.toml
 
-# Or run directly
-beacon-agent start --config /etc/beacon/agent.toml
+# Start on boot via cron (@reboot)
+sudo beacon-agent cron install
+# Remove: sudo beacon-agent cron remove
 ```
+
+> The agent refuses to run without sudo/root privileges.
 
 ---
 
@@ -82,8 +83,8 @@ beacon-agent start --config /etc/beacon/agent.toml
 ### Agent Commands
 
 ```bash
-# Service management
-beacon-agent service install|remove|start|stop|restart|status
+# Run on boot (@reboot cron)
+beacon-agent cron install|remove
 
 # Initialization
 beacon-agent init

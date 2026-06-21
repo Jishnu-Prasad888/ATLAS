@@ -11,11 +11,12 @@ mod storage;
 mod transport;
 // config::validator is a sub-module of config — no explicit declaration needed here
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
-use std::os::unix::fs::PermissionsExt;
+use libc::geteuid;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -26,8 +27,6 @@ use engines::{
 };
 use storage::StorageManager;
 use transport::WebSocketTransport;
-
-const SERVICE_UNIT: &str = include_str!("../beacon-agent.service");
 
 #[derive(Parser)]
 #[command(
@@ -74,11 +73,11 @@ enum Commands {
     /// Show current user
     Whoami,
 
-    // ─── Service ──────────────────────────────────────────────────────────────
-    /// Manage systemd service
-    Service {
+    // ─── Cron ─────────────────────────────────────────────────────────────────
+    /// Manage cron-based startup (@reboot)
+    Cron {
         #[command(subcommand)]
-        action: ServiceAction,
+        action: CronAction,
     },
 
     // ─── Metrics ─────────────────────────────────────────────────────────────
@@ -189,13 +188,11 @@ enum EnableDisable {
 }
 
 #[derive(Subcommand, Clone)]
-enum ServiceAction {
+enum CronAction {
+    /// Install root @reboot entry via crontab
     Install,
+    /// Remove the beacon-agent @reboot entry
     Remove,
-    Start,
-    Stop,
-    Restart,
-    Status,
 }
 
 #[derive(Subcommand, Clone)]
@@ -304,6 +301,8 @@ async fn main() -> Result<()> {
 
     info!("beacon-agent v1.0.0 starting");
 
+    require_root();
+
     match cli.command.unwrap_or(Commands::Start) {
         Commands::Init => run_init(&cli.config).await,
         Commands::Start => run_daemon(&cli.config).await,
@@ -314,7 +313,7 @@ async fn main() -> Result<()> {
         Commands::Logout => run_logout(&cli.config).await,
         Commands::Whoami => run_whoami(&cli.config).await,
 
-        Commands::Service { action } => handle_service(action),
+        Commands::Cron { action } => handle_cron_cmd(action, &cli.config).await,
         Commands::Cpu { action } => handle_collector("cpu", action),
         Commands::Ram { action } => handle_collector("ram", action),
         Commands::Storage { action } => handle_collector("storage", action),
@@ -334,15 +333,16 @@ async fn main() -> Result<()> {
     }
 }
 
+fn require_root() {
+    if unsafe { geteuid() } != 0 {
+        eprintln!("beacon-agent must be run as root (use sudo).");
+        std::process::exit(1);
+    }
+}
+
 // ─── Run daemon ───────────────────────────────────────────────────────────────
 
 async fn run_daemon(config_path: &str) -> Result<()> {
-    let handed_to_systemd = ensure_system_install().await;
-    if handed_to_systemd {
-        info!("Systemd service started; exiting current process to avoid double-run");
-        return Ok(());
-    }
-
     info!("Loading configuration from {}", config_path);
 
     let config = AgentConfig::load(config_path).await?;
@@ -488,128 +488,6 @@ async fn run_daemon(config_path: &str) -> Result<()> {
 
     info!("Beacon agent stopped.");
     Ok(())
-}
-
-async fn ensure_system_install() -> bool {
-    let exe = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(e) => {
-            warn!("Unable to determine current executable path: {e}");
-            return false;
-        }
-    };
-
-    let target = Path::new("/usr/local/bin/beacon-agent");
-    let needs_copy = !target.exists() || exe != target;
-    if needs_copy {
-        match tokio::fs::copy(&exe, target).await {
-            Ok(_) => {
-                let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755));
-                info!("Updated beacon-agent at /usr/local/bin");
-            }
-            Err(e) => {
-                warn!("Skipping binary install/update to /usr/local/bin (permission/other error): {e}");
-                // Without a system install we cannot enable autostart.
-                return false;
-            }
-        }
-    }
-
-    let unit_path = Path::new("/etc/systemd/system/beacon-agent.service");
-    if !unit_path.exists() {
-        if let Some(parent) = unit_path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        match tokio::fs::write(unit_path, SERVICE_UNIT).await {
-            Ok(_) => info!("Installed systemd unit: /etc/systemd/system/beacon-agent.service"),
-            Err(e) => {
-                warn!("Skipping systemd unit install (permission/other error): {e}");
-                return false;
-            }
-        }
-    }
-
-    if !ensure_user_and_dirs() {
-        warn!("Could not ensure service user/directories; skipping systemd handoff");
-        return false;
-    }
-
-    // Enable and start via systemd; if this succeeds we can exit and let systemd own the process.
-    let reloaded = run_cmd("systemctl daemon-reload", ["daemon-reload"]);
-    let enabled = reloaded && run_cmd("systemctl enable beacon-agent", ["enable", "beacon-agent"]);
-    let started = enabled && run_cmd("systemctl start beacon-agent", ["start", "beacon-agent"]);
-
-    if started {
-        info!("Enabled and started beacon-agent via systemd (auto-start on boot)");
-        return true;
-    }
-
-    warn!("Systemd enable/start failed or unavailable; continuing foreground run");
-    false
-}
-
-fn ensure_user_and_dirs() -> bool {
-    // Check if user exists
-    let user_exists = Command::new("id")
-        .arg("-u")
-        .arg("beacon")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !user_exists {
-        let created = Command::new("useradd")
-            .args([
-                "--system",
-                "--home",
-                "/var/lib/beacon",
-                "--shell",
-                "/usr/sbin/nologin",
-                "beacon",
-            ])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !created {
-            warn!("Failed to create service user 'beacon'");
-            return false;
-        }
-    }
-
-    for dir in ["/var/lib/beacon", "/var/log/beacon"] {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            warn!("Failed to create {dir}: {e}");
-            return false;
-        }
-        let chown_ok = Command::new("chown")
-            .args(["beacon:beacon", dir])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !chown_ok {
-            warn!("Failed to chown {dir} to beacon");
-            return false;
-        }
-    }
-
-    true
-}
-
-fn run_cmd<const N: usize>(label: &str, args: [&str; N]) -> bool {
-    let output = Command::new("systemctl").args(args).output();
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                return true;
-            }
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            warn!("{label} failed: {}", stderr.trim());
-            false
-        }
-        Err(e) => {
-            warn!("{label} failed to execute: {e}");
-            false
-        }
-    }
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -814,16 +692,114 @@ async fn run_tui(config_path: &str) -> Result<()> {
 
 // ─── CLI handlers ─────────────────────────────────────────────────────────────
 
-fn handle_service(action: ServiceAction) -> Result<()> {
+async fn handle_cron_cmd(action: CronAction, config_path: &str) -> Result<()> {
     match action {
-        ServiceAction::Install => println!("Installing systemd service..."),
-        ServiceAction::Remove => println!("Removing systemd service..."),
-        ServiceAction::Start => println!("Starting service: systemctl start beacon-agent"),
-        ServiceAction::Stop => println!("Stopping service: systemctl stop beacon-agent"),
-        ServiceAction::Restart => println!("Restarting service: systemctl restart beacon-agent"),
-        ServiceAction::Status => println!("Service status: systemctl status beacon-agent"),
+        CronAction::Install => install_cron_entry(config_path)?,
+        CronAction::Remove => remove_cron_entry(config_path)?,
     }
     Ok(())
+}
+
+fn install_cron_entry(config_path: &str) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+
+    let log_dir = "/var/log/beacon";
+    if let Err(e) = std::fs::create_dir_all(log_dir) {
+        warn!("Could not create {log_dir}: {e}");
+    }
+    let log_path = format!("{log_dir}/agent-cron.log");
+
+    let cron_line = build_cron_line(&exe, config_path, &log_path);
+
+    let mut lines = read_crontab()?;
+    if lines.iter().any(|l| l.trim() == cron_line) {
+        println!("Cron @reboot entry already present.");
+        return Ok(());
+    }
+
+    lines.push(cron_line);
+    write_crontab(&lines)?;
+    println!("Installed cron @reboot entry for beacon-agent.");
+    Ok(())
+}
+
+fn remove_cron_entry(config_path: &str) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+    let cron_line = build_cron_line(&exe, config_path, "/var/log/beacon/agent-cron.log");
+
+    let mut lines = read_crontab()?;
+    let before = lines.len();
+    lines.retain(|l| {
+        let trimmed = l.trim();
+        trimmed != cron_line && !is_agent_cron_line(trimmed)
+    });
+
+    if lines.len() == before {
+        println!("No beacon-agent cron entry found.");
+        return Ok(());
+    }
+
+    write_crontab(&lines)?;
+    println!("Removed beacon-agent cron entry.");
+    Ok(())
+}
+
+fn read_crontab() -> Result<Vec<String>> {
+    let output = Command::new("crontab").arg("-l").output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            Ok(text.lines().map(|l| l.to_string()).collect())
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if stderr.contains("no crontab for") || out.status.code() == Some(1) {
+                Ok(Vec::new())
+            } else {
+                bail!("crontab -l failed: {}", stderr.trim());
+            }
+        }
+        Err(e) => bail!("crontab -l failed: {e}"),
+    }
+}
+
+fn write_crontab(lines: &[String]) -> Result<()> {
+    let mut child = Command::new("crontab")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow!("failed to open crontab stdin"))?;
+        let content = if lines.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", lines.join("\n"))
+        };
+        stdin.write_all(content.as_bytes())?;
+    }
+
+    let status = child.wait()?;
+    if !status.success() {
+        bail!("crontab update failed with status {status}");
+    }
+    Ok(())
+}
+
+fn build_cron_line(exe: &Path, config_path: &str, log_path: &str) -> String {
+    format!(
+        "@reboot {} start --config {} >> {} 2>&1",
+        exe.display(), config_path, log_path
+    )
+}
+
+fn is_agent_cron_line(line: &str) -> bool {
+    line.starts_with("@reboot") && line.contains("beacon-agent") && line.contains("start --config")
 }
 
 fn handle_collector(name: &str, action: EnableDisable) -> Result<()> {
