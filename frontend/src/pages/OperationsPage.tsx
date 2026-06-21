@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAgents, useLatestMetrics, useLogs } from '@/hooks'
 import { queryKeys } from '@/hooks/queryKeys'
 import { useUiStore } from '@/store/uiStore'
+import { useAuthStore } from '@/store/authStore'
 import { PageHeader } from '@/components/layout/AppLayout'
 import { DockerMetricsCard, KubernetesMetricsCard } from '@/components/agents'
 import {
@@ -613,12 +614,24 @@ export function OperationsPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
   const { selectedAgentId, selectAgent } = useUiStore()
-  const { data: agents, isLoading: agentsLoading } = useAgents()
+  const { canAccessAgent } = useAuthStore()
+  const { data: agents: agentsData, isLoading: agentsLoading } = useAgents()
+  const agents = useMemo(() => agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agentsData, canAccessAgent])
 
   const activeAgentId = useMemo(
     () => selectedAgentId ?? agents?.[0]?.agent_id ?? null,
     [selectedAgentId, agents],
   )
+
+  useEffect(() => {
+    if (!agents.length && selectedAgentId) {
+      selectAgent(null)
+      return
+    }
+    if (selectedAgentId && !agents.some((a) => a.agent_id === selectedAgentId)) {
+      selectAgent(agents[0]?.agent_id ?? null)
+    }
+  }, [agents, selectedAgentId, selectAgent])
 
   const { data: latestMetrics } = useLatestMetrics(activeAgentId)
 

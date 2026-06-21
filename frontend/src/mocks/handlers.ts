@@ -5,12 +5,20 @@ const BASE = '/api/v1'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
+const globalAccess = { access_all_agents: true, organization_ids: [], agent_ids: [] }
+
 export const mockUser: User = {
   id: 1,
   username: 'admin',
   email: 'admin@example.com',
   role: 'administrator',
   is_active: true,
+  approval_status: 'approved',
+  approved_by: 'system',
+  approved_at: '2024-01-15T10:00:00Z',
+  expires_at: null,
+  start_at: null,
+  access_scope: globalAccess,
   created_at: '2024-01-15T10:00:00Z',
   last_login: '2024-01-15T14:23:01Z',
 }
@@ -21,6 +29,12 @@ export const mockViewerUser: User = {
   email: 'viewer@example.com',
   role: 'viewer',
   is_active: true,
+  approval_status: 'approved',
+  approved_by: 'admin',
+  approved_at: '2024-01-15T12:00:00Z',
+  expires_at: null,
+  start_at: null,
+  access_scope: { access_all_agents: false, organization_ids: [1], agent_ids: [] },
   created_at: '2024-01-15T10:00:00Z',
   last_login: null,
 }
@@ -31,6 +45,12 @@ export const mockTestUser: User = {
   email: 'test@example.com',
   role: 'administrator',
   is_active: true,
+  approval_status: 'approved',
+  approved_by: 'admin',
+  approved_at: '2024-06-01T10:05:00Z',
+  expires_at: null,
+  start_at: null,
+  access_scope: globalAccess,
   created_at: '2024-06-01T10:00:00Z',
   last_login: null,
 }
@@ -188,7 +208,17 @@ export const handlers = [
 
   http.post(`${BASE}/users/`, async ({ request }) => {
     const body = await request.json() as Record<string, string>
-    const newUser: User = { ...mockViewerUser, id: 99, username: body.username, email: body.email ?? '', role: body.role as User['role'] }
+    const newUser: User = {
+      ...mockViewerUser,
+      id: 99,
+      username: body.username,
+      email: body.email ?? '',
+      role: body.role as User['role'],
+      approval_status: 'pending',
+      is_active: false,
+      approved_at: null,
+      approved_by: null,
+    }
     return HttpResponse.json(newUser, { status: 201 })
   }),
 

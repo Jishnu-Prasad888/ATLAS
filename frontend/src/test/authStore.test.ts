@@ -14,6 +14,7 @@ describe('authStore', () => {
     expect(state.isAuthenticated).toBe(false)
     expect(state.user).toBeNull()
     expect(state.isAdmin).toBe(false)
+    expect(state.isApproved).toBe(false)
   })
 
   it('sets user on login', () => {
@@ -25,6 +26,7 @@ describe('authStore', () => {
     expect(state.user?.username).toBe('admin')
     expect(state.user?.role).toBe('administrator')
     expect(state.isAdmin).toBe(true)
+    expect(state.isApproved).toBe(true)
   })
 
   it('stores access token in api client', () => {
@@ -78,5 +80,6 @@ describe('authStore', () => {
     expect(state.isAdmin).toBe(false)
     expect(state.isAuthenticated).toBe(true)
     expect(state.user?.role).toBe('viewer')
+    expect(state.isApproved).toBe(true)
   })
 })

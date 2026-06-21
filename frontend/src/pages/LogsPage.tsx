@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useAgents, useLogs, useLiveLogs, useDebounce, usePersistedState } from '@/hooks'
 import { logsApi } from '@/api'
 import { buildLogsExportUrl } from '@/api/telemetry'
@@ -209,9 +209,10 @@ function SeverityChip({
 
 export function LogsPage() {
   const [refreshing, setRefreshing] = useState(false)
-  const { isAdmin, accessToken } = useAuthStore()
+  const { isAdmin, accessToken, canAccessAgent } = useAuthStore()
   const addNotification = useUiStore((s) => s.addNotification)
-  const { data: agents } = useAgents()
+  const { data: agents: agentsData } = useAgents()
+  const agents = useMemo(() => agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agentsData, canAccessAgent])
 
   const [agentId,     setAgentId]     = usePersistedState<string>('logs_agent',    '')
   const [severity,    setSeverity]    = usePersistedState<string>('logs_severity', '')
@@ -225,6 +226,16 @@ export function LogsPage() {
 
   const search = useDebounce(searchInput, 500)
   const selectedAgentId = agentId || agents?.[0]?.agent_id || undefined
+
+  useEffect(() => {
+    if (!agents.length && agentId) {
+      setAgentId('')
+      return
+    }
+    if (agentId && !agents.some((a) => a.agent_id === agentId)) {
+      setAgentId(agents[0]?.agent_id ?? '')
+    }
+  }, [agents, agentId, setAgentId])
 
   const { data: historicLogs, isLoading, error, refetch } = useLogs(
     {

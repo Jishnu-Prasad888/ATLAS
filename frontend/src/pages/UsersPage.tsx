@@ -75,7 +75,7 @@ export function UsersPage() {
             <table className="w-full text-xs font-mono">
               <thead>
                 <tr className="border-b border-[--color-border]">
-                  {['Username', 'Email', 'Role', 'Status', 'Last Login', 'Created', 'Actions'].map((h) => (
+                  {['Username', 'Email', 'Role', 'Approval', 'Status', 'Last Login', 'Created', 'Actions'].map((h) => (
                     <th key={h} className="text-left px-3 py-2 text-[--color-text-muted] font-normal uppercase tracking-wide whitespace-nowrap">
                       {h}
                     </th>
@@ -129,9 +129,14 @@ function UserRow({
           disabled={isSelf}
           className="bg-transparent text-xs font-mono text-[--color-text] border border-[--color-border] rounded px-1.5 py-0.5 disabled:opacity-40"
         >
-          <option value="viewer">viewer</option>
-          <option value="administrator">administrator</option>
-        </select>
+           <option value="viewer">viewer</option>
+           <option value="moderator">moderator</option>
+           <option value="administrator">administrator</option>
+           <option value="guest">guest</option>
+         </select>
+      </td>
+      <td className="px-3 py-2 text-[--color-text-muted] uppercase tracking-wide text-[10px]">
+        {user.approval_status}
       </td>
       <td className="px-3 py-2">
         <StatusBadge
@@ -239,16 +244,18 @@ function CreateUserForm({
           autoComplete="new-password"
           disabled={loading}
         />
-        <Select
-          label="Role"
-          value={role}
-          onChange={(e) => setRole(e.target.value as Role)}
-          disabled={loading}
-        >
-          <option value="viewer">viewer</option>
-          <option value="administrator">administrator</option>
-        </Select>
-      </div>
+         <Select
+           label="Role"
+           value={role}
+           onChange={(e) => setRole(e.target.value as Role)}
+           disabled={loading}
+         >
+           <option value="viewer">viewer</option>
+           <option value="moderator">moderator</option>
+           <option value="administrator">administrator</option>
+           <option value="guest">guest</option>
+         </Select>
+       </div>
       {errors._global && (
         <p className="text-xs text-red-400 mb-3">{errors._global}</p>
       )}

@@ -3,6 +3,7 @@ import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { agentsApi } from '@/api'
 import { useAgents, useTelemetry, useLiveMetrics, usePersistedState } from '@/hooks'
 import { useUiStore } from '@/store/uiStore'
+import { useAuthStore } from '@/store/authStore'
 import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
@@ -68,7 +69,9 @@ function isoAgo(hours: number): string {
 export function MetricsPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
-  const { data: agents } = useAgents()
+  const { data: agents: agentsData } = useAgents()
+  const { canAccessAgent, isAdmin, isModerator } = useAuthStore()
+  const agents = useMemo(() => agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agentsData, canAccessAgent])
   const [selectedAgentId, setSelectedAgentId] = usePersistedState<string>('metrics_agent', '')
   const [metricType, setMetricType] = usePersistedState<MetricType>('metrics_type', 'cpu')
   const [timeRangeIdx, setTimeRangeIdx] = usePersistedState<number>('metrics_range', 1)
@@ -81,6 +84,7 @@ export function MetricsPage() {
   const [gpuView, setGpuView] = usePersistedState<'combined' | 'per'>('metrics_gpu_view', 'combined')
   const timeRange = TIME_RANGES[timeRangeIdx]
   const addNotification = useUiStore((s) => s.addNotification)
+  const canControl = isAdmin || isModerator
 
   const agentId = selectedAgentId || agents?.[0]?.agent_id || ''
 
@@ -119,6 +123,12 @@ export function MetricsPage() {
 
   const handleKillConfirm = useCallback(() => {
     if (!killTarget) return
+    if (!canControl) {
+      appendKillLog('Kill aborted: insufficient permissions')
+      addNotification?.({ type: 'error', title: 'Not permitted', message: 'Only administrators and moderators can kill processes.' })
+      setKillTarget(null)
+      return
+    }
     if (!agentId) {
       appendKillLog('Kill aborted: no agent selected')
       addNotification?.({ type: 'error', title: 'Select an agent', message: 'Pick an agent before killing a process.' })
@@ -128,9 +138,14 @@ export function MetricsPage() {
     appendKillLog(`Requesting kill for PID ${killTarget.pid} (${killTarget.name || 'process'})`)
     killMutation.mutate({ targetAgentId: agentId, pid: killTarget.pid })
     setKillTarget(null)
-  }, [agentId, killMutation, killTarget, appendKillLog, addNotification])
+  }, [agentId, killMutation, killTarget, appendKillLog, addNotification, canControl])
 
   const handleKillGroup = useCallback((exe: string, pids: number[]) => {
+    if (!canControl) {
+      appendKillLog('Kill aborted: insufficient permissions')
+      addNotification?.({ type: 'error', title: 'Not permitted', message: 'Only administrators and moderators can kill processes.' })
+      return
+    }
     if (!agentId) {
       appendKillLog('Kill aborted: no agent selected')
       addNotification?.({ type: 'error', title: 'Select an agent', message: 'Pick an agent before killing a process.' })
@@ -141,7 +156,7 @@ export function MetricsPage() {
     pids.forEach((pid) => {
       killMutation.mutate({ targetAgentId: agentId, pid })
     })
-  }, [agentId, killMutation, appendKillLog, addNotification])
+  }, [agentId, killMutation, appendKillLog, addNotification, canControl])
 
   const queryParams = useMemo(
     () => ({

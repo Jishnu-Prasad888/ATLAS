@@ -8,10 +8,10 @@ import {
 import { queryKeys } from '@/hooks/queryKeys'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
-  AgentStatusBadge, Sparkline, LoadingState, EmptyState, Tag, Button, SeverityBadge,
+  AgentStatusBadge, Sparkline, LoadingState, EmptyState, Tag, Button, SeverityBadge, Card,
 } from '@/components/common'
 import {
-  formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId, LOG_SOURCE_LABEL,
+  formatBytes, formatBandwidth, formatUptime, timeAgo, shortAgentId, LOG_SOURCE_LABEL, formatTimestamp,
 } from '@/utils'
 import { configApi, usersApi } from '@/api'
 import type {
@@ -673,7 +673,7 @@ const MetricPanel = memo(function MetricPanel({
 export function DashboardPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
-  const { user, isAdmin }                           = useAuthStore()
+  const { user, isAdmin, isModerator, isViewer, isGuest, canAccessAgent } = useAuthStore()
   const { selectedAgentId, selectAgent, wsConnected } = useUiStore()
   const { data: health }                           = useFleetHealth()
   const { data: agents, isLoading: agentsLoading } = useAgents()
@@ -693,28 +693,30 @@ export function DashboardPage() {
     staleTime: 60_000,
   })
 
+  const accessibleAgents = useMemo(() => agents?.filter((a) => canAccessAgent(a.agent_id)) ?? [], [agents, canAccessAgent])
+
   // Reset selection if persisted agent is not in the current list
   useEffect(() => {
-    if (!agents) return
-    if (!agents.length && selectedAgentId) {
+    if (!accessibleAgents) return
+    if (!accessibleAgents.length && selectedAgentId) {
       selectAgent(null)
       return
     }
-    const exists = agents.some((a) => a.agent_id === selectedAgentId)
+    const exists = accessibleAgents.some((a) => a.agent_id === selectedAgentId)
     if (!exists) {
-      selectAgent(agents[0]?.agent_id ?? null)
+      selectAgent(accessibleAgents[0]?.agent_id ?? null)
     }
-  }, [agents, selectedAgentId, selectAgent])
+  }, [accessibleAgents, selectedAgentId, selectAgent])
 
   // Stable active agent ID — don't derive inline so it doesn't thrash on each render
   const activeAgentId = useMemo(
-    () => selectedAgentId ?? agents?.[0]?.agent_id ?? null,
-    [selectedAgentId, agents],
+    () => selectedAgentId ?? accessibleAgents?.[0]?.agent_id ?? null,
+    [selectedAgentId, accessibleAgents],
   )
 
   const activeAgent = useMemo(
-    () => agents?.find((a) => a.agent_id === activeAgentId),
-    [agents, activeAgentId],
+    () => accessibleAgents?.find((a) => a.agent_id === activeAgentId),
+    [accessibleAgents, activeAgentId],
   )
 
   const handleSelectAgent = useCallback(
@@ -723,11 +725,11 @@ export function DashboardPage() {
   )
 
   const cycleAgent = useCallback((direction: 1 | -1) => {
-    if (!agents?.length) return
-    const idx = agents.findIndex((a) => a.agent_id === activeAgentId)
-    const nextIdx = idx === -1 ? 0 : (idx + direction + agents.length) % agents.length
-    selectAgent(agents[nextIdx].agent_id)
-  }, [agents, activeAgentId, selectAgent])
+    if (!accessibleAgents?.length) return
+    const idx = accessibleAgents.findIndex((a) => a.agent_id === activeAgentId)
+    const nextIdx = idx === -1 ? 0 : (idx + direction + accessibleAgents.length) % accessibleAgents.length
+    selectAgent(accessibleAgents[nextIdx].agent_id)
+  }, [accessibleAgents, activeAgentId, selectAgent])
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true)
@@ -769,7 +771,41 @@ export function DashboardPage() {
   const dbSize = typeof snapshot.db_size_bytes === 'number' ? formatBytes(snapshot.db_size_bytes) : null
   const snapshotTs = typeof snapshot.timestamp === 'string' ? snapshot.timestamp : null
 
-  const staleCount = useMemo(() => agents?.filter((a) => a.is_stale).length ?? 0, [agents])
+  const staleCount = useMemo(() => accessibleAgents?.filter((a) => a.is_stale).length ?? 0, [accessibleAgents])
+
+  const accessibleCount = accessibleAgents.length
+  const roleLabel = isAdmin ? 'Administration Dashboard' : isModerator ? 'Operations Dashboard' : isGuest ? 'Guest Monitoring Dashboard' : 'Monitoring Dashboard'
+
+  if (isGuest) {
+    const expiresAt = user?.expiresAt ?? null
+    return (
+      <div className="space-y-4">
+        <PageHeader title={roleLabel} subtitle={`Accessible agents: ${accessibleCount}`} />
+        <Card>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm font-mono text-[--color-text]">
+            <div className="rounded border border-[--color-border] bg-[--color-surface-2] p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[--color-text-dim] mb-1">Accessible Agents</p>
+              <p className="text-lg font-semibold">{accessibleCount}</p>
+            </div>
+            <div className="rounded border border-[--color-border] bg-[--color-surface-2] p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[--color-text-dim] mb-1">Organizations</p>
+              <p className="text-lg font-semibold">{user?.accessScope.organization_ids.length ?? 0}</p>
+            </div>
+            <div className="rounded border border-[--color-border] bg-[--color-surface-2] p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[--color-text-dim] mb-1">Access mode</p>
+              <p className="text-lg font-semibold">Read-only</p>
+            </div>
+          </div>
+          {expiresAt && (
+            <div className="mt-4 text-xs font-mono text-[--color-text-muted]">
+              <p>Guest access expires: <span className="text-[--color-text]">{formatTimestamp(expiresAt)}</span></p>
+            </div>
+          )}
+          <div className="mt-4 text-xs font-mono text-[--color-text-muted]">You can view assigned agents and organizations. Administration, audit, and controls are hidden for guest access.</div>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -825,7 +861,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Agents"
-          value={agents?.length ?? '—'}
+          value={accessibleCount || '—'}
           hint={activeAgent ? `${activeAgent.hostname}` : 'Select an agent to inspect'}
         />
         {isAdmin && (
@@ -851,13 +887,13 @@ export function DashboardPage() {
                   value={activeAgentId ?? ''}
                   onChange={(e) => handleSelectAgent(e.target.value)}
                 >
-                  {(agents ?? []).map((agent) => (
+                  {(accessibleAgents ?? []).map((agent) => (
                     <option key={agent.agent_id} value={agent.agent_id}>{agent.hostname}</option>
                   ))}
                 </select>
                 <div className="mini-chip">
-                  <button onClick={() => cycleAgent(-1)} disabled={!agents?.length} style={{ color: 'inherit' }}>‹</button>
-                  <button onClick={() => cycleAgent(1)} disabled={!agents?.length} style={{ color: 'inherit' }}>›</button>
+                  <button onClick={() => cycleAgent(-1)} disabled={!accessibleAgents?.length} style={{ color: 'inherit' }}>‹</button>
+                  <button onClick={() => cycleAgent(1)} disabled={!accessibleAgents?.length} style={{ color: 'inherit' }}>›</button>
                 </div>
               </div>
             </div>
@@ -865,7 +901,7 @@ export function DashboardPage() {
             {agentsLoading ? (
               <LoadingState label="Loading agents..." />
             ) : !activeAgent ? (
-              <EmptyState message="No agents registered" />
+              <EmptyState message="No agents available for your account" />
             ) : (
               <div className="panel-body">
                 <div className="agent-title">

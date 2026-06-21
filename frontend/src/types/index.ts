@@ -1,6 +1,23 @@
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ─── Enums & Access Control ───────────────────────────────────────────────────
 
-export type Role = 'viewer' | 'administrator'
+export type Role = 'administrator' | 'moderator' | 'viewer' | 'guest'
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
+
+export interface AccessScope {
+  access_all_agents: boolean
+  organization_ids: number[]
+  agent_ids: string[]
+}
+
+export interface Organization {
+  id: number
+  name: string
+  description?: string | null
+  agent_ids: string[]
+  created_at?: string
+  updated_at?: string
+}
 
 export type AgentStatus =
   | 'BOOTING'
@@ -56,6 +73,13 @@ export interface JwtPayload {
   user_id: number
   username: string
   role: Role
+  approved?: boolean
+  approval_status?: ApprovalStatus
+  access_all_agents?: boolean
+  agent_ids?: string[]
+  organization_ids?: number[]
+  expires_at?: string | null
+  start_at?: string | null
   jti: string
   exp: number
   iat: number
@@ -69,6 +93,12 @@ export interface User {
   email: string
   role: Role
   is_active: boolean
+  approval_status: ApprovalStatus
+  approved_by?: string | null
+  approved_at?: string | null
+  expires_at?: string | null
+  start_at?: string | null
+  access_scope?: AccessScope
   created_at: string
   last_login: string | null
 }

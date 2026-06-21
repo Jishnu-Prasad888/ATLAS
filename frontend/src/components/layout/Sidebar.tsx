@@ -67,6 +67,20 @@ const Icon = {
       <path d="M12 7v2M11 8h2" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
     </svg>
   ),
+  Organizations: () => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="5" width="4" height="9.5" rx="1" stroke="currentColor" strokeWidth="1.25" />
+      <rect x="6.5" y="1.5" width="4" height="13" rx="1" stroke="currentColor" strokeWidth="1.25" />
+      <rect x="11.5" y="7" width="3" height="7.5" rx="1" stroke="currentColor" strokeWidth="1.25" />
+    </svg>
+  ),
+  Reports: () => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <path d="M2 2h9l3 3v9a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M11 2v3h3" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M4 8h6M4 10.5h4M4 13h6" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  ),
   Audit: () => (
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
       <path d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.25"/>
@@ -111,19 +125,52 @@ const Icon = {
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
 
-const CORE_NAV: NavItem[] = [
+const CORE_NAV_ADMIN: NavItem[] = [
   { path: '/',           label: 'Dashboard',  icon: <Icon.Dashboard /> },
   { path: '/agents',     label: 'Agents',     icon: <Icon.Agents />    },
+  { path: '/organizations', label: 'Organizations', icon: <Icon.Organizations /> },
   { path: '/operations', label: 'Operations', icon: <Icon.Operations />},
   { path: '/metrics',    label: 'Metrics',    icon: <Icon.Metrics />   },
   { path: '/logs',       label: 'Logs',       icon: <Icon.Logs />      },
   { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
+  { path: '/reports',    label: 'Reports',    icon: <Icon.Reports />   },
+]
+
+const CORE_NAV_MODERATOR: NavItem[] = [
+  { path: '/',           label: 'Dashboard',  icon: <Icon.Dashboard /> },
+  { path: '/agents',     label: 'Agents',     icon: <Icon.Agents />    },
+  { path: '/organizations', label: 'Organizations', icon: <Icon.Organizations /> },
+  { path: '/operations', label: 'Operations', icon: <Icon.Operations />},
+  { path: '/metrics',    label: 'Metrics',    icon: <Icon.Metrics />   },
+  { path: '/logs',       label: 'Logs',       icon: <Icon.Logs />      },
+  { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
+  { path: '/reports',    label: 'Reports',    icon: <Icon.Reports />   },
+]
+
+const CORE_NAV_VIEWER: NavItem[] = [
+  { path: '/',           label: 'Dashboard',  icon: <Icon.Dashboard /> },
+  { path: '/agents',     label: 'Agents',     icon: <Icon.Agents />    },
+  { path: '/metrics',    label: 'Metrics',    icon: <Icon.Metrics />   },
+  { path: '/logs',       label: 'Logs',       icon: <Icon.Logs />      },
+  { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
+  { path: '/organizations', label: 'Organizations', icon: <Icon.Organizations /> },
+  { path: '/reports',    label: 'Reports',    icon: <Icon.Reports />   },
+]
+
+const CORE_NAV_GUEST: NavItem[] = [
+  { path: '/',           label: 'Dashboard',  icon: <Icon.Dashboard /> },
+  { path: '/agents',     label: 'Agents',     icon: <Icon.Agents />    },
+  { path: '/organizations', label: 'Organizations', icon: <Icon.Organizations /> },
 ]
 
 const ADMIN_NAV: NavItem[] = [
   { path: '/audit',  label: 'Audit',  icon: <Icon.Audit />  },
   { path: '/users',  label: 'Users',  icon: <Icon.Users />  },
   { path: '/config', label: 'Config', icon: <Icon.Config /> },
+]
+
+const AUDIT_NAV: NavItem[] = [
+  { path: '/audit', label: 'Audit', icon: <Icon.Audit /> },
 ]
 
 const UTIL_NAV: NavItem[] = [
@@ -133,7 +180,7 @@ const UTIL_NAV: NavItem[] = [
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
-  const { isAdmin, user, refreshToken, logout } = useAuthStore()
+  const { isAdmin, isModerator, isGuest, user, refreshToken, logout } = useAuthStore()
   const { sidebarCollapsed, toggleSidebar, wsConnected } = useUiStore()
   const { data: health } = useFleetHealth()
   const navigate = useNavigate()
@@ -161,6 +208,17 @@ export function Sidebar() {
     : 'ok'
 
   const { text: statusColor, bar: barColor, dot: dotColor } = STATUS_STYLE[fleetStatus]
+
+  const primaryNav = isAdmin
+    ? CORE_NAV_ADMIN
+    : isModerator
+    ? CORE_NAV_MODERATOR
+    : isGuest
+    ? CORE_NAV_GUEST
+    : CORE_NAV_VIEWER
+
+  const adminNavItems = isAdmin ? ADMIN_NAV : isModerator ? AUDIT_NAV : []
+  const utilityNav = isGuest ? [] : UTIL_NAV
 
   return (
     <>
@@ -337,28 +395,32 @@ export function Sidebar() {
         {/* ── Navigation ───────────────────────────────────────────────── */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden" style={{ padding: '6px 0' }} aria-label="Primary">
           <NavSection>
-            {CORE_NAV.map(item => (
+            {primaryNav.map(item => (
               <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
             ))}
           </NavSection>
 
-          {isAdmin && (
+          {adminNavItems.length > 0 && (
             <>
-              <SectionDivider label="Admin" collapsed={sidebarCollapsed} />
+              <SectionDivider label={isAdmin ? 'Admin' : 'Audit'} collapsed={sidebarCollapsed} />
               <NavSection>
-                {ADMIN_NAV.map(item => (
+                {adminNavItems.map(item => (
                   <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
                 ))}
               </NavSection>
             </>
           )}
 
-          <SectionDivider collapsed={sidebarCollapsed} />
-          <NavSection>
-            {UTIL_NAV.map(item => (
-              <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
-            ))}
-          </NavSection>
+          {utilityNav.length > 0 && (
+            <>
+              <SectionDivider collapsed={sidebarCollapsed} />
+              <NavSection>
+                {utilityNav.map(item => (
+                  <NavRow key={item.path} item={item} collapsed={sidebarCollapsed} />
+                ))}
+              </NavSection>
+            </>
+          )}
         </nav>
 
         {/* ── Footer ───────────────────────────────────────────────────── */}

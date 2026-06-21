@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFleetHealth, useAgents, useAgentHealth, usePersistedState } from '@/hooks'
 import { queryKeys } from '@/hooks/queryKeys'
+import { useAuthStore } from '@/store/authStore'
 import { PageHeader } from '@/components/layout/AppLayout'
 import {
   Button,
@@ -264,10 +265,22 @@ export function HealthPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
   const { data: health } = useFleetHealth()
-  const { data: agents } = useAgents()
+  const { canAccessAgent } = useAuthStore()
+  const { data: agents: agentsData } = useAgents()
+  const agents = agentsData?.filter((a) => canAccessAgent(a.agent_id)) ?? []
   const [selectedId, setSelectedId] = usePersistedState<string | null>('health_agent', null)
 
   const selectedAgent = agents?.find((a) => a.agent_id === selectedId) ?? null
+
+  useEffect(() => {
+    if (!agents.length && selectedId) {
+      setSelectedId(null)
+      return
+    }
+    if (selectedId && !agents.some((a) => a.agent_id === selectedId)) {
+      setSelectedId(agents[0]?.agent_id ?? null)
+    }
+  }, [agents, selectedId, setSelectedId])
 
   const snapshot = health?.latest_snapshot
 

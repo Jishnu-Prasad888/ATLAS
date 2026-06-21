@@ -2,10 +2,15 @@ import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from '@/components/layout/AppLayout'
-import { RequireAuth, RequireAdmin, RedirectIfAuthenticated, AuthEventHandler } from '@/components/auth/RouteGuards'
+import { RequireAuth, RequireAdmin, RedirectIfAuthenticated, AuthEventHandler, RequireRoles } from '@/components/auth/RouteGuards'
 import { LoadingState } from '@/components/common'
 import { LoginPage } from '@/pages/LoginPage'
 import { RecoverPage } from '@/pages/RecoverPage'
+import { AwaitingApprovalPage } from '@/pages/AwaitingApprovalPage'
+import { ForbiddenPage } from '@/pages/ForbiddenPage'
+import { OrganizationsPage } from '@/pages/OrganizationsPage'
+import { ReportsPage } from '@/pages/ReportsPage'
+import type { Role } from '@/types'
 
 const DashboardPage = lazy(() => import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const AgentsPage = lazy(() => import('@/pages/AgentsPage').then((m) => ({ default: m.AgentsPage })))
@@ -49,6 +54,16 @@ function AdminPage({ children }: { children: React.ReactNode }) {
   )
 }
 
+function RolePage({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
+  return (
+    <RequireRoles roles={roles}>
+      <AppLayout>
+        <PageSuspense>{children}</PageSuspense>
+      </AppLayout>
+    </RequireRoles>
+  )
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -57,14 +72,18 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<RedirectIfAuthenticated><LoginPage /></RedirectIfAuthenticated>} />
           <Route path="/recover" element={<RedirectIfAuthenticated><RecoverPage /></RedirectIfAuthenticated>} />
+          <Route path="/awaiting-approval" element={<AuthedPage><AwaitingApprovalPage /></AuthedPage>} />
+          <Route path="/forbidden" element={<AuthedPage><ForbiddenPage /></AuthedPage>} />
           <Route path="/" element={<AuthedPage><DashboardPage /></AuthedPage>} />
           <Route path="/agents" element={<AuthedPage><AgentsPage /></AuthedPage>} />
-          <Route path="/operations" element={<AuthedPage><OperationsPage /></AuthedPage>} />
-          <Route path="/metrics" element={<AuthedPage><MetricsPage /></AuthedPage>} />
-          <Route path="/logs" element={<AuthedPage><LogsPage /></AuthedPage>} />
-          <Route path="/health" element={<AuthedPage><HealthPage /></AuthedPage>} />
-          <Route path="/settings" element={<AuthedPage><SettingsPage /></AuthedPage>} />
-          <Route path="/audit" element={<AdminPage><AuditPage /></AdminPage>} />
+          <Route path="/organizations" element={<AuthedPage><OrganizationsPage /></AuthedPage>} />
+          <Route path="/reports" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><ReportsPage /></RolePage>} />
+          <Route path="/operations" element={<RolePage roles={[ 'administrator', 'moderator' ]}><OperationsPage /></RolePage>} />
+          <Route path="/metrics" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><MetricsPage /></RolePage>} />
+          <Route path="/logs" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><LogsPage /></RolePage>} />
+          <Route path="/health" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><HealthPage /></RolePage>} />
+          <Route path="/settings" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><SettingsPage /></RolePage>} />
+          <Route path="/audit" element={<RolePage roles={[ 'administrator', 'moderator' ]}><AuditPage /></RolePage>} />
           <Route path="/users" element={<AdminPage><UsersPage /></AdminPage>} />
           <Route path="/config" element={<AdminPage><ConfigPage /></AdminPage>} />
           <Route path="*" element={<Navigate to="/" replace />} />

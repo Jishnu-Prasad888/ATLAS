@@ -6,12 +6,13 @@ import { getRefreshToken } from '@/api'
 import { wsClient } from '@/ws/client'
 import { useUiStore } from '@/store/uiStore'
 import { LoadingState } from '@/components/common'
+import type { Role } from '@/types'
 
 /**
  * Requires authentication. Redirects to /login if not authenticated.
  */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isHydrating } = useAuthStore()
+  const { isAuthenticated, isHydrating, isApproved } = useAuthStore()
   const location = useLocation()
 
   if (isHydrating) {
@@ -20,6 +21,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
+  }
+
+  if (!isApproved && location.pathname !== '/awaiting-approval') {
+    return <Navigate to="/awaiting-approval" replace />
   }
 
   return <>{children}</>
@@ -29,7 +34,15 @@ export function RequireAuth({ children }: { children: ReactNode }) {
  * Requires administrator role. Redirects to / if authenticated but not admin.
  */
 export function RequireAdmin({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isAdmin, isHydrating } = useAuthStore()
+  return (
+    <RequireRoles roles={['administrator']}>
+      {children}
+    </RequireRoles>
+  )
+}
+
+export function RequireRoles({ children, roles }: { children: ReactNode; roles: Role[] }) {
+  const { isAuthenticated, isHydrating, isApproved, user } = useAuthStore()
   const location = useLocation()
 
   if (isHydrating) {
@@ -40,8 +53,12 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  if (!isAdmin) {
-    return <Navigate to="/" replace />
+  if (!isApproved && location.pathname !== '/awaiting-approval') {
+    return <Navigate to="/awaiting-approval" replace />
+  }
+
+  if (!user || !roles.includes(user.role)) {
+    return <Navigate to="/forbidden" replace />
   }
 
   return <>{children}</>
@@ -51,10 +68,10 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
  * Redirects authenticated users away from login/recover pages.
  */
 export function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, isApproved } = useAuthStore()
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to={isApproved ? '/' : '/awaiting-approval'} replace />
   }
 
   return <>{children}</>

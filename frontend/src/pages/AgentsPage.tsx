@@ -38,7 +38,8 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
 ]
 
 export function AgentsPage() {
-  const { isAdmin } = useAuthStore()
+  const { isAdmin, isModerator, canAccessAgent } = useAuthStore()
+  const canControlAgents = isAdmin || isModerator
   const { data: agents, isLoading, error, refetch } = useAgents()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = usePersistedState('agents_search', '')
@@ -47,14 +48,16 @@ export function AgentsPage() {
   const { enableAgent, disableAgent, deleteAgent, renameAgent, regenerateId } = useAgentMutations()
   const addNotification = useUiStore((s) => s.addNotification)
 
+  const scopedAgents = agents?.filter((a) => canAccessAgent(a.agent_id)) ?? []
+
   const counts = {
-    total: agents?.length ?? 0,
-    active: agents?.filter((a) => a.is_active).length ?? 0,
-    stale: agents?.filter((a) => a.is_stale).length ?? 0,
-    inactive: agents?.filter((a) => !a.is_active).length ?? 0,
+    total: scopedAgents.length,
+    active: scopedAgents.filter((a) => a.is_active).length,
+    stale: scopedAgents.filter((a) => a.is_stale).length,
+    inactive: scopedAgents.filter((a) => !a.is_active).length,
   }
 
-  const filtered = agents?.filter((a) => {
+  const filtered = scopedAgents.filter((a) => {
     const matchesSearch =
       !search ||
       a.hostname.toLowerCase().includes(search.toLowerCase()) ||
@@ -70,7 +73,7 @@ export function AgentsPage() {
     return matchesSearch && matchesStatus
   })
 
-  const selected = agents?.find((a) => a.agent_id === selectedId) ?? null
+  const selected = scopedAgents.find((a) => a.agent_id === selectedId) ?? null
 
   const handleDelete = (agentId: string) => {
     setConfirm(null)
@@ -213,7 +216,7 @@ export function AgentsPage() {
           {selected ? (
             <AgentDetail
               agent={selected}
-              isAdmin={isAdmin}
+              canControl={canControlAgents}
               onEnable={() => enableAgent.mutate(selected.agent_id)}
               onDisable={() => disableAgent.mutate(selected.agent_id)}
               onDelete={() => setConfirm({ type: 'delete', agentId: selected.agent_id, hostname: selected.hostname })}
@@ -307,7 +310,7 @@ function SubLabel({ children }: { children: React.ReactNode }) {
 
 function AgentDetail({
   agent,
-  isAdmin,
+  canControl,
   onEnable,
   onDisable,
   onDelete,
@@ -316,7 +319,7 @@ function AgentDetail({
   renameLoading,
 }: {
   agent: Agent
-  isAdmin: boolean
+  canControl: boolean
   onEnable: () => void
   onDisable: () => void
   onDelete: () => void
@@ -380,7 +383,7 @@ function AgentDetail({
             ) : (
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-mono font-semibold text-[--color-text] truncate">{agent.hostname}</h2>
-                {isAdmin && (
+                {canControl && (
                   <button
                     onClick={() => { setNewHostname(agent.hostname); setRenameMode(true) }}
                     className="text-xs text-[--color-text-dim] hover:text-[--color-text-muted] font-mono transition-colors"
@@ -403,9 +406,9 @@ function AgentDetail({
           <AgentStatusBadge status={agent.status} />
         </div>
 
-        {isAdmin && (
+        {canControl && (
           <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-[--color-border]">
-            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
               <Toggle checked={agent.is_active} onChange={(v) => (v ? onEnable() : onDisable())} />
               <span className="text-xs font-mono text-[--color-text-muted]">
                 {agent.is_active ? 'Enabled' : 'Disabled'}
@@ -441,7 +444,7 @@ function AgentDetail({
         )}
       </Card>
 
-      {config && <MetricConfigPanel config={config} isAdmin={isAdmin} agentId={agent.agent_id} />}
+      {config && <MetricConfigPanel config={config} canControl={canControl} agentId={agent.agent_id} />}
 
       {gpuData && (
         <Card>
@@ -673,11 +676,11 @@ const COLLECTOR_GROUPS: Array<{ title: string; items: Array<{ key: keyof MetricC
 
 function MetricConfigPanel({
   config,
-  isAdmin,
+  canControl,
   agentId,
 }: {
   config: MetricConfig
-  isAdmin: boolean
+  canControl: boolean
   agentId: string
 }) {
   const addNotification = useUiStore((s) => s.addNotification)
@@ -709,7 +712,7 @@ function MetricConfigPanel({
                   <Toggle
                     checked={config[key] as boolean}
                     onChange={(v) => toggleCollector(key, v)}
-                    disabled={!isAdmin}
+                    disabled={!canControl}
                   />
                 </div>
               ))}
