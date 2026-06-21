@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState } from 'react'
+import { useMemo, useCallback, useState, useEffect } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { agentsApi } from '@/api'
 import { useAgents, useTelemetry, useLiveMetrics, usePersistedState } from '@/hooks'
@@ -83,6 +83,19 @@ export function MetricsPage() {
   const addNotification = useUiStore((s) => s.addNotification)
 
   const agentId = selectedAgentId || agents?.[0]?.agent_id || ''
+
+  // Reset selection if persisted agent no longer exists
+  useEffect(() => {
+    if (!agents) return
+    if (!agents.length && selectedAgentId) {
+      setSelectedAgentId('')
+      return
+    }
+    const exists = agents.some((a) => a.agent_id === selectedAgentId)
+    if (!exists) {
+      setSelectedAgentId(agents[0]?.agent_id ?? '')
+    }
+  }, [agents, selectedAgentId, setSelectedAgentId])
 
   const { latest, history } = useLiveMetrics(agentId || null)
 

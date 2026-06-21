@@ -295,6 +295,7 @@ export function useLiveMetrics(agentId: string | null): LiveMetrics {
       try {
         const seeded = await telemetryApi.latest(agentId)
         if (!active) return
+        console.log('[metrics] latest keys:', Object.keys(seeded), 'Has GPU:', 'gpu' in seeded)
         setState((prev) => ({ ...prev, latest: seeded }))
       } catch (error) {
         console.warn('[metrics] failed to seed latest metrics', error)

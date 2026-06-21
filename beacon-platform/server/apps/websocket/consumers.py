@@ -17,6 +17,7 @@ from channels.db import database_sync_to_async
 from django.utils import timezone
 
 from apps.metrics.views import update_latest_cache
+from apps.metrics.serializers import MetricSerializer
 
 logger = logging.getLogger("beacon")
 
@@ -121,12 +122,15 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         metrics = data.get("payload", [])
         if not isinstance(metrics, list):
             metrics = [metrics]
-        saved = await self.save_metrics(self.agent_id, metrics)
+        saved, serialized = await self.save_metrics(self.agent_id, metrics)
         logger.debug("AgentIngestConsumer metrics — saved %d metrics for agent %s", saved, self.agent_id)
-        await self.channel_layer.group_send(
-            f"metrics_{self.safe_agent_id}",
-            {"type": "metric.update", "data": {"agent_id": self.agent_id, "count": saved}},
-        )
+
+        for metric in serialized:
+            await self.channel_layer.group_send(
+                f"metrics_{self.safe_agent_id}",
+                {"type": "metric.update", "data": metric},
+            )
+
         await self.send_json({"type": "metrics_ack", "ingested": saved})
 
     async def handle_logs(self, data):
@@ -230,6 +234,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
 
         objects = []
         collector_names = set()
+        serialized = []
 
         for m in metrics:
             if not isinstance(m, dict):
@@ -248,6 +253,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         if objects:
             Metric.objects.bulk_create(objects, batch_size=500)
             update_latest_cache(agent_id, objects)
+            serialized = MetricSerializer(objects, many=True).data
 
             # Auto-maintain collector health so the UI doesn't stay empty when the agent
             # isn't sending collector_health messages explicitly.
@@ -265,7 +271,7 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
                         },
                     )
 
-        return len(objects)
+        return len(objects), serialized
 
     @database_sync_to_async
     def save_logs(self, agent_id, logs):

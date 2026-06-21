@@ -1,4 +1,4 @@
-import { useState, useMemo, memo, useCallback, type ReactNode } from 'react'
+import { useState, useMemo, memo, useCallback, useEffect, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
@@ -238,13 +238,9 @@ const CSS = `
 
   .atlas-dash .metric-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
     padding: 16px;
-  }
-  .atlas-dash .metric-grid > :nth-child(3) {
-    grid-column: 1 / -1;
-    justify-self: center;
   }
   .atlas-dash .info-row {
     display: grid;
@@ -696,6 +692,19 @@ export function DashboardPage() {
     enabled: isAdmin,
     staleTime: 60_000,
   })
+
+  // Reset selection if persisted agent is not in the current list
+  useEffect(() => {
+    if (!agents) return
+    if (!agents.length && selectedAgentId) {
+      selectAgent(null)
+      return
+    }
+    const exists = agents.some((a) => a.agent_id === selectedAgentId)
+    if (!exists) {
+      selectAgent(agents[0]?.agent_id ?? null)
+    }
+  }, [agents, selectedAgentId, selectAgent])
 
   // Stable active agent ID — don't derive inline so it doesn't thrash on each render
   const activeAgentId = useMemo(

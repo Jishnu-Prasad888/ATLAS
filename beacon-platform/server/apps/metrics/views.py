@@ -53,7 +53,7 @@ def update_latest_cache(agent_id: str, metric_objects: Iterable[Metric]):
     key = cache_key_for_latest(agent_id)
     cached = cache_safe_get(key)
     if cached is None:
-        return
+        cached = {}
     for metric in metric_objects:
         cached[metric.metric_type] = MetricSerializer(metric).data
     cache_safe_set(key, cached)
@@ -100,7 +100,9 @@ class MetricIngestView(APIView):
         logger.debug("MetricIngestView ingested %d metrics for agent %s", len(objects), agent_id)
 
         if objects:
-            broadcast_metric(agent_id, MetricSerializer(objects[-1]).data)
+            serialized = MetricSerializer(objects, many=True).data
+            for metric_data in serialized:
+                broadcast_metric(agent_id, metric_data)
             update_latest_cache(agent_id, objects)
 
         return Response({"ingested": len(objects)}, status=status.HTTP_201_CREATED)
@@ -153,6 +155,14 @@ class MetricLatestView(APIView):
             return Response(result)
 
         logger.debug("MetricLatestView cache MISS for agent %s — querying DB", agent_id)
+        types_on_disk = list(
+            Metric.objects
+            .filter(agent_id=agent_id)
+            .values_list("metric_type", flat=True)
+            .distinct()
+        )
+        logger.debug("MetricLatestView disk types for %s: %s", agent_id, types_on_disk)
+
         latest_metrics = (
             Metric.objects
             .filter(agent_id=agent_id)
