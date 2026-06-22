@@ -5,6 +5,7 @@ All REST endpoints are under /api/v1/
 from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
+from apps.graphql_api.views import graphql_view
 
 
 def health_check(request):
@@ -14,6 +15,7 @@ def health_check(request):
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health_check, name="health"),
+    path("api/v1/graphql/", graphql_view()),
 
     # API v1
     path("api/v1/auth/",      include("apps.auth_rbac.urls")),
@@ -23,6 +25,7 @@ urlpatterns = [
     path("api/v1/logs/",      include("apps.logs.urls")),
     path("api/v1/metrics/",   include("apps.metrics.urls_metrics")),
     path("api/v1/audit/",     include("apps.audit.urls")),
+    path("api/v1/operations/",include("apps.operations.urls")),
     path("api/v1/atlas-ai/",  include("apps.atlas_ai.urls")),
     path("api/v1/config/",    include("apps.config.urls")),
     path("api/v1/health/",    include("apps.health.urls")),

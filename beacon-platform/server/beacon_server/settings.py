@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "apps.health",
     "apps.atlas_ai",
     "apps.websocket",
+    "apps.operations",
 ]
 
 MIDDLEWARE = [
