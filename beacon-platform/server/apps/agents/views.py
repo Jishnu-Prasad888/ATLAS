@@ -2,6 +2,7 @@
 Beacon Agents Views — /api/v1/agents/
 """
 import logging
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
@@ -9,7 +10,13 @@ from rest_framework.response import Response
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from apps.auth_rbac.permissions import IsAdministrator, IsAdminOrReadOnly, IsViewer, IsModeratorOrAdmin
+from apps.auth_rbac.permissions import (
+    AgentSharedSecretPermission,
+    IsAdministrator,
+    IsAdminOrReadOnly,
+    IsViewer,
+    IsModeratorOrAdmin,
+)
 from apps.audit.utils import audit_log
 from apps.auth_rbac.models import UserAgentAccess, OrganizationAgent, UserOrganizationAccess
 from .models import Agent, AgentStatus, CollectorHealth, CollectorStatus, ProcessKillRequest
@@ -186,12 +193,17 @@ class AgentRegisterView(APIView):
     permission_classes = []
 
     def post(self, request):
+        expected_secret = getattr(settings, "BEACON_AGENT_SECRET", "").strip()
+        provided_secret = str(request.data.get("secret", "")).strip()
+        if not expected_secret or provided_secret != expected_secret:
+            logger.debug("AgentRegisterView secret mismatch for agent_id=%s", request.data.get("agent_id"))
+            return Response({"detail": "Invalid agent secret."}, status=403)
+
         serializer = AgentRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
         logger.debug("AgentRegisterView POST — agent_id=%s hostname=%s", data["agent_id"], data["hostname"])
-        print(data["agent_id"])
         agent, created = Agent.objects.update_or_create(
             agent_id=data["agent_id"],
             defaults={
@@ -215,7 +227,7 @@ class AgentRegisterView(APIView):
 
 
 class AgentHeartbeatView(APIView):
-    permission_classes = []
+    permission_classes = [AgentSharedSecretPermission]
 
     def post(self, request, agent_id):
         logger.debug("AgentHeartbeatView POST — agent_id=%s", agent_id)
@@ -235,7 +247,7 @@ class AgentHeartbeatView(APIView):
 
 
 class AgentCollectorHealthView(APIView):
-    permission_classes = []
+    permission_classes = [AgentSharedSecretPermission]
 
     def post(self, request, agent_id):
         logger.debug("AgentCollectorHealthView POST — agent_id=%s", agent_id)
@@ -302,7 +314,7 @@ class AgentKillProcessResultView(APIView):
     """POST /api/v1/agents/<agent_id>/kill_process_result/
     Payload: { pid: int, status: completed|failed, request_id?: int, error?: str }
     """
-    permission_classes = []  # trusted agent callback; network-controlled
+    permission_classes = [AgentSharedSecretPermission]  # trusted agent callback; network-controlled
 
     def post(self, request, agent_id):
         pid = request.data.get("pid")

@@ -14,6 +14,7 @@ import json
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
+from django.conf import settings
 from django.utils import timezone
 
 from apps.metrics.views import update_latest_cache
@@ -87,6 +88,20 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         if not agent_id:
             logger.debug("AgentIngestConsumer register — missing agent_id")
             await self.send_json({"error": "agent_id is required"})
+            return
+
+        provided_secret = str(payload.get("secret", "")).strip()
+        expected_secret = getattr(settings, "BEACON_AGENT_SECRET", "").strip()
+
+        if not provided_secret:
+            await self.send_json({"error": "secret is required for registration"})
+            await self.close(code=4003)
+            return
+
+        if not ((expected_secret and provided_secret == expected_secret) or await self._agent_secret_valid(agent_id, provided_secret)):
+            logger.warning("AgentIngestConsumer register — secret mismatch for agent %s", agent_id)
+            await self.send_json({"error": "invalid agent secret"})
+            await self.close(code=4003)
             return
 
         logger.debug("AgentIngestConsumer register — agent_id=%s hostname=%s", agent_id, payload.get("hostname"))
@@ -208,6 +223,15 @@ class AgentIngestConsumer(AsyncWebsocketConsumer):
         if payload.get("secret"):
             agent.set_secret(payload["secret"])
         return agent
+
+    @database_sync_to_async
+    def _agent_secret_valid(self, agent_id, provided):
+        from apps.agents.models import Agent
+        try:
+            agent = Agent.objects.get(agent_id=agent_id)
+            return bool(agent.secret_hash) and agent.verify_secret(provided)
+        except Agent.DoesNotExist:
+            return False
 
     @database_sync_to_async
     def touch_agent(self, agent_id, status="ONLINE"):

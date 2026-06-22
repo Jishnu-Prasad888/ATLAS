@@ -131,6 +131,10 @@ class BeaconWebSocketClient {
   updateToken(token: string): void {
     log(`${LOG_PREFIX} updateToken Updating WS auth token`)
     this.token = token
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      // Force reconnect so the new token takes effect
+      this.ws.close(4100, 'token refreshed')
+    }
   }
 
   get isConnected(): boolean {

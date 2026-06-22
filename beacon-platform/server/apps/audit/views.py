@@ -2,6 +2,8 @@
 Beacon Audit Views — /api/v1/audit/
 """
 import logging
+from typing import Any, Dict, Mapping, cast
+
 from rest_framework import serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -67,6 +69,7 @@ class AuditLogListView(APIView):
         user     = request.query_params.get("user")
         action   = request.query_params.get("action")
         resource = request.query_params.get("resource")
+        success  = request.query_params.get("success")
         start    = request.query_params.get("start")
         end      = request.query_params.get("end")
 
@@ -76,6 +79,11 @@ class AuditLogListView(APIView):
             qs = qs.filter(action=action)
         if resource:
             qs = qs.filter(resource=resource)
+        if success is not None:
+            if success.lower() in {"true", "1", "yes"}:
+                qs = qs.filter(success=True)
+            elif success.lower() in {"false", "0", "no"}:
+                qs = qs.filter(success=False)
         if start:
             qs = qs.filter(timestamp__gte=start)
         if end:
@@ -94,17 +102,21 @@ class AuditLogIngestView(APIView):
     def post(self, request):
         serializer = AuditLogIngestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
+        validated: Mapping[str, Any] = cast(Mapping[str, Any], serializer.validated_data)
+        data: Dict[str, Any] = {str(k): v for k, v in validated.items()}
 
         # Merge optional fields into details for traceability
-        details = {**(data.get("details") or {})}
+        raw_details = data.get("details") or {}
+        details: Dict[str, Any] = dict(raw_details) if isinstance(raw_details, dict) else {}
         for field in ["status", "error", "timestamp", "user_id", "username", "role"]:
-            if field in data and data[field] is not None:
-                details[field] = data[field]
+            value = data.get(field)
+            if value is not None:
+                details[field] = value
 
         success = data.get("success")
-        if success is None and "status" in data:
-            success = data.get("status") != "error"
+        status_val = data.get("status")
+        if success is None and status_val is not None:
+            success = status_val != "error"
 
         audit_log(
             request,

@@ -115,6 +115,44 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 )
 Input.displayName = 'Input'
 
+// ─── Textarea ─────────────────────────────────────────────────────────────────
+
+interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label?: string
+  error?: string
+  hint?: string
+}
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
+  ({ label, error, hint, className, id, rows = 4, ...props }, ref) => {
+    const textareaId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
+
+    return (
+      <div className="flex flex-col gap-1">
+        {label && (
+          <label htmlFor={textareaId} className="text-xs text-[--color-text-muted] font-mono uppercase tracking-wide">
+            {label}
+          </label>
+        )}
+        <textarea
+          ref={ref}
+          id={textareaId}
+          rows={rows}
+          className={clsx(
+            'w-full rounded border bg-[--color-surface-2] px-3 py-2 text-xs font-mono text-[--color-text] placeholder:text-[--color-text-dim] leading-snug',
+            'focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors',
+            error ? 'border-red-700' : 'border-[--color-border] hover:border-[--color-border-strong]',
+            className,
+          )}
+          {...props}
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        {hint && !error && <p className="text-xs text-[--color-text-muted]">{hint}</p>}
+      </div>
+    )}
+)
+Textarea.displayName = 'Textarea'
+
 // ─── Select ───────────────────────────────────────────────────────────────────
 
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {

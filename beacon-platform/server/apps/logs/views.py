@@ -8,7 +8,12 @@ from rest_framework.response import Response
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from apps.auth_rbac.permissions import IsAdminOrReadOnly, IsViewer, IsAdministrator
+from apps.auth_rbac.permissions import (
+    AgentSharedSecretPermission,
+    IsAdminOrReadOnly,
+    IsViewer,
+    IsAdministrator,
+)
 from apps.audit.utils import audit_log
 from .models import LogEntry, LogSeverity
 from .serializers import (
@@ -33,7 +38,7 @@ def broadcast_log(agent_id: str, log_data: dict):
 
 class LogIngestView(APIView):
     """POST /api/v1/logs/ingest/ — Agent posts log batches."""
-    permission_classes = []
+    permission_classes = [AgentSharedSecretPermission]
 
     def post(self, request):
         serializer = LogBatchIngestSerializer(data=request.data)

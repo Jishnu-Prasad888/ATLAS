@@ -12,7 +12,12 @@ from rest_framework.response import Response
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from apps.auth_rbac.permissions import IsAdminOrReadOnly, IsViewer, IsAdministrator
+from apps.auth_rbac.permissions import (
+    AgentSharedSecretPermission,
+    IsAdminOrReadOnly,
+    IsViewer,
+    IsAdministrator,
+)
 from .models import Metric, MetricConfig, MetricResolution
 from .serializers import (
     MetricSerializer,
@@ -75,7 +80,7 @@ class MetricIngestView(APIView):
     POST /api/v1/telemetry/ingest/
     Accepts batches of metrics from agents.
     """
-    permission_classes = []  # Agent-authenticated via header
+    permission_classes = [AgentSharedSecretPermission]  # Agent-auth via shared secret
 
     def post(self, request):
         serializer = MetricBatchIngestSerializer(data=request.data)

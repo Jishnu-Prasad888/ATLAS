@@ -10,11 +10,18 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "beacon-change-me-in-production-use-a-long-random-string")
+def require_env(name: str) -> str:
+    val = os.environ.get(name, "").strip()
+    if not val:
+        raise RuntimeError(f"{name} must be set in the environment")
+    return val
+
+
+SECRET_KEY = require_env("SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = require_env("ALLOWED_HOSTS").split(",")
 
 # ─── Applications ────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
@@ -42,6 +49,8 @@ INSTALLED_APPS = [
     "apps.atlas_ai",
     "apps.websocket",
     "apps.operations",
+    "apps.tools",
+    "apps.ai_agents",
 ]
 
 MIDDLEWARE = [
@@ -180,6 +189,7 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 CORS_ALLOW_CREDENTIALS = True
 
 # ─── Encryption ───────────────────────────────────────────────────────────────
+BEACON_AGENT_SECRET = require_env("BEACON_AGENT_SECRET")
 BEACON_ENCRYPTION_KEY = os.environ.get("BEACON_ENCRYPTION_KEY", "")  # 32-byte AES-256 key (base64)
 BEACON_TLS_CERT = os.environ.get("BEACON_TLS_CERT", "certs/server.crt")
 BEACON_TLS_KEY = os.environ.get("BEACON_TLS_KEY", "certs/server.key")
@@ -189,6 +199,12 @@ BEACON_AGENT_HEARTBEAT_TIMEOUT = int(os.environ.get("BEACON_AGENT_HEARTBEAT_TIME
 BEACON_MAX_AGENTS = int(os.environ.get("BEACON_MAX_AGENTS", "1000"))
 BEACON_WEBSOCKET_BUFFER_SIZE = int(os.environ.get("BEACON_WEBSOCKET_BUFFER_SIZE", "1000"))
 BEACON_RATE_LIMIT_PER_AGENT = int(os.environ.get("BEACON_RATE_LIMIT_PER_AGENT", "100"))  # msgs/sec
+
+# ─── Sandbox Execution Defaults ───────────────────────────────────────────────
+SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", "sandbox-python:1.0")
+SANDBOX_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT", "15"))
+SANDBOX_MEM_LIMIT = os.environ.get("SANDBOX_MEM_LIMIT", "256m")
+SANDBOX_CPU_QUOTA = int(os.environ.get("SANDBOX_CPU_QUOTA", "50000"))
 
 # ─── Static / Media ───────────────────────────────────────────────────────────
 STATIC_URL = "/static/"
@@ -223,11 +239,19 @@ LOGGING = {
             "backupCount": 5,
             "formatter": "verbose",
         },
+        "ai_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": BASE_DIR / "logs" / "ai.log",
+            "maxBytes": 1024 * 1024 * 10,  # 10 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
     },
     "root": {"handlers": ["console"], "level": "INFO"},
     "loggers": {
         "beacon": {"handlers": ["console", "file"], "level": "DEBUG", "propagate": False},
         "django": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "ai": {"handlers": ["console", "ai_file"], "level": "INFO", "propagate": False},
     },
 }
 

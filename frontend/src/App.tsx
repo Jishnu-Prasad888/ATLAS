@@ -24,6 +24,8 @@ const AuditPage = lazy(() => import('@/pages/AuditPage').then((m) => ({ default:
 const UsersPage = lazy(() => import('@/pages/UsersPage').then((m) => ({ default: m.UsersPage })))
 const ConfigPage = lazy(() => import('@/pages/ConfigPage').then((m) => ({ default: m.ConfigPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const AiWorkbenchPage = lazy(() => import('@/pages/AiWorkbenchPage').then((m) => ({ default: m.AiWorkbenchPage })))
+const AiAnalystPage = lazy(() => import('@/pages/AiAnalystPage').then((m) => ({ default: m.AiAnalystPage })))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -87,6 +89,8 @@ export default function App() {
           <Route path="/health" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><HealthPage /></RolePage>} />
           <Route path="/settings" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><SettingsPage /></RolePage>} />
           <Route path="/audit" element={<RolePage roles={[ 'administrator', 'moderator' ]}><AuditPage /></RolePage>} />
+          <Route path="/ai-workbench" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><AiWorkbenchPage /></RolePage>} />
+          <Route path="/ai-analyst" element={<RolePage roles={[ 'administrator', 'moderator', 'viewer' ]}><AiAnalystPage /></RolePage>} />
           <Route path="/users" element={<AdminPage><UsersPage /></AdminPage>} />
           <Route path="/config" element={<AdminPage><ConfigPage /></AdminPage>} />
           <Route path="*" element={<AuthedPage><NotFoundPage /></AuthedPage>} />

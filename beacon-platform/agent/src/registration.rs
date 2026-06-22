@@ -310,7 +310,7 @@ fn extract_base_url(ws_url: &str) -> Result<String> {
 }
 
 /// Build a `reqwest::Client` that respects the TLS configuration.
-fn build_http_client(config: &AgentConfig) -> Result<reqwest::Client> {
+pub(crate) fn build_http_client(config: &AgentConfig) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
 
     if !config.tls.verify_cert {

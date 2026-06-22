@@ -13,11 +13,12 @@ use tokio::time::sleep;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
 use tracing::{debug, error, info, warn};
 
-use crate::config::{AgentConfig, CollectorFlags};
+use crate::config::{AgentConfig, CollectorFlags, ConfigValidator};
 use crate::engines::encryption::EncryptionEngine;
 use crate::engines::identity::AgentIdentity;
 use crate::engines::logging::LogEngine;
 use crate::engines::queue::QueueEngine;
+use crate::registration::{build_http_client, resolve_secret};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -131,6 +132,9 @@ impl WebSocketTransport {
 
         let (mut writer, mut reader) = ws_stream.split();
 
+        let secret = resolve_secret(&self.config)
+            .map_err(|e| anyhow!("Missing agent secret for WebSocket registration: {e}"))?;
+
         // Send registration
         let register_msg = json!({
             "type": "register",
@@ -142,6 +146,7 @@ impl WebSocketTransport {
                 "version":      "1.0.0",
                 "tags":         [],
                 "metadata":     {},
+                "secret":       secret,
             }
         });
         writer
@@ -394,32 +399,39 @@ impl WebSocketTransport {
         config: &AgentConfig,
         config_path: &str,
     ) {
+        // Apply and validate config before mutating runtime flags or disk
+        let updated = config.clone().apply_update(payload);
+        if let Err(e) = ConfigValidator::validate(&updated) {
+            warn!("Rejected config update: {e}");
+            return;
+        }
+
         // Update in-memory flags for all collectors
-        let mut map = flags.write().await;
-        let mappings = [
-            ("cpu_enabled", "cpu"),
-            ("ram_enabled", "ram"),
-            ("storage_enabled", "storage"),
-            ("network_enabled", "network"),
-            ("process_enabled", "process"),
-            ("systemd_enabled", "systemd"),
-            ("system_inventory_enabled", "system_inventory"),
-            ("docker_enabled", "docker"),
-            ("kubernetes_enabled", "kubernetes"),
-            ("temperature_enabled", "temperature"),
-            ("power_enabled", "power"),
-            ("gpu_enabled", "gpu"),
-        ];
-        for (field, key) in &mappings {
-            if let Some(val) = payload.get(*field).and_then(|v| v.as_bool()) {
-                info!("Config update: {} = {}", key, val);
-                map.insert(key.to_string(), val);
+        {
+            let mut map = flags.write().await;
+            let mappings = [
+                ("cpu_enabled", "cpu"),
+                ("ram_enabled", "ram"),
+                ("storage_enabled", "storage"),
+                ("network_enabled", "network"),
+                ("process_enabled", "process"),
+                ("systemd_enabled", "systemd"),
+                ("system_inventory_enabled", "system_inventory"),
+                ("docker_enabled", "docker"),
+                ("kubernetes_enabled", "kubernetes"),
+                ("temperature_enabled", "temperature"),
+                ("power_enabled", "power"),
+                ("gpu_enabled", "gpu"),
+            ];
+            for (field, key) in &mappings {
+                if let Some(val) = payload.get(*field).and_then(|v| v.as_bool()) {
+                    info!("Config update: {} = {}", key, val);
+                    map.insert(key.to_string(), val);
+                }
             }
         }
-        drop(map);
 
         // Persist updated config to disk so changes survive agent restart
-        let updated = config.clone().apply_update(payload);
         if let Err(e) = updated.save(config_path).await {
             error!("Failed to persist config update to disk: {e}");
         } else {
@@ -511,7 +523,8 @@ impl WebSocketTransport {
             base, identity.agent_id
         );
 
-        let client = reqwest::Client::new();
+        let client = build_http_client(config)?;
+        let secret = resolve_secret(config)?;
         let mut payload = serde_json::json!({
             "pid": pid,
             "status": if error.is_some() { "failed" } else { "completed" },
@@ -525,6 +538,8 @@ impl WebSocketTransport {
 
         client
             .post(url)
+            .header("X-Beacon-Agent-Secret", secret)
+            .header("X-Agent-ID", &identity.agent_id)
             .json(&payload)
             .send()
             .await?

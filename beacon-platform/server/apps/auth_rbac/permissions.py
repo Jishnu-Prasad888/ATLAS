@@ -84,3 +84,30 @@ class IsAgentAuthenticated(BasePermission):
             return agent.verify_secret(agent_secret)
         except Agent.DoesNotExist:
             return False
+
+
+class AgentSharedSecretPermission(BasePermission):
+    """Validates X-Beacon-Agent-Secret against server and agent secrets."""
+    message = "Agent shared secret required."
+
+    def has_permission(self, request, view):  # noqa: PLR0911 - simple branching
+        from django.conf import settings
+        from apps.agents.models import Agent
+
+        provided = request.headers.get("X-Beacon-Agent-Secret", "").strip()
+        if not provided:
+            return False
+
+        expected = getattr(settings, "BEACON_AGENT_SECRET", "").strip()
+        if expected and provided == expected:
+            return True
+
+        agent_id = request.headers.get("X-Agent-ID", "").strip()
+        if not agent_id:
+            return False
+
+        try:
+            agent = Agent.objects.get(agent_id=agent_id, is_active=True)
+            return agent.secret_hash != "" and agent.verify_secret(provided)
+        except Agent.DoesNotExist:
+            return False

@@ -380,10 +380,11 @@ export function LoginPage() {
                 )}
 
                 <div className="space-y-2">
-                  <label className="block text-[10px] font-semibold uppercase tracking-[0.13em] text-[#8a9099]">
+                  <label htmlFor="login-username" className="block text-[10px] font-semibold uppercase tracking-[0.13em] text-[#8a9099]">
                     Username
                   </label>
                   <input
+                    id="login-username"
                     className={`w-full rounded-[5px] border bg-[#080a0d] px-3 py-2.5 text-[13px] text-[#e7eaef] outline-none transition focus:border-[#5eead4] focus:ring-2 focus:ring-[#5eead4]/30 ${
                       errors.username ? 'border-red-700 focus:border-red-600 focus:ring-red-800/60' : 'border-[#2a323f]'
                     }`}
@@ -397,10 +398,11 @@ export function LoginPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-[10px] font-semibold uppercase tracking-[0.13em] text-[#8a9099]">
+                  <label htmlFor="login-password" className="block text-[10px] font-semibold uppercase tracking-[0.13em] text-[#8a9099]">
                     Password
                   </label>
                   <input
+                    id="login-password"
                     className={`w-full rounded-[5px] border bg-[#080a0d] px-3 py-2.5 text-[13px] text-[#e7eaef] outline-none transition focus:border-[#5eead4] focus:ring-2 focus:ring-[#5eead4]/30 ${
                       errors.password ? 'border-red-700 focus:border-red-600 focus:ring-red-800/60' : 'border-[#2a323f]'
                     }`}
@@ -427,7 +429,7 @@ export function LoginPage() {
                     }}
                     aria-hidden
                   />
-                  <span className="relative">{loading ? 'Signing in…' : 'Sign in →'}</span>
+                  <span className="relative">{loading ? 'Sign in…' : 'Sign in →'}</span>
                 </button>
               </form>
 

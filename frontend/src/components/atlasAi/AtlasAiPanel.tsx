@@ -292,10 +292,18 @@ export function AtlasAiPanel() {
                   {threads.map((t) => {
                     const isActive = t.id === activeThreadId
                     return (
-                      <button
+                      <div
                         key={t.id}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => selectThread(t.id)}
-                        className={`w-full text-left rounded border px-2 py-2 ${isActive ? 'border-[--color-border-strong] bg-[--color-bg]' : 'border-[--color-border] bg-[--color-surface]'}`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            selectThread(t.id)
+                          }
+                        }}
+                        className={`w-full rounded border px-2 py-2 cursor-pointer outline-none ${isActive ? 'border-[--color-border-strong] bg-[--color-bg]' : 'border-[--color-border] bg-[--color-surface]'}`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-[11px] font-mono text-[--color-text] truncate">{t.title || 'Untitled'}</div>
@@ -311,7 +319,7 @@ export function AtlasAiPanel() {
                           </div>
                         </div>
                         <div className="text-[10px] text-[--color-text-dim] mt-1">Updated {formatTime(t.updated_at)}</div>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>

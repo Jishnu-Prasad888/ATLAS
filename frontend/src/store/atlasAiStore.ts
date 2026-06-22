@@ -8,7 +8,12 @@ import {
   type AtlasAiThread,
   type AtlasAiStoredMessage,
 } from '@/api'
+import { askCommander } from '@/api/commander'
+import { getUnlockedKey } from '@/atlas-ai/keyStore'
+import { useAuthStore } from '@/store/authStore'
 import { env } from '@/config/env'
+
+const getErrorMessage = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
 export type ChatRole = AtlasAiMessage['role']
 
@@ -181,8 +186,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
         if (activeId && !get().threadMessages[activeId]) {
           await get().selectThread(activeId)
         }
-      } catch (err: any) {
-        set({ loadingThreads: false, error: err?.message ?? 'Failed to load threads' })
+      } catch (err: unknown) {
+        set({ loadingThreads: false, error: getErrorMessage(err, 'Failed to load threads') })
       }
     },
 
@@ -207,8 +212,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
         const msgs = stored.map(mapStoredToChat)
         applyThreadState(threadId, msgs, get().threadPending[threadId] ?? [])
         set({ loadingMessages: false })
-      } catch (err: any) {
-        set({ loadingMessages: false, error: err?.message ?? 'Failed to load conversation' })
+      } catch (err: unknown) {
+        set({ loadingMessages: false, error: getErrorMessage(err, 'Failed to load conversation') })
       }
     },
 
@@ -230,8 +235,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
           }
         })
         return thread.id
-      } catch (err: any) {
-        set({ error: err?.message ?? 'Failed to start a new thread' })
+      } catch (err: unknown) {
+        set({ error: getErrorMessage(err, 'Failed to start a new thread') })
         return null
       }
     },
@@ -264,12 +269,14 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
         if (nextActive && !get().threadMessages[nextActive]) {
           await get().selectThread(nextActive)
         }
-      } catch (err: any) {
-        set({ error: err?.message ?? 'Failed to delete thread' })
+      } catch (err: unknown) {
+        set({ error: getErrorMessage(err, 'Failed to delete thread') })
       }
     },
 
-    async send(content, page, context) {
+    async send(content, _page, _context) {
+      void _page
+      void _context
       const trimmed = content.trim()
       if (!trimmed) return
       if (!env.atlasAiEnabled) {
@@ -299,35 +306,40 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
         workingMessages = [...base, ...savedUser.map(mapStoredToChat)]
         applyThreadState(threadId, workingMessages)
         bumpThreadMeta(threadId, savedUser.length, savedUser[savedUser.length - 1]?.created_at)
-      } catch (err: any) {
+      } catch (err: unknown) {
         applyThreadState(threadId, existing)
-        set({ sending: false, error: err?.message ?? 'Failed to store message' })
+        set({ sending: false, error: getErrorMessage(err, 'Failed to store message') })
         return
       }
 
       try {
-        const payloadMessages: AtlasAiMessage[] = workingMessages.map((m) => ({ role: m.role, content: m.content }))
-        const res = await atlasAiApi.chat({ messages: payloadMessages, page, context })
+        const authUser = useAuthStore.getState().user
+        const key = authUser ? getUnlockedKey(String(authUser.id)) : null
+
+        // Call commander endpoint; pick last assistant message as reply
+        const res = await askCommander(trimmed, key?.apiKey)
+        const assistantContent = [...res.transcript].reverse().find((m) => m.role === 'assistant')?.content || 'No response.'
+
         const assistantMsg: ChatEntry = {
           id: `m-${++idCounter}`,
           role: 'assistant',
-          content: res.message,
+          content: assistantContent,
           created_at: new Date().toISOString(),
         }
 
         workingMessages = [...workingMessages, assistantMsg]
-        applyThreadState(threadId, workingMessages, res.pending_actions)
+        applyThreadState(threadId, workingMessages, [])
 
         try {
-          const savedAssistant = await atlasAiApi.appendMessages(threadId, [{ role: 'assistant', content: res.message }])
+          const savedAssistant = await atlasAiApi.appendMessages(threadId, [{ role: 'assistant', content: assistantContent }])
           const base = workingMessages.slice(0, workingMessages.length - savedAssistant.length)
           workingMessages = [...base, ...savedAssistant.map(mapStoredToChat)]
-          applyThreadState(threadId, workingMessages, res.pending_actions)
+          applyThreadState(threadId, workingMessages, [])
           bumpThreadMeta(threadId, savedAssistant.length, savedAssistant[savedAssistant.length - 1]?.created_at)
-        } catch (err: any) {
-          set({ error: err?.message ?? 'Failed to store reply' })
+        } catch (err: unknown) {
+          set({ error: getErrorMessage(err, 'Failed to store reply') })
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         const failureMsg: ChatEntry = {
           id: `m-${++idCounter}`,
           role: 'assistant',
@@ -335,7 +347,7 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
         }
         workingMessages = [...workingMessages, failureMsg]
         applyThreadState(threadId, workingMessages)
-        set({ error: err?.message ?? 'ATLAS-AI error' })
+        set({ error: getErrorMessage(err, 'ATLAS-AI error') })
       } finally {
         set({ sending: false })
       }
@@ -361,14 +373,14 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
           bumpThreadMeta(threadId, 1, msg.created_at)
           try {
             await atlasAiApi.appendMessages(threadId, [{ role: 'assistant', content: msg.content }])
-          } catch (err: any) {
-            set({ error: err?.message ?? 'Failed to store confirmation' })
+          } catch (err: unknown) {
+            set({ error: getErrorMessage(err, 'Failed to store confirmation') })
           }
         } else {
           set({ messages: updated, pending: [] })
         }
-      } catch (err: any) {
-        set({ error: err?.message ?? 'Action failed' })
+      } catch (err: unknown) {
+        set({ error: getErrorMessage(err, 'Action failed') })
       } finally {
         set({ sending: false })
       }
@@ -386,8 +398,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       try {
         const status = await atlasAiApi.keyStatus()
         set({ keyStatus: status, keyLoading: false })
-      } catch (err: any) {
-        set({ keyLoading: false, error: err?.message ?? 'Key status error' })
+      } catch (err: unknown) {
+        set({ keyLoading: false, error: getErrorMessage(err, 'Key status error') })
       }
     },
 
@@ -396,8 +408,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       try {
         await atlasAiApi.storeKey(provider, apiKey, passphrase)
         await get().refreshKeyStatus()
-      } catch (err: any) {
-        set({ error: err?.message ?? 'Failed to store key' })
+      } catch (err: unknown) {
+        set({ error: getErrorMessage(err, 'Failed to store key') })
       } finally {
         set({ keyWorking: false })
       }
@@ -408,8 +420,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       try {
         await atlasAiApi.unlockKey(passphrase)
         await get().refreshKeyStatus()
-      } catch (err: any) {
-        set({ error: err?.message ?? 'Unlock failed' })
+      } catch (err: unknown) {
+        set({ error: getErrorMessage(err, 'Unlock failed') })
       } finally {
         set({ keyWorking: false })
       }
@@ -420,8 +432,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       try {
         await atlasAiApi.lockKey()
         await get().refreshKeyStatus()
-      } catch (err: any) {
-        set({ error: err?.message ?? 'Lock failed' })
+      } catch (err: unknown) {
+        set({ error: getErrorMessage(err, 'Lock failed') })
       } finally {
         set({ keyWorking: false })
       }

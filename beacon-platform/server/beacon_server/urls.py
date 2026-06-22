@@ -6,6 +6,8 @@ from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
 from apps.graphql_api.views import graphql_view
+from apps.ai_agents.views import AiRunGraphView
+from apps.ai_agents.views_commander import CommanderChatView
 
 
 def health_check(request):
@@ -16,6 +18,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health_check, name="health"),
     path("api/v1/graphql/", graphql_view()),
+    path("api/v1/ai/run-graph/", AiRunGraphView.as_view(), name="ai-run-graph"),
+    path("api/v1/ai/commander/", CommanderChatView.as_view(), name="ai-commander"),
 
     # API v1
     path("api/v1/auth/",      include("apps.auth_rbac.urls")),

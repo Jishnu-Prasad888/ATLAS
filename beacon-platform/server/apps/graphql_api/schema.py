@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
+
+from apps.graphql_api.pydantic_compat import patch_pydantic_is_new_type
+
+patch_pydantic_is_new_type()
 
 import strawberry
 from strawberry.scalars import JSON
@@ -11,6 +15,8 @@ from django.db.models import Q
 
 from apps.agents.views import _allowed_agent_ids
 from apps.metrics.models import Metric
+from apps.logs.models import LogEntry
+from apps.audit.models import AuditLog
 from apps.operations.models import (
     DockerContainer,
     KubernetesPod,
@@ -18,6 +24,11 @@ from apps.operations.models import (
     NetworkInterface,
     ProcessSnapshot,
 )
+
+if TYPE_CHECKING:
+    JSONType = Any
+else:
+    JSONType = JSON
 
 
 def _ensure_agent_access(info: Info, agent_id: str) -> None:
@@ -28,6 +39,15 @@ def _ensure_agent_access(info: Info, agent_id: str) -> None:
     allowed = _allowed_agent_ids(user)
     if allowed is not None and agent_id not in allowed:
         raise PermissionError("Not authorized for this agent")
+
+
+def _ensure_moderator(info: Info) -> None:
+    request = info.context.request
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        raise PermissionError("Authentication required")
+    if getattr(user, "role", "") not in {"administrator", "moderator"}:
+        raise PermissionError("Not authorized for audit access")
 
 
 @strawberry.type
@@ -65,9 +85,9 @@ class KubernetesPodType:
     phase: str
     restart_count: int
     started_at: Optional[datetime]
-    labels: JSON
-    annotations: JSON
-    container_statuses: JSON
+    labels: JSONType
+    annotations: JSONType
+    container_statuses: JSONType
     updated_at: datetime
 
     @classmethod
@@ -90,7 +110,7 @@ class NetworkInterfaceType:
     tx_errors: int
     rx_dropped: int
     tx_dropped: int
-    meta: JSON
+    meta: JSONType
     updated_at: datetime
 
     @classmethod
@@ -129,7 +149,7 @@ class ProcessSnapshotType:
     mem_pct: Optional[float]
     mem_bytes: Optional[int]
     started_at: Optional[datetime]
-    meta: JSON
+    meta: JSONType
     updated_at: datetime
 
     @classmethod
@@ -143,7 +163,7 @@ class MetricSample:
     metric_type: str
     resolution: str
     timestamp: datetime
-    data: JSON
+    data: JSONType
     schema_version: str
 
     @classmethod
@@ -155,6 +175,84 @@ class MetricSample:
             timestamp=obj.timestamp,
             data=obj.data,
             schema_version=obj.schema_version,
+        )
+
+
+@strawberry.type
+class LogEntryType:
+    id: strawberry.ID
+    agent_id: str
+    source: str
+    severity: str
+    message: str
+    timestamp: datetime
+    schema_version: str
+    extra: JSONType
+    sequence_number: Optional[int]
+
+    @classmethod
+    def from_model(cls, obj: LogEntry) -> "LogEntryType":
+        obj_id = getattr(obj, "id", None)
+        return cls(
+            id=strawberry.ID(str(obj_id)),
+            agent_id=obj.agent_id,
+            source=obj.source,
+            severity=obj.severity,
+            message=obj.message,
+            timestamp=obj.timestamp,
+            schema_version=obj.schema_version,
+            extra=obj.extra,
+            sequence_number=obj.sequence_number,
+        )
+
+
+@strawberry.type
+class AuditLogType:
+    id: strawberry.ID
+    timestamp: datetime
+    user: str
+    ip_address: Optional[str]
+    action: str
+    resource: str
+    resource_id: str
+    details: JSONType
+    success: bool
+    user_agent: Optional[str]
+    device: Optional[str]
+    country: Optional[str]
+    region: Optional[str]
+    city: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    path: Optional[str]
+    method: Optional[str]
+    session_id: Optional[str]
+    approved_by: Optional[str]
+
+    @classmethod
+    def from_model(cls, obj: AuditLog) -> "AuditLogType":
+        obj_id = getattr(obj, "id", None)
+        return cls(
+            id=strawberry.ID(str(obj_id)),
+            timestamp=obj.timestamp,
+            user=obj.user,
+            ip_address=obj.ip_address,
+            action=obj.action,
+            resource=obj.resource,
+            resource_id=obj.resource_id,
+            details=obj.details,
+            success=obj.success,
+            user_agent=obj.user_agent,
+            device=obj.device,
+            country=obj.country,
+            region=obj.region,
+            city=obj.city,
+            latitude=obj.latitude,
+            longitude=obj.longitude,
+            path=obj.path,
+            method=obj.method,
+            session_id=obj.session_id,
+            approved_by=obj.approved_by,
         )
 
 
@@ -306,6 +404,62 @@ class Query:
             .distinct("metric_type")
         )
         return [MetricSample.from_model(obj) for obj in latest]
+
+    @strawberry.field
+    def logs(
+        self,
+        info: Info,
+        agent_id: str,
+        severity: Optional[str] = None,
+        source: Optional[str] = None,
+        search: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: int = 500,
+    ) -> List[LogEntryType]:
+        _ensure_agent_access(info, agent_id)
+        qs = LogEntry.objects.filter(agent_id=agent_id)
+        if severity:
+            qs = qs.filter(severity=severity)
+        if source:
+            qs = qs.filter(source=source)
+        if search:
+            qs = qs.filter(message__icontains=search)
+        if start:
+            qs = qs.filter(timestamp__gte=start)
+        if end:
+            qs = qs.filter(timestamp__lte=end)
+        qs = qs.order_by("-timestamp")[: min(limit, 2000)]
+        return [LogEntryType.from_model(obj) for obj in qs]
+
+    @strawberry.field
+    def audit_logs(
+        self,
+        info: Info,
+        user: Optional[str] = None,
+        action: Optional[str] = None,
+        resource: Optional[str] = None,
+        success: Optional[bool] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: int = 500,
+    ) -> List[AuditLogType]:
+        _ensure_moderator(info)
+        qs = AuditLog.objects.all()
+        if user:
+            qs = qs.filter(user=user)
+        if action:
+            qs = qs.filter(action=action)
+        if resource:
+            qs = qs.filter(resource=resource)
+        if success is not None:
+            qs = qs.filter(success=success)
+        if start:
+            qs = qs.filter(timestamp__gte=start)
+        if end:
+            qs = qs.filter(timestamp__lte=end)
+        qs = qs.order_by("-timestamp")[: min(limit, 2000)]
+        return [AuditLogType.from_model(obj) for obj in qs]
 
 
 schema = strawberry.Schema(query=Query)
