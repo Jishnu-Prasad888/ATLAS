@@ -26,6 +26,9 @@ export const env = {
   /** WebSocket path */
   wsPath: get('VITE_WS_PATH', '/ws/subscribe/'),
 
+  /** Feature flag for ATLAS-AI UI */
+  atlasAiEnabled: get('VITE_ATLAS_AI_ENABLED', 'false') === 'true',
+
   /** Derived: full REST base */
   get restBase(): string {
     return `${this.apiBaseUrl}${this.apiPrefix}`

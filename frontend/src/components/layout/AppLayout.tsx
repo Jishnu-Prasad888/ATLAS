@@ -3,9 +3,12 @@ import { clsx } from 'clsx'
 import { Sidebar } from './Sidebar'
 import { useUiStore } from '@/store/uiStore'
 import type { Notification } from '@/store/uiStore'
+import { AtlasAiPanel } from '@/components/atlasAi'
+import { useAtlasAiStore } from '@/store/atlasAiStore'
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { sidebarCollapsed } = useUiStore()
+  const { open: aiOpen, panelWidth } = useAtlasAiStore()
 
   return (
     <div className="min-h-screen bg-[--color-bg]">
@@ -15,10 +18,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
           'min-h-screen transition-[padding-left] duration-150',
           sidebarCollapsed ? 'pl-12' : 'pl-44',
         )}
+        style={aiOpen ? { paddingRight: panelWidth + 24 } : undefined}
       >
         <div className="p-4 md:p-6 max-w-screen-2xl mx-auto">{children}</div>
       </main>
       <NotificationStack />
+      <AtlasAiPanel />
     </div>
   )
 }
