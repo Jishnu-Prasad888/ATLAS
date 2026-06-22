@@ -38,20 +38,21 @@ def audit_log(
         except Exception:
             session_id = ""
 
+        payload_details = details or {}
         AuditLog.objects.create(
             user        = user,
             ip_address  = ip,
             action      = action,
             resource    = resource,
             resource_id = resource_id,
-            details     = details or {},
+            details     = payload_details,
             success     = success,
             user_agent  = ua,
             device      = ua[:128],
             path        = getattr(request, "path", ""),
             method      = getattr(request, "method", ""),
             session_id  = session_id,
-            approved_by = details.get("approved_by") if details else "",
+            approved_by = payload_details.get("approved_by") or "",
         )
     except Exception as e:
         # Audit failures must never break the main flow

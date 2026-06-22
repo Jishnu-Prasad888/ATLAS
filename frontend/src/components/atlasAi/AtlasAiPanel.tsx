@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MessageCircle, Send, ShieldCheck, X, TriangleAlert, LockKeyhole, UnlockKeyhole, KeyRound, Settings } from 'lucide-react'
+import {
+  MessageCircle,
+  Send,
+  ShieldCheck,
+  X,
+  TriangleAlert,
+  LockKeyhole,
+  UnlockKeyhole,
+  KeyRound,
+  Settings,
+  Plus,
+  Trash2,
+  Loader2,
+} from 'lucide-react'
 import { env } from '@/config/env'
 import { useAtlasAiStore } from '@/store/atlasAiStore'
 import { useAuthStore } from '@/store/authStore'
@@ -24,7 +38,14 @@ export function AtlasAiPanel() {
     lockKey,
     send,
     confirm,
-    reset,
+    threads,
+    activeThreadId,
+    loadThreads,
+    selectThread,
+    startThread,
+    deleteThread,
+    loadingThreads,
+    loadingMessages,
     panelWidth,
     setPanelWidth,
   } = useAtlasAiStore()
@@ -44,8 +65,12 @@ export function AtlasAiPanel() {
   }, [open, messages])
 
   useEffect(() => {
-    if (open) refreshKeyStatus()
+    if (open) void refreshKeyStatus()
   }, [open, refreshKeyStatus])
+
+  useEffect(() => {
+    if (open) void loadThreads()
+  }, [open, loadThreads])
 
   useEffect(() => {
     if (keyStatus?.provider) setProvider(keyStatus.provider)
@@ -71,11 +96,27 @@ export function AtlasAiPanel() {
 
   if (!env.atlasAiEnabled || !isAuthenticated) return null
 
+  const activeThread = threads.find((t) => t.id === activeThreadId)
+
   const handleSend = () => {
     const content = draft.trim()
     if (!content) return
     send(content, location.pathname, {})
     setDraft('')
+  }
+
+  const handleDeleteThread = (threadId: string, e: ReactMouseEvent) => {
+    e.stopPropagation()
+    deleteThread(threadId)
+  }
+
+  const formatTime = (iso?: string | null) => {
+    if (!iso) return '—'
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return iso
+    }
   }
 
   return (
@@ -97,7 +138,7 @@ export function AtlasAiPanel() {
       {open && (
         <div
           className="fixed top-0 bottom-0 right-0 z-40 border-l border-[--color-border] bg-[--color-bg] shadow-2xl flex flex-col"
-          style={{ width: panelWidth, maxWidth: 'min(640px, 100vw - 48px)' }}
+          style={{ width: panelWidth, maxWidth: 'min(720px, 100vw - 48px)' }}
         >
           <div
             className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize bg-[--color-border]/50 hover:bg-[--color-border]"
@@ -106,18 +147,23 @@ export function AtlasAiPanel() {
           />
 
           <div className="flex items-center justify-between px-3 py-3 border-b border-[--color-border] pl-4">
-            <div className="flex items-center gap-2 text-xs font-mono text-[--color-text]">
+            <div className="flex items-center gap-3 text-xs font-mono text-[--color-text]">
               <ShieldCheck size={16} />
-              ATLAS-AI (role-aware)
+              <span>ATLAS-AI (role-aware)</span>
+              {activeThread ? (
+                <span className="text-[10px] uppercase tracking-wide text-[--color-text-dim]">Thread: {activeThread.title || 'Untitled'}</span>
+              ) : (
+                <span className="text-[10px] uppercase tracking-wide text-[--color-text-dim]">No thread</span>
+              )}
               {keyLoading && <span className="text-[10px] text-[--color-text-dim]">loading key…</span>}
             </div>
             <div className="flex items-center gap-2 text-[--color-text-dim]">
               <button
-                onClick={() => reset()}
-                aria-label="Clear chat"
-                className="hover:text-[--color-text] text-[11px] font-mono"
+                onClick={() => startThread()}
+                aria-label="Start new thread"
+                className="hover:text-[--color-text] text-[11px] font-mono flex items-center gap-1"
               >
-                Clear
+                <Plus size={14} /> New
               </button>
               <button
                 onClick={() => setShowSettings((v) => !v)}
@@ -222,73 +268,132 @@ export function AtlasAiPanel() {
             </div>
           )}
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
-            {messages.length === 0 && (
-              <div className="text-[11px] font-mono text-[--color-text-dim]">
-                Ask anything about the current page. Mutating actions will ask for confirmation.
+          <div className="flex flex-1 overflow-hidden">
+            <aside className="w-60 border-r border-[--color-border] bg-[--color-surface] flex flex-col p-3">
+              <div className="flex items-center justify-between text-xs font-mono text-[--color-text] mb-2">
+                <span>Threads</span>
+                <button
+                  onClick={() => startThread()}
+                  className="flex items-center gap-1 rounded border border-[--color-border] px-2 py-1 text-[10px] hover:border-[--color-border-strong]"
+                >
+                  <Plus size={12} /> New
+                </button>
               </div>
-            )}
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`rounded-md border px-3 py-2 text-xs font-mono ${m.role === 'user' ? 'border-[--color-border] bg-[--color-surface]' : 'border-[--color-border] bg-[--color-surface-2]'}`}
-              >
-                <div className="text-[10px] uppercase tracking-wide text-[--color-text-dim] mb-1">{m.role}</div>
-                <div className="text-[--color-text] whitespace-pre-wrap leading-relaxed">{m.content}</div>
-              </div>
-            ))}
-          </div>
-
-          {pending.length > 0 && (
-            <div className="border-t border-[--color-border] px-3 py-2">
-              <div className="flex items-center gap-2 text-[11px] font-mono text-amber-200 mb-2">
-                <TriangleAlert size={14} /> Pending actions (confirmation required)
-              </div>
-              <div className="space-y-2">
-                {pending.map((p, idx) => (
-                  <div key={`${p.name}-${idx}`} className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-mono text-[--color-text]">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="uppercase tracking-wide text-[10px]">{p.name}</span>
+              {loadingThreads ? (
+                <div className="flex items-center gap-2 text-[11px] text-[--color-text-dim]">
+                  <Loader2 size={14} className="animate-spin" /> Loading threads…
+                </div>
+              ) : threads.length === 0 ? (
+                <div className="text-[11px] text-[--color-text-dim] font-mono">
+                  No threads yet. Start a conversation.
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto space-y-1">
+                  {threads.map((t) => {
+                    const isActive = t.id === activeThreadId
+                    return (
                       <button
-                        className="text-[10px] uppercase px-2 py-1 rounded bg-amber-500 text-black font-semibold"
-                        onClick={() => confirm(p)}
-                        disabled={sending}
+                        key={t.id}
+                        onClick={() => selectThread(t.id)}
+                        className={`w-full text-left rounded border px-2 py-2 ${isActive ? 'border-[--color-border-strong] bg-[--color-bg]' : 'border-[--color-border] bg-[--color-surface]'}`}
                       >
-                        Confirm
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[11px] font-mono text-[--color-text] truncate">{t.title || 'Untitled'}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-[--color-text-dim]">{t.message_count}</span>
+                            <button
+                              aria-label="Delete thread"
+                              onClick={(e) => handleDeleteThread(t.id, e)}
+                              className="text-[--color-text-dim] hover:text-red-400"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-[--color-text-dim] mt-1">Updated {formatTime(t.updated_at)}</div>
                       </button>
+                    )
+                  })}
+                </div>
+              )}
+            </aside>
+
+            <div className="flex-1 flex flex-col">
+              <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
+                {loadingMessages && (
+                  <div className="text-[11px] font-mono text-[--color-text-dim]">Loading conversation…</div>
+                )}
+                {!loadingMessages && messages.length === 0 && (
+                  <div className="text-[11px] font-mono text-[--color-text-dim]">
+                    Start a new thread or select an existing one. Mutating actions will ask for confirmation.
+                  </div>
+                )}
+                {messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`rounded-md border px-3 py-2 text-xs font-mono ${m.role === 'user' ? 'border-[--color-border] bg-[--color-surface]' : 'border-[--color-border] bg-[--color-surface-2]'}`}
+                  >
+                    <div className="text-[10px] uppercase tracking-wide text-[--color-text-dim] mb-1">
+                      {m.role}
+                      {m.created_at && <span className="ml-2 lowercase text-[--color-text-muted]">{formatTime(m.created_at)}</span>}
                     </div>
-                    <pre className="mt-1 text-[10px] text-[--color-text-dim] whitespace-pre-wrap">
-                      {JSON.stringify(p.arguments, null, 2)}
-                    </pre>
+                    <div className="text-[--color-text] whitespace-pre-wrap leading-relaxed">{m.content}</div>
                   </div>
                 ))}
               </div>
+
+              {pending.length > 0 && (
+                <div className="border-t border-[--color-border] px-3 py-2">
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-amber-200 mb-2">
+                    <TriangleAlert size={14} /> Pending actions (confirmation required)
+                  </div>
+                  <div className="space-y-2">
+                    {pending.map((p, idx) => (
+                      <div key={`${p.name}-${idx}`} className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-mono text-[--color-text]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="uppercase tracking-wide text-[10px]">{p.name}</span>
+                          <button
+                            className="text-[10px] uppercase px-2 py-1 rounded bg-amber-500 text-black font-semibold"
+                            onClick={() => confirm(p)}
+                            disabled={sending}
+                          >
+                            Confirm
+                          </button>
+                        </div>
+                        <pre className="mt-1 text-[10px] text-[--color-text-dim] whitespace-pre-wrap">
+                          {JSON.stringify(p.arguments, null, 2)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {error && <div className="border-t border-[--color-border] px-3 py-2 text-[11px] font-mono text-red-300">{error}</div>}
+
+              <div className="flex items-center gap-2 border-t border-[--color-border] px-3 py-2">
+                <input
+                  className="flex-1 rounded border border-[--color-border] bg-[--color-surface] px-2 py-1 text-xs font-mono text-[--color-text] focus:outline-none focus:border-[--color-border-strong]"
+                  placeholder="Ask ATLAS-AI..."
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSend()
+                    }
+                  }}
+                  disabled={sending}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="rounded bg-[--color-text] text-[--color-bg] px-2 py-1 text-xs font-mono hover:opacity-90 disabled:opacity-50"
+                >
+                  <Send size={14} />
+                </button>
+              </div>
             </div>
-          )}
-
-          {error && <div className="border-t border-[--color-border] px-3 py-2 text-[11px] font-mono text-red-300">{error}</div>}
-
-          <div className="flex items-center gap-2 border-t border-[--color-border] px-3 py-2">
-            <input
-              className="flex-1 rounded border border-[--color-border] bg-[--color-surface] px-2 py-1 text-xs font-mono text-[--color-text] focus:outline-none focus:border-[--color-border-strong]"
-              placeholder="Ask ATLAS-AI..."
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              disabled={sending}
-            />
-            <button
-              onClick={handleSend}
-              disabled={sending}
-              className="rounded bg-[--color-text] text-[--color-bg] px-2 py-1 text-xs font-mono hover:opacity-90 disabled:opacity-50"
-            >
-              <Send size={14} />
-            </button>
           </div>
         </div>
       )}

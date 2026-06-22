@@ -1,3 +1,4 @@
+import { request } from './client'
 import { whoAmI, tools, allowedToolsForRole, mutatingTools } from '@/atlas-ai/beacon'
 import { toOpenAITools } from '@/atlas-ai/tooling'
 import { runChat } from '@/atlas-ai/model'
@@ -28,6 +29,20 @@ export interface KeyStatus {
   created_at?: string
   unlocked: boolean
   unlock_expires_at?: string | null
+}
+
+export interface AtlasAiThread {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+  deleted_at?: string | null
+  message_count: number
+}
+
+export interface AtlasAiStoredMessage extends AtlasAiMessage {
+  id: number
+  created_at: string
 }
 
 export type ProviderOption = 'openai' | 'local'
@@ -145,6 +160,35 @@ export const atlasAiApi = {
     return { message: assistantMessage, pending_actions: pending }
   },
 
+  async listThreads(): Promise<AtlasAiThread[]> {
+    return request<AtlasAiThread[]>({ method: 'GET', url: '/atlas-ai/threads/' })
+  },
+
+  async createThread(title?: string): Promise<AtlasAiThread> {
+    return request<AtlasAiThread>({ method: 'POST', url: '/atlas-ai/threads/', data: title ? { title } : {} })
+  },
+
+  async deleteThread(threadId: string): Promise<void> {
+    await request<void>({ method: 'DELETE', url: `/atlas-ai/threads/${encodeURIComponent(threadId)}/` })
+  },
+
+  async listMessages(threadId: string): Promise<AtlasAiStoredMessage[]> {
+    const res = await request<{ thread: string; messages: AtlasAiStoredMessage[]}>({
+      method: 'GET',
+      url: `/atlas-ai/threads/${encodeURIComponent(threadId)}/messages/`,
+    })
+    return res.messages
+  },
+
+  async appendMessages(threadId: string, messages: AtlasAiMessage[]): Promise<AtlasAiStoredMessage[]> {
+    const payload = Array.isArray(messages) ? messages : [messages]
+    return request<AtlasAiStoredMessage[]>({
+      method: 'POST',
+      url: `/atlas-ai/threads/${encodeURIComponent(threadId)}/messages/`,
+      data: { messages: payload },
+    })
+  },
+
   async confirm(action: PendingAction): Promise<{ ok: boolean; result: unknown }> {
     const { user, scope } = await whoAmI()
     const allowed = allowedToolsForRole(user.role)
@@ -218,11 +262,13 @@ function safeParseArgs(raw: string): Record<string, unknown> {
 
 function buildSystemPrompt(username: string, role: string, page?: string) {
   return [
-    'You are ATLAS-AI. Mirror the user permissions. Do not guess.',
+    'You are ATLAS-AI for the Beacon platform dashboard. You help users inspect and manage agents, telemetry, metrics, logs, and config while strictly honoring their role-based permissions.',
     `User: ${username} · Role: ${role}.`,
     page ? `Current page: ${page}.` : '',
-    'Only use tools that are allowed. For any mutating tool, ask for confirmation and do not execute unless the user explicitly confirms.',
-    'Keep answers concise; prefer bullet points.',
-    'If a tool is unavailable, say so briefly.',
+    'If the user provides a SHA-like hash (sha256:..., hex id), treat it as an agent_id and use it directly with relevant tools.',
+    'Use only allowed tools. For any mutating tool, ask for explicit confirmation and do not execute unless the user confirms.',
+    'When suggesting actions, prefer the built-in tools (list/get agent, metrics/logs, config) before generic advice.',
+    'If a tool is unavailable or returns an error, state that briefly and offer the next best available step.',
+    'Keep answers concise; prefer bullet points; include short status/next-step notes when helpful.',
   ].filter(Boolean).join(' ')
 }

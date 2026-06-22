@@ -23,6 +23,7 @@ urlpatterns = [
     path("api/v1/logs/",      include("apps.logs.urls")),
     path("api/v1/metrics/",   include("apps.metrics.urls_metrics")),
     path("api/v1/audit/",     include("apps.audit.urls")),
+    path("api/v1/atlas-ai/",  include("apps.atlas_ai.urls")),
     path("api/v1/config/",    include("apps.config.urls")),
     path("api/v1/health/",    include("apps.health.urls")),
 ]

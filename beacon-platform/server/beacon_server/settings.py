@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.audit",
     "apps.config",
     "apps.health",
+    "apps.atlas_ai",
     "apps.websocket",
 ]
 
