@@ -22,7 +22,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       >
         <div className="atlas-shell max-w-screen-2xl mx-auto">
           <div className="atlas-shell__surface">
-            <div className="atlas-shell__content atlas-dash">
+            <div className="atlas-shell__content page-stack">
               {children}
             </div>
           </div>
@@ -119,12 +119,14 @@ export function PageHeader({
   actions?: ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 mb-6">
-      <div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+      <div className="space-y-1">
         <h1 className="text-base font-mono font-semibold text-[--color-text] uppercase tracking-wider">{title}</h1>
-        {subtitle && <p className="text-xs text-[--color-text-muted] mt-0.5 font-mono">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-[--color-text-muted] font-mono">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && (
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>
+      )}
     </div>
   )
 }

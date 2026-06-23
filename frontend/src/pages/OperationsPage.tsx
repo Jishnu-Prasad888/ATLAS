@@ -682,14 +682,14 @@ export function OperationsPage() {
   ]
 
   return (
-    <>
+    <div className="atlas-dash">
       <style>{CSS}</style>
       <PageHeader
         title="Operations"
         subtitle="Docker, Kubernetes & Network"
         actions={
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-mono text-[--color-text-dim]">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10px] font-mono text-[--color-text-dim] whitespace-normal">
               {agents?.length ?? 0} agents
               {dockerAgentCount > 0 && ` · ${dockerAgentCount} Docker`}
               {k8sAgentCount > 0 && ` · ${k8sAgentCount} K8s`}
@@ -702,13 +702,13 @@ export function OperationsPage() {
         }
       />
 
-      <div className="flex gap-4 flex-1 min-h-0">
+      <div className="flex flex-col gap-4 flex-1 min-h-0 xl:flex-row xl:min-h-0">
         {/* Agent list */}
-        <Card padding={false} className="shrink-0 overflow-hidden" style={{ width: 220 }}>
+        <Card padding={false} className="overflow-hidden w-full xl:w-72 xl:max-w-sm xl:shrink-0">
           <div className="p-2.5 border-b border-[--color-border]">
             <span className="text-[10px] font-mono text-[--color-text-dim] uppercase tracking-wider">Agents</span>
           </div>
-          <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+          <div className="overflow-y-auto xl:max-h-[calc(100vh-220px)]">
             {agentsLoading ? (
               <LoadingState />
             ) : agentsForList.length === 0 ? (
@@ -730,14 +730,14 @@ export function OperationsPage() {
         </Card>
 
         {/* Main content */}
-        <div className="flex-1 min-w-0 overflow-y-auto space-y-4 relative" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+        <div className="flex-1 min-w-0 space-y-4 relative xl:overflow-y-auto xl:max-h-[calc(100vh-220px)]">
           {!activeAgentId ? (
             <div className="py-16"><EmptyState message="Select an agent" /></div>
           ) : (
             <>
               <div className="ops-view-bar">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
                     {viewOptions.map((opt) => {
                       const colorMap: Record<string, string> = { docker: 'border-sky-700 text-sky-400', kubernetes: 'border-violet-700 text-violet-400', network: 'border-emerald-700 text-emerald-400' }
                       const activeColor = colorMap[opt.key] ?? ''
@@ -756,7 +756,9 @@ export function OperationsPage() {
                       )
                     })}
                   </div>
-                  <span className="text-[10px] font-mono text-[--color-text-dim]">{view === 'network' ? 'Network telemetry with per-process ports' : view === 'docker' ? 'Docker collector telemetry' : 'Kubernetes collector telemetry'}</span>
+                  <span className="text-[10px] font-mono text-[--color-text-dim] md:text-right">
+                    {view === 'network' ? 'Network telemetry with per-process ports' : view === 'docker' ? 'Docker collector telemetry' : 'Kubernetes collector telemetry'}
+                  </span>
                 </div>
               </div>
 
@@ -782,6 +784,6 @@ export function OperationsPage() {
           )}
         </div>
       </div>
-    </>
+    </div>
   )
 }

@@ -7,7 +7,11 @@
 
 .atlas-shell {
   position: relative;
-  padding: clamp(1.25rem, 2vw, 2.5rem);
+  padding: clamp(1rem, 2.4vw, 2.5rem);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .atlas-shell::before,
@@ -43,6 +47,10 @@
   position: relative;
   z-index: 2;
   border-radius: 20px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
   background: linear-gradient(
       150deg,
       color-mix(in srgb, var(--color-surface) 85%, transparent) 0%,
@@ -64,6 +72,10 @@
   gap: clamp(1rem, 1.8vw, 1.75rem);
   padding: clamp(1.25rem, 2.4vw, 2.75rem);
   color: var(--color-text);
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
 .atlas-shell__content > *:first-child {
@@ -79,21 +91,52 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+.page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(1rem, 2vw, 1.75rem);
+  width: 100%;
+  min-width: 0;
+}
+
 @media (max-width: 768px) {
   .atlas-shell {
     padding: 1rem;
   }
   .atlas-shell__content {
-    padding: 1.25rem;
+    padding: 1.25rem 1rem 1.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-stack {
+    gap: 1.1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .atlas-shell {
+    padding: 0.75rem;
+  }
+  .atlas-shell__content {
+    padding: 1rem 0.75rem 1.25rem;
+  }
+  .atlas-shell::after {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-border) 55%, transparent),
+      0 18px 40px -36px var(--color-accent),
+      inset 0 -30px 90px -110px var(--atlas-shell-glow);
   }
 }
 
 .atlas-dash {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: clamp(1rem, 2vw, 1.5rem);
   color: var(--color-text);
   min-height: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .atlas-dash .panel {
@@ -112,6 +155,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
   padding: 12px 14px;
   border-bottom: 1px solid var(--color-border);
   flex: 0 0 auto;
@@ -144,7 +188,7 @@
 
 .atlas-dash .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
   flex-shrink: 0;
 }
@@ -392,14 +436,9 @@
 @keyframes atlas-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .atlas-spin { animation: atlas-spin 0.6s linear; }
 
-@media (max-width: 1280px) {
+@media (max-width: 1200px) {
   .atlas-shell__content {
-    padding: clamp(1.25rem, 3vw, 2rem);
-  }
-  .atlas-dash {
-    overflow: auto;
-    height: auto;
-    min-height: 100%;
+    padding: clamp(1.15rem, 3vw, 2.1rem);
   }
   .atlas-dash .main-grid {
     grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -418,8 +457,11 @@
   .atlas-dash .panel { height: auto; }
   .atlas-dash .panel-body { overflow-y: visible; }
 }
-@media (max-width: 900px) {
-  .atlas-dash .stat-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+
+@media (max-width: 1024px) {
+  .atlas-dash .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
   .atlas-dash .main-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-rows: repeat(5, auto);
@@ -429,5 +471,36 @@
       "health health health health"
       "signals signals signals signals"
       "account account account account";
+  }
+}
+
+@media (max-width: 768px) {
+  .atlas-dash .metric-grid {
+    padding: 12px;
+    gap: 12px;
+  }
+  .atlas-dash .info-row,
+  .atlas-dash .net-row {
+    padding: 10px 12px;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .atlas-dash .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .atlas-dash .agent-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .atlas-dash .metric-grid {
+    padding: 10px;
+  }
+  .atlas-dash .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 }

@@ -434,7 +434,7 @@ export function DashboardPage() {
   if (isGuest) {
     const expiresAt = user?.expiresAt ?? null
     return (
-      <div className="space-y-4">
+      <div className="atlas-dash">
         <PageHeader title={roleLabel} subtitle={`Accessible agents: ${accessibleCount}`} />
         <Card>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm font-mono text-[--color-text]">
@@ -463,7 +463,7 @@ export function DashboardPage() {
   }
 
   return (
-    <>
+    <div className="atlas-dash">
       <PageHeader
         title="Dashboard"
         subtitle={user ? `Welcome, ${user.username}` : undefined}
@@ -697,6 +697,6 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   )
 }
