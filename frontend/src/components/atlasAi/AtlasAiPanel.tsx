@@ -29,14 +29,12 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import type { Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { CopyButton } from '@/components/common'
 import { env } from '@/config/env'
 import { useAtlasAiStore } from '@/store/atlasAiStore'
 import { useAuthStore } from '@/store/authStore'
 import { useUiStore } from '@/store/uiStore'
+import { AtlasAiMarkdown } from './Markdown'
 
 const MIN_PANEL_WIDTH = 320
 const DEFAULT_MAX_PANEL_WIDTH = 720
@@ -51,61 +49,6 @@ function getMaxPanelWidth() {
 
 function clampPanelWidth(value: number) {
   return Math.min(Math.max(value, MIN_PANEL_WIDTH), getMaxPanelWidth())
-}
-
-const markdownComponents: Components = {
-  p: ({ children, ...props }) => (
-    <p className="mb-2 leading-relaxed text-[--color-text] last:mb-0" {...props}>
-      {children}
-    </p>
-  ),
-  ul: ({ children, ...props }) => (
-    <ul className="mb-2 list-disc space-y-1 pl-5 text-[--color-text] last:mb-0" {...props}>
-      {children}
-    </ul>
-  ),
-  ol: ({ children, ...props }) => (
-    <ol className="mb-2 list-decimal space-y-1 pl-5 text-[--color-text] last:mb-0" {...props}>
-      {children}
-    </ol>
-  ),
-  li: ({ children, ...props }) => (
-    <li className="marker:text-[#8fbaf9] [&>p]:mb-0" {...props}>
-      {children}
-    </li>
-  ),
-  a: ({ children, href, ...props }) => (
-    <a
-      href={href}
-      className="text-[#8fbaf9] underline decoration-[#8fbaf9]/70 underline-offset-4 transition hover:text-[#b8d2ff]"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
-  code({ inline, className, children, ...props }) {
-    const content = String(children).replace(/\n$/, '')
-    if (inline) {
-      return (
-        <code className="rounded bg-[#1c2d44] px-1.5 py-0.5 text-[12px] text-[#d6e3ff]" {...props}>
-          {content}
-        </code>
-      )
-    }
-    return (
-      <pre className="mb-3 overflow-x-auto rounded-md bg-[#101a29] px-3 py-2 text-[12px] leading-relaxed text-[#d6e3ff]" {...props}>
-        <code className={className}>{content}</code>
-      </pre>
-    )
-  },
-  blockquote: ({ children, ...props }) => (
-    <blockquote className="mb-2 border-l-2 border-[#3f5879] pl-3 text-[--color-text]" {...props}>
-      {children}
-    </blockquote>
-  ),
-  hr: (props) => <hr className="my-3 border-t border-[--color-border]" {...props} />,
 }
 
 export function AtlasAiPanel() {
@@ -153,8 +96,6 @@ export function AtlasAiPanel() {
   const [threadsCollapsed, setThreadsCollapsed] = useState(false)
   const modalMode = open && modalEnabled
 
-  const markdownPlugins = useMemo(() => [remarkGfm], [])
-
   const requestContext = useMemo(() => {
     const ctx: Record<string, unknown> = {}
     if (selectedAgentId) ctx.agentId = selectedAgentId
@@ -179,10 +120,12 @@ export function AtlasAiPanel() {
   }, [open, loadThreads])
 
   useEffect(() => {
-    if (!keyStatus?.provider) return
-    const raf = requestAnimationFrame(() => setProvider(keyStatus.provider))
+    const nextProvider = keyStatus?.provider
+    if (!nextProvider) return
+    if (provider === nextProvider) return
+    const raf = requestAnimationFrame(() => setProvider(nextProvider))
     return () => cancelAnimationFrame(raf)
-  }, [keyStatus?.provider])
+  }, [keyStatus?.provider, provider])
 
   useEffect(() => {
     function onMove(e: PointerEvent) {
@@ -674,13 +617,9 @@ export function AtlasAiPanel() {
                   <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[--color-border] bg-[--color-surface] text-[--color-text-dim]">
                     {m.role === 'user' ? <User size={12} /> : <Bot size={12} />}
                   </span>
-                  <ReactMarkdown
-                    remarkPlugins={markdownPlugins}
-                    components={markdownComponents}
-                    className="whitespace-pre-wrap leading-relaxed text-[--color-text]"
-                  >
+                  <AtlasAiMarkdown className="whitespace-pre-wrap leading-relaxed text-[--color-text]">
                     {m.content ?? ''}
-                  </ReactMarkdown>
+                  </AtlasAiMarkdown>
                 </div>
                 {m.content && m.role === 'assistant' && (
                   <div className="mt-2 flex justify-end">

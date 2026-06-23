@@ -212,6 +212,136 @@ def _processes_from_metrics(agent_id: str | None, search: str | None = None, lim
     return summary
 
 
+def _network_metric(agent_id: str | None):
+    if not agent_id:
+        return None
+    from apps.metrics.models import Metric
+
+    return (
+        Metric.objects.filter(agent_id=agent_id, metric_type="network")
+        .order_by("-timestamp")
+        .first()
+    )
+
+
+def _network_interfaces_from_metrics(agent_id: str | None) -> list[dict[str, Any]]:
+    metric = _network_metric(agent_id)
+    if not metric:
+        return []
+
+    data = metric.data or {}
+    interfaces = data.get("interfaces", [])
+    if not isinstance(interfaces, list):
+        return []
+
+    updated_at = None
+    try:
+        updated_at = metric.timestamp.isoformat() if metric.timestamp else None
+    except AttributeError:
+        updated_at = None
+
+    summary: list[dict[str, Any]] = []
+    for iface in interfaces:
+        if not isinstance(iface, dict):
+            continue
+        addresses = iface.get("addresses")
+        primary_addr = None
+        if isinstance(addresses, list) and addresses:
+            first = addresses[0]
+            if isinstance(first, dict):
+                primary_addr = first.get("address")
+
+        meta: dict[str, Any] = {}
+        for key in ("rx_bytes_rate", "tx_bytes_rate", "qlen", "state", "flags", "addresses"):
+            if key in iface and iface[key] is not None:
+                meta[key] = iface[key]
+
+        summary.append(
+            {
+                "agent_id": agent_id,
+                "name": iface.get("name"),
+                "address": primary_addr or iface.get("address", ""),
+                "mac": iface.get("mac"),
+                "mtu": iface.get("mtu"),
+                "speed_mbps": iface.get("speed_mbps") or iface.get("speed"),
+                "rx_bytes": iface.get("rx_bytes", 0),
+                "tx_bytes": iface.get("tx_bytes", 0),
+                "rx_errors": iface.get("rx_errors", 0),
+                "tx_errors": iface.get("tx_errors", 0),
+                "rx_dropped": iface.get("rx_dropped", 0),
+                "tx_dropped": iface.get("tx_dropped", 0),
+                "meta": meta,
+                "updated_at": updated_at,
+            }
+        )
+
+    summary.sort(key=lambda item: (item.get("tx_bytes") or 0), reverse=True)
+    return summary
+
+
+def _network_connections_from_metrics(
+    agent_id: str | None,
+    protocol: str | None = None,
+    state: str | None = None,
+    pid: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    metric = _network_metric(agent_id)
+    if not metric:
+        return []
+
+    data = metric.data or {}
+    connections = data.get("process_connections", [])
+    if not isinstance(connections, list):
+        return []
+
+    protocol_filter = (protocol or "").lower()
+    state_filter = (state or "").lower()
+    pid_filter = None
+    try:
+        pid_filter = int(pid) if pid is not None else None
+    except (TypeError, ValueError):
+        pid_filter = None
+
+    updated_at = None
+    try:
+        updated_at = metric.timestamp.isoformat() if metric.timestamp else None
+    except AttributeError:
+        updated_at = None
+
+    summary: list[dict[str, Any]] = []
+    for conn in connections:
+        if not isinstance(conn, dict):
+            continue
+        if protocol_filter and (conn.get("protocol") or "").lower() != protocol_filter:
+            continue
+        if state_filter and (conn.get("state") or "").lower() != state_filter:
+            continue
+        if pid_filter is not None and conn.get("pid") != pid_filter:
+            continue
+
+        summary.append(
+            {
+                "agent_id": agent_id,
+                "pid": conn.get("pid"),
+                "process_name": conn.get("name") or conn.get("process_name"),
+                "username": conn.get("username"),
+                "laddr": conn.get("local_addr") or conn.get("laddr"),
+                "lport": conn.get("local_port") or conn.get("lport"),
+                "raddr": conn.get("remote_addr") or conn.get("raddr"),
+                "rport": conn.get("remote_port") or conn.get("rport"),
+                "protocol": (conn.get("protocol") or "").upper(),
+                "state": conn.get("state"),
+                "updated_at": updated_at,
+            }
+        )
+
+    summary.sort(key=lambda item: (item.get("lport") or 0, item.get("pid") or 0))
+    if limit is not None and limit > 0:
+        summary = summary[:limit]
+    return summary
+
+
 def _tool_agents_list(args: Dict[str, Any], request: Any | None = None) -> Any:
     from apps.agents.views import AgentListView
 
@@ -339,26 +469,32 @@ def _tool_ops_k8s_pod(args: Dict[str, Any], request: Any | None = None) -> Dict[
 
 def _tool_ops_network_interfaces(args: Dict[str, Any], request: Any | None = None) -> Dict[str, Any]:
     from apps.operations.views import NetworkInterfaceListView
-    query = """
-    query($agent_id: String!) {
-      networkInterfaces(agentId: $agent_id) {
-        agentId
-        name
-        address
-        speedMbps
-        rxBytes
-        txBytes
-        updatedAt
-      }
-    }
-    """
-    return _call_ops_view(
+    result = _call_ops_view(
         NetworkInterfaceListView,
         request,
         path=f"/api/v1/operations/network/agents/{args['agent_id']}/interfaces/",
         params=None,
         agent_id=args["agent_id"],
     )
+    if isinstance(result, dict) and "error" in result:
+        fallback = _network_interfaces_from_metrics(args.get("agent_id"))
+        if fallback:
+            return fallback
+        return result
+
+    interfaces: list
+    if isinstance(result, list):
+        interfaces = result
+    elif isinstance(result, dict) and isinstance(result.get("results"), list):
+        interfaces = result["results"]
+    else:
+        interfaces = []
+
+    if not interfaces:
+        fallback = _network_interfaces_from_metrics(args.get("agent_id"))
+        if fallback:
+            return fallback
+    return interfaces
 
 
 def _tool_ops_network_connections(args: Dict[str, Any], request: Any | None = None) -> Dict[str, Any]:
@@ -385,13 +521,45 @@ def _tool_ops_network_connections(args: Dict[str, Any], request: Any | None = No
         "state": args.get("state"),
         "limit": min(int(args.get("limit", 200)), 1000),
     }
-    return _call_ops_view(
+    result = _call_ops_view(
         NetworkConnectionListView,
         request,
         path=f"/api/v1/operations/network/agents/{args['agent_id']}/connections/",
         params=params,
         agent_id=args["agent_id"],
     )
+    if isinstance(result, dict) and "error" in result:
+        fallback = _network_connections_from_metrics(
+            args.get("agent_id"),
+            protocol=args.get("protocol"),
+            state=args.get("state"),
+            pid=args.get("pid"),
+            limit=params["limit"],
+        )
+        if fallback:
+            return fallback
+        return result
+
+    connections: list
+    if isinstance(result, list):
+        connections = result
+    elif isinstance(result, dict) and isinstance(result.get("results"), list):
+        connections = result["results"]
+    else:
+        connections = []
+
+    if not connections:
+        fallback = _network_connections_from_metrics(
+            args.get("agent_id"),
+            protocol=args.get("protocol"),
+            state=args.get("state"),
+            pid=args.get("pid"),
+            limit=params["limit"],
+        )
+        if fallback:
+            return fallback
+
+    return connections
 
 
 def _tool_ops_processes(args: Dict[str, Any], request: Any | None = None) -> Dict[str, Any]:

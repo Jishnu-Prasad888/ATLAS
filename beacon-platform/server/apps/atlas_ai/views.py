@@ -7,6 +7,7 @@ from typing import Iterable, List
 from django.db.models import Count
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,6 +24,8 @@ logger = logging.getLogger("beacon")
 
 class AtlasAiThreadListCreateView(APIView):
     """List a user's threads or create a new empty one."""
+
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         threads = (
@@ -52,6 +55,8 @@ class AtlasAiThreadListCreateView(APIView):
 class AtlasAiThreadDetailView(APIView):
     """Delete (soft) a thread that belongs to the user."""
 
+    permission_classes = [IsAuthenticated]
+
     def delete(self, request, thread_id):
         try:
             thread = AtlasAiThread.objects.get(id=thread_id, user=request.user, deleted_at__isnull=True)
@@ -75,9 +80,36 @@ class AtlasAiThreadDetailView(APIView):
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    def patch(self, request, thread_id):
+        try:
+            thread = AtlasAiThread.objects.get(id=thread_id, user=request.user, deleted_at__isnull=True)
+        except AtlasAiThread.DoesNotExist:
+            return Response({"detail": "Thread not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        title = (request.data.get("title") or "").strip()
+        if not title:
+            return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        thread.title = title[:255]
+        thread.save(update_fields=["title", "updated_at"])
+        thread.refresh_from_db()
+        thread.message_count = thread.messages.count()
+
+        audit_log(
+            request,
+            action="ATLAS_AI_THREAD_RENAME",
+            resource="atlas_ai",
+            resource_id=str(thread.id),
+            details={"title": thread.title},
+        )
+        logger.debug("AtlasAiThreadDetailView renamed thread=%s user=%s", thread.id, request.user)
+        return Response(AtlasAiThreadSerializer(thread).data)
+
 
 class AtlasAiThreadMessagesView(APIView):
     """List or append messages for a thread (user-scoped)."""
+
+    permission_classes = [IsAuthenticated]
 
     def _get_thread(self, request, thread_id):
         try:

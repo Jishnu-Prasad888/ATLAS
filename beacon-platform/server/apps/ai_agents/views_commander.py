@@ -96,6 +96,19 @@ class CommanderChatView(APIView):
         if api_key:
             api_key = str(api_key).strip()[:200]
 
+        provider = str(request.data.get("provider") or "openai").strip().lower()
+        if provider not in {"openai", "local"}:
+            return Response({"detail": "Invalid provider."}, status=400)
+
+        model = request.data.get("model")
+        model = str(model).strip()[:200] if model else None
+
+        base_url = request.data.get("base_url")
+        base_url = str(base_url).strip()[:500] if base_url else None
+
+        if provider == "local" and not base_url:
+            return Response({"detail": "base_url is required for local provider."}, status=400)
+
         preview_source = ""
         if messages:
             for existing in reversed(messages):
@@ -111,15 +124,31 @@ class CommanderChatView(APIView):
                 "user": getattr(request.user, "username", "anon"),
                 "question_len": len(preview_source),
                 "provided_api_key": bool(api_key),
+                "provider": provider,
+                "model": model,
                 "question": preview_source[:2000],
             },
         )
 
         try:
             if messages:
-                trace = run_commander_for_messages(messages, api_key=api_key, request=request)
+                trace = run_commander_for_messages(
+                    messages,
+                    api_key=api_key,
+                    request=request,
+                    provider=provider,
+                    model=model,
+                    base_url=base_url,
+                )
             else:
-                trace = run_commander_for_question(question, api_key=api_key, request=request)
+                trace = run_commander_for_question(
+                    question,
+                    api_key=api_key,
+                    request=request,
+                    provider=provider,
+                    model=model,
+                    base_url=base_url,
+                )
         except Exception as exc:  # tool/HTTP/OpenAI errors
             self.ai_logger.error(
                 "ai.commander.error",
@@ -131,7 +160,12 @@ class CommanderChatView(APIView):
             )
             return Response({"detail": str(exc)}, status=502)
 
-        audit_log(request, action="AI_COMMANDER", resource="ai", details={"turns": len(trace)})
+        audit_log(
+            request,
+            action="AI_COMMANDER",
+            resource="ai",
+            details={"turns": len(trace), "provider": provider, "model": model},
+        )
 
         last_msg = trace[-1]["content"] if trace and isinstance(trace[-1], dict) else None
         self.ai_logger.info(

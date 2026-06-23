@@ -41,6 +41,13 @@ interface AtlasAiState {
   sessionKey: string | null
   sessionKeyExpiry: number | null
   sessionKeyTimer: ReturnType<typeof setTimeout> | null
+  provider: ProviderOption
+  model: string
+  baseUrl: string
+  sessionProvider: ProviderOption | null
+  sessionModel: string | null
+  sessionBaseUrl: string | null
+  threadRenameLoading: boolean
 }
 
 interface AtlasAiActions {
@@ -51,14 +58,18 @@ interface AtlasAiActions {
   selectThread: (threadId: string) => Promise<void>
   startThread: (title?: string) => Promise<string | null>
   deleteThread: (threadId: string) => Promise<void>
+  renameThread: (threadId: string, title: string) => Promise<void>
   send: (content: string, page?: string, context?: Record<string, unknown>) => Promise<void>
   confirm: (action: PendingAction) => Promise<void>
   reset: () => Promise<void>
   refreshKeyStatus: () => Promise<void>
-  storeKey: (provider: ProviderOption, apiKey: string, passphrase: string) => Promise<void>
+  storeKey: (provider: ProviderOption, apiKey: string, passphrase: string, options?: { model?: string; baseUrl?: string }) => Promise<void>
   unlockKey: (passphrase: string) => Promise<void>
   lockKey: () => Promise<void>
   setPanelWidth: (w: number) => void
+  setProvider: (provider: ProviderOption) => void
+  setModel: (model: string) => void
+  setBaseUrl: (url: string) => void
 }
 
 const PANEL_WIDTH_KEY = 'atlas_ai_panel_width'
@@ -151,6 +162,13 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
     sessionKey: null,
     sessionKeyExpiry: null,
     sessionKeyTimer: null,
+    provider: 'openai',
+    model: '',
+    baseUrl: '',
+    sessionProvider: null,
+    sessionModel: null,
+    sessionBaseUrl: null,
+    threadRenameLoading: false,
 
     toggle() {
       set((s) => ({ open: !s.open }))
@@ -278,6 +296,30 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       }
     },
 
+    async renameThread(threadId, title) {
+      const trimmed = title.trim()
+      if (!trimmed) {
+        set({ error: 'Thread title cannot be empty.' })
+        return
+      }
+      set({ threadRenameLoading: true, error: null })
+      try {
+        const updated = await atlasAiApi.renameThread(threadId, trimmed)
+        set((s) => {
+          const threads = s.threads
+            .map((t) => (t.id === threadId ? { ...t, title: updated.title, updated_at: updated.updated_at } : t))
+            .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+
+          return {
+            threads,
+            threadRenameLoading: false,
+          }
+        })
+      } catch (err: unknown) {
+        set({ threadRenameLoading: false, error: getErrorMessage(err, 'Failed to rename thread') })
+      }
+    },
+
     async send(content, page, ctx) {
       const trimmed = content.trim()
       if (!trimmed) return
@@ -287,10 +329,25 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       }
 
       const contextData = ctx ?? {}
+      const snapshot = get()
+      const runtimeKey = snapshot.sessionKey
+      const runtimeProvider = snapshot.sessionProvider ?? snapshot.provider
+      const runtimeModel = snapshot.sessionModel ?? snapshot.model
+      const runtimeBaseUrl = snapshot.sessionBaseUrl ?? snapshot.baseUrl
+
+      if (!runtimeKey) {
+        set({ error: 'Unlock ATLAS-AI to continue.' })
+        return
+      }
+
+      if (runtimeProvider === 'local' && !runtimeBaseUrl) {
+        set({ error: 'Provide a local model URL before chatting.' })
+        return
+      }
 
       set({ sending: true, error: null })
 
-      let threadId = get().activeThreadId
+      let threadId = snapshot.activeThreadId
       if (!threadId) {
         threadId = await get().startThread(trimmed.slice(0, 80))
         if (!threadId) {
@@ -317,8 +374,6 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       }
 
       try {
-        const sessionKey = get().sessionKey
-
         const commanderHistory: CommanderMessage[] = []
 
         const contextParts: string[] = []
@@ -346,9 +401,25 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
           })),
         )
 
+        const liveState = get()
+        const sessionKey = liveState.sessionKey ?? runtimeKey
+        if (!sessionKey) {
+          throw new Error('ATLAS-AI session expired. Unlock to continue.')
+        }
+        const providerNow = liveState.sessionProvider ?? liveState.provider ?? runtimeProvider
+        const modelNow = liveState.sessionModel ?? liveState.model ?? runtimeModel
+        const baseUrlNow = liveState.sessionBaseUrl ?? liveState.baseUrl ?? runtimeBaseUrl
+
+        if (providerNow === 'local' && !baseUrlNow) {
+          throw new Error('Local model URL missing. Provide a base URL in settings.')
+        }
+
         const res = await askCommander({
           messages: commanderHistory,
-          apiKey: sessionKey ?? undefined,
+          apiKey: sessionKey,
+          provider: providerNow,
+          model: modelNow || undefined,
+          baseUrl: providerNow === 'local' ? baseUrlNow : undefined,
           question: trimmed,
         })
         const assistantContent = [...res.transcript].reverse().find((m) => m.role === 'assistant')?.content || 'No response.'
@@ -436,23 +507,34 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
             clearTimeout(timer)
             timer = null
           }
-          return {
+          const next: Partial<AtlasAiState> = {
             keyStatus: status,
             keyLoading: false,
             sessionKey: status.unlocked ? state.sessionKey : null,
             sessionKeyExpiry: status.unlocked ? state.sessionKeyExpiry : null,
             sessionKeyTimer: status.unlocked ? timer : null,
           }
+          if (!status.unlocked) {
+            next.sessionProvider = null
+            next.sessionModel = null
+            next.sessionBaseUrl = null
+          }
+          if (status.provider) next.provider = status.provider
+          if (typeof status.model === 'string') next.model = status.model
+          if (typeof status.base_url === 'string') next.baseUrl = status.base_url
+          return next as Partial<AtlasAiState>
         })
       } catch (err: unknown) {
         set({ keyLoading: false, error: getErrorMessage(err, 'Key status error') })
       }
     },
 
-    async storeKey(provider, apiKey, passphrase) {
-      set({ keyWorking: true, error: null })
+    async storeKey(provider, apiKey, passphrase, options) {
+      const normalizedModel = options?.model?.trim() ?? ''
+      const normalizedBaseUrl = options?.baseUrl?.trim() ?? ''
+      set({ keyWorking: true, error: null, provider, model: normalizedModel, baseUrl: normalizedBaseUrl })
       try {
-        await atlasAiApi.storeKey(provider, apiKey, passphrase)
+        await atlasAiApi.storeKey(provider, apiKey, passphrase, { model: normalizedModel || undefined, baseUrl: normalizedBaseUrl || undefined })
         await get().refreshKeyStatus()
       } catch (err: unknown) {
         set({ error: getErrorMessage(err, 'Failed to store key') })
@@ -475,6 +557,9 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
               sessionKey: null,
               sessionKeyExpiry: null,
               sessionKeyTimer: null,
+              sessionProvider: null,
+              sessionModel: null,
+              sessionBaseUrl: null,
               keyStatus: state.keyStatus
                 ? { ...state.keyStatus, unlocked: false, unlock_expires_at: null }
                 : state.keyStatus,
@@ -491,6 +576,12 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
             sessionKey: res.apiKey,
             sessionKeyExpiry: expiryMs,
             sessionKeyTimer: timeoutHandle,
+            sessionProvider: res.provider,
+            sessionModel: res.model ?? (res.key_status.model ?? s.model),
+            sessionBaseUrl: res.baseUrl ?? (res.key_status.base_url ?? s.baseUrl),
+            provider: res.key_status.provider ?? res.provider ?? s.provider,
+            model: res.key_status.model ?? res.model ?? s.model,
+            baseUrl: res.key_status.base_url ?? res.baseUrl ?? s.baseUrl,
           }
         })
       } catch (err: unknown) {
@@ -510,6 +601,9 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
             sessionKey: null,
             sessionKeyExpiry: null,
             sessionKeyTimer: null,
+            sessionProvider: null,
+            sessionModel: null,
+            sessionBaseUrl: null,
           }
         })
       } catch (err: unknown) {
@@ -525,6 +619,18 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       } catch {
         /* ignore */
       }
+    },
+
+    setProvider(provider) {
+      set({ provider })
+    },
+
+    setModel(model) {
+      set({ model })
+    },
+
+    setBaseUrl(url) {
+      set({ baseUrl: url })
     },
   }
 })

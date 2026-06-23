@@ -26,6 +26,8 @@ export interface AtlasAiChatResponse {
 export interface KeyStatus {
   hasKey: boolean
   provider?: 'openai' | 'local'
+  model?: string
+  base_url?: string
   created_at?: string
   unlocked: boolean
   unlock_expires_at?: string | null
@@ -54,6 +56,8 @@ export const atlasAiApi = {
     context?: Record<string, unknown>
     provider?: 'openai' | 'local'
     apiKey?: string
+    model?: string
+    baseUrl?: string
   }): Promise<AtlasAiChatResponse> {
     const { user, scope } = await whoAmI()
     const kStatus = ks(String(user.id))
@@ -88,6 +92,8 @@ export const atlasAiApi = {
       tools: toolsForModel,
       provider,
       apiKeyOverride: runtimeKey,
+      modelOverride: payload.model,
+      baseUrlOverride: payload.baseUrl,
     })
     const choice = result.choices[0]
 
@@ -175,6 +181,14 @@ export const atlasAiApi = {
     return request<AtlasAiThread>({ method: 'POST', url: '/atlas-ai/threads/', data: title ? { title } : {} })
   },
 
+  async renameThread(threadId: string, title: string): Promise<AtlasAiThread> {
+    return request<AtlasAiThread>({
+      method: 'PATCH',
+      url: `/atlas-ai/threads/${encodeURIComponent(threadId)}/`,
+      data: { title },
+    })
+  },
+
   async deleteThread(threadId: string): Promise<void> {
     await request<void>({ method: 'DELETE', url: `/atlas-ai/threads/${encodeURIComponent(threadId)}/` })
   },
@@ -222,9 +236,14 @@ export const atlasAiApi = {
     return ks(String(user.id))
   },
 
-  async storeKey(provider: ProviderOption, apiKey: string, passphrase: string): Promise<{ ok: boolean }> {
+  async storeKey(
+    provider: ProviderOption,
+    apiKey: string,
+    passphrase: string,
+    options?: { model?: string; baseUrl?: string },
+  ): Promise<{ ok: boolean }> {
     const { user } = await whoAmI()
-    await storeApiKey(String(user.id), provider, apiKey, passphrase)
+    await storeApiKey(String(user.id), provider, apiKey, passphrase, options)
     writeAudit({
       timestamp: new Date().toISOString(),
       user_id: user.id,
@@ -232,7 +251,7 @@ export const atlasAiApi = {
       role: user.role,
       action: 'atlas-ai.key.store',
       status: 'ok',
-      details: { provider },
+      details: { provider, model: options?.model, baseUrl: options?.baseUrl },
     })
     return { ok: true }
   },
@@ -241,12 +260,21 @@ export const atlasAiApi = {
     ok: boolean
     provider: ProviderOption
     apiKey: string
+    model?: string
+    baseUrl?: string
     key_status: KeyStatus
   }> {
     const { user } = await whoAmI()
     const plain = await unlockKey(String(user.id), passphrase)
     const status = ks(String(user.id))
-    return { ok: true, provider: plain.provider, apiKey: plain.apiKey, key_status: status }
+    return {
+      ok: true,
+      provider: plain.provider,
+      apiKey: plain.apiKey,
+      model: plain.model,
+      baseUrl: plain.baseUrl,
+      key_status: status,
+    }
   },
 
   async lockKey(): Promise<{ ok: boolean; key_status: KeyStatus }> {

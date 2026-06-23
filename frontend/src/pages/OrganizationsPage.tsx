@@ -42,7 +42,7 @@ export function OrganizationsPage() {
       <PageHeader title="Organizations" subtitle={`${orgs.length} orgs`} />
 
       <Card className="space-y-3">
-        <SectionHeader title="Create organization" subtitle="Group agents and assign them quickly" />
+        <SectionHeader title="Create organization" description="Group agents and assign them quickly" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} disabled={submitting} />
           <Input label="Description" value={description} onChange={(e) => setDescription(e.target.value)} disabled={submitting} />
@@ -135,7 +135,7 @@ function OrganizationRow({ org, onUpdate, onDelete, updating, deleting, agents }
     <tr className="hover:bg-[--color-surface-2]">
       <td className="px-3 py-2 font-mono text-[--color-text]">
         {editing ? (
-          <Input value={name} onChange={(e) => setName(e.target.value)} size="sm" disabled={updating || deleting} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} disabled={updating || deleting} />
         ) : (
           <div className="flex items-center gap-2">
             <span>{org.name}</span>
@@ -146,7 +146,7 @@ function OrganizationRow({ org, onUpdate, onDelete, updating, deleting, agents }
       <td className="px-3 py-2 text-xs text-[--color-text-muted]">
         {editing ? (
           <div className="space-y-2">
-            <Input value={agentInput} onChange={(e) => setAgentInput(e.target.value)} size="sm" disabled={updating || deleting} />
+            <Input value={agentInput} onChange={(e) => setAgentInput(e.target.value)} disabled={updating || deleting} />
             <select
               multiple
               size={Math.min(8, Math.max(3, agents.length))}
@@ -177,13 +177,13 @@ function OrganizationRow({ org, onUpdate, onDelete, updating, deleting, agents }
         <div className="flex gap-2">
           {editing ? (
             <>
-              <Button size="xs" variant="primary" onClick={save} disabled={!name.trim()} loading={updating}>Save</Button>
-              <Button size="xs" variant="ghost" onClick={() => { setEditing(false); setName(org.name); setDescription(org.description ?? ''); setAgentInput(org.agent_ids.join(', ')); setAgentSelections(new Set(org.agent_ids)) }} disabled={updating}>Cancel</Button>
+              <Button size="sm" variant="primary" onClick={save} disabled={!name.trim()} loading={updating}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setName(org.name); setDescription(org.description ?? ''); setAgentInput(org.agent_ids.join(', ')); setAgentSelections(new Set(org.agent_ids)) }} disabled={updating}>Cancel</Button>
             </>
           ) : (
             <>
-              <Button size="xs" variant="ghost" onClick={() => setEditing(true)} disabled={updating || deleting}>Edit</Button>
-              <Button size="xs" variant="danger" onClick={() => { if (window.confirm(`Delete organization "${org.name}"?`)) { onDelete() } }} loading={deleting} disabled={updating}>Delete</Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={updating || deleting}>Edit</Button>
+              <Button size="sm" variant="danger" onClick={() => { if (window.confirm(`Delete organization "${org.name}"?`)) { onDelete() } }} loading={deleting} disabled={updating}>Delete</Button>
             </>
           )}
         </div>

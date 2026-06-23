@@ -86,7 +86,7 @@ export function UsersPage() {
       )}
 
       <Card className="mb-5">
-        <SectionHeader title="Registrations" subtitle="Approve or reject new access requests" />
+        <SectionHeader title="Registrations" description="Approve or reject new access requests" />
         {registrations.isLoading ? (
           <LoadingState />
         ) : registrations.error ? (
@@ -202,12 +202,16 @@ function RegistrationRow({ request, decisions, organizations, agents }: { reques
       <td className="px-3 py-2 text-[--color-text-muted]">{request.reason || '—'}</td>
       <td className="px-3 py-2 text-[--color-text-muted]">{formatDate(request.created_at)}</td>
       <td className="px-3 py-2">
-        <StatusBadge status={request.status === 'pending' ? 'warning' : request.status === 'approved' ? 'active' : 'inactive'} label={request.status} />
+        <StatusBadge
+          status={request.status.toUpperCase()}
+          variant={request.status === 'approved' ? 'online' : request.status === 'pending' ? 'warning' : 'error'}
+        />
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <Toggle label="Access all" checked={accessAll} onChange={setAccessAll} disabled={pending !== null} />
+          <div className="flex items-center gap-2 text-[--color-text-muted]">
+            <Toggle checked={accessAll} onChange={setAccessAll} disabled={pending !== null} />
+            <span className="text-xs font-mono">Access all agents</span>
           </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <input
@@ -270,10 +274,10 @@ function RegistrationRow({ request, decisions, organizations, agents }: { reques
           </div>
         </div>
           <div className="flex gap-2">
-            <Button size="xs" variant="primary" loading={pending === 'approve'} disabled={pending === 'reject'} onClick={approve}>
+            <Button size="sm" variant="primary" loading={pending === 'approve'} disabled={pending === 'reject'} onClick={approve}>
               Approve
             </Button>
-            <Button size="xs" variant="danger" loading={pending === 'reject'} disabled={pending === 'approve'} onClick={reject}>
+            <Button size="sm" variant="danger" loading={pending === 'reject'} disabled={pending === 'approve'} onClick={reject}>
               Reject
             </Button>
           </div>
@@ -485,7 +489,10 @@ function CreateUserForm({
             <p className="col-span-full text-[10px] text-[--color-text-muted] font-mono">Guest access auto-revokes after this duration. Leave 0/0 for no expiry.</p>
           </div>
         )}
-        <Toggle label="Access all agents" checked={accessAll} onChange={setAccessAll} disabled={loading} />
+        <div className="flex items-center gap-2 text-[--color-text-muted]">
+          <Toggle checked={accessAll} onChange={setAccessAll} disabled={loading} />
+          <span className="text-xs font-mono">Access all agents</span>
+        </div>
         <Input label="Agent IDs (comma separated)" value={agentIds} onChange={(e) => setAgentIds(e.target.value)} disabled={loading} />
         <div className="col-span-full space-y-2">
           <label className="text-[11px] uppercase tracking-wide text-[--color-text-muted] font-semibold">Select agents</label>

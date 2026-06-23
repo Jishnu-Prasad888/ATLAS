@@ -328,7 +328,7 @@ const MetricPanel = memo(function MetricPanel({
 export function DashboardPage() {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
-  const { user, isAdmin, isModerator, isViewer, isGuest, canAccessAgent } = useAuthStore()
+  const { user, isAdmin, isModerator, isGuest, canAccessAgent } = useAuthStore()
   const { selectedAgentId, selectAgent, wsConnected } = useUiStore()
   const { data: health }                           = useFleetHealth()
   const { data: agents, isLoading: agentsLoading } = useAgents()

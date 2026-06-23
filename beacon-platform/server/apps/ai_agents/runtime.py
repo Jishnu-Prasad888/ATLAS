@@ -31,6 +31,8 @@ def run_commander(
     tools: Optional[List[Dict[str, Any]]] = None,
     api_key: Optional[str] = None,
     request: Any | None = None,
+    provider: str = "openai",
+    base_url: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Run an OpenAI chat loop with tool-calling.
 
@@ -38,7 +40,21 @@ def run_commander(
     Returns the full transcript including tool results.
     """
 
-    client = OpenAI(api_key=api_key)
+    provider_normalized = (provider or "openai").strip().lower()
+    client_kwargs: Dict[str, Any] = {}
+
+    if base_url:
+        client_kwargs["base_url"] = base_url.rstrip("/")
+
+    if provider_normalized == "local":
+        if not base_url:
+            raise ValueError("base_url is required when provider is 'local'")
+        if not api_key:
+            api_key = os.environ.get("LOCAL_OPENAI_API_KEY", "local-key")
+    elif provider_normalized != "openai":
+        raise ValueError(f"Unknown provider '{provider}'")
+
+    client = OpenAI(api_key=api_key, **client_kwargs)
     tool_defs = tools or TOOL_SPECS
     turn = 0
     transcript = [

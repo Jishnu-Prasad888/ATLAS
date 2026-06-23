@@ -32,6 +32,9 @@ export interface CommanderChatRequest {
   messages: CommanderMessage[]
   apiKey?: string
   question?: string
+  provider?: 'openai' | 'local'
+  model?: string
+  baseUrl?: string
 }
 
 export async function askCommander(requestPayload: CommanderChatRequest): Promise<CommanderResponse> {
@@ -39,7 +42,7 @@ export async function askCommander(requestPayload: CommanderChatRequest): Promis
 
   if (requestPayload.messages?.length) {
     data.messages = requestPayload.messages.map((message) => {
-      const payload: Record<string, string> = { role: message.role }
+      const payload: Record<string, unknown> = { role: message.role }
       if (typeof message.content === 'string') payload.content = message.content
       if (message.name) payload.name = message.name
       if (message.tool_call_id) payload.tool_call_id = message.tool_call_id
@@ -49,7 +52,7 @@ export async function askCommander(requestPayload: CommanderChatRequest): Promis
           if (call.id) callPayload.id = call.id
           if (call.type) callPayload.type = call.type
           if (call.function) {
-            const fnPayload: Record<string, string> = {}
+            const fnPayload: Record<string, unknown> = {}
             if (call.function.name) fnPayload.name = call.function.name
             if (call.function.arguments) fnPayload.arguments = call.function.arguments
             callPayload.function = fnPayload
@@ -63,6 +66,9 @@ export async function askCommander(requestPayload: CommanderChatRequest): Promis
 
   if (requestPayload.question) data.question = requestPayload.question
   if (requestPayload.apiKey) data.api_key = requestPayload.apiKey
+  if (requestPayload.provider) data.provider = requestPayload.provider
+  if (requestPayload.model) data.model = requestPayload.model
+  if (requestPayload.baseUrl) data.base_url = requestPayload.baseUrl
 
   return request<CommanderResponse>({
     method: 'POST',

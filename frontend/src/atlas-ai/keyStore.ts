@@ -9,6 +9,8 @@ interface EncryptedRecord {
   iv: string
   encrypted: string
   created_at: string
+  model?: string
+  base_url?: string
 }
 
 interface StoreShape {
@@ -18,9 +20,11 @@ interface StoreShape {
 interface PlainKey {
   provider: Provider
   apiKey: string
+  model?: string
+  baseUrl?: string
 }
 
-const unlockedMeta = new Map<string, { provider: Provider; expiresAt: number }>()
+const unlockedMeta = new Map<string, { provider: Provider; model?: string; baseUrl?: string; expiresAt: number }>()
 
 function readStore(): StoreShape {
   try {
@@ -62,7 +66,13 @@ async function deriveKey(passphrase: string, salt: ArrayBuffer): Promise<CryptoK
   )
 }
 
-export async function storeApiKey(userId: string, provider: Provider, apiKey: string, passphrase: string) {
+export async function storeApiKey(
+  userId: string,
+  provider: Provider,
+  apiKey: string,
+  passphrase: string,
+  options?: { model?: string; baseUrl?: string },
+) {
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const key = await deriveKey(passphrase, salt.buffer as ArrayBuffer)
@@ -78,6 +88,8 @@ export async function storeApiKey(userId: string, provider: Provider, apiKey: st
     iv: btoa(String.fromCharCode(...iv)),
     encrypted: bufToBase64(encrypted),
     created_at: new Date().toISOString(),
+    model: options?.model?.trim().slice(0, 200),
+    base_url: options?.baseUrl?.trim().slice(0, 500),
   }
 
   const store = readStore()
@@ -104,8 +116,18 @@ export async function unlockKey(userId: string, passphrase: string): Promise<Pla
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted)
   const apiKey = new TextDecoder().decode(plaintext)
 
-  const plain: PlainKey = { provider: record.provider, apiKey }
-  unlockedMeta.set(userId, { provider: record.provider, expiresAt: Date.now() + UNLOCK_TTL_MS })
+  const plain: PlainKey = {
+    provider: record.provider,
+    apiKey,
+    model: record.model,
+    baseUrl: record.base_url,
+  }
+  unlockedMeta.set(userId, {
+    provider: record.provider,
+    model: record.model,
+    baseUrl: record.base_url,
+    expiresAt: Date.now() + UNLOCK_TTL_MS,
+  })
   return plain
 }
 
@@ -124,6 +146,8 @@ export function keyStatus(userId: string) {
   return {
     hasKey: Boolean(record),
     provider: (active?.provider ?? record?.provider) as Provider | undefined,
+    model: active?.model ?? record?.model,
+    base_url: active?.baseUrl ?? record?.base_url,
     created_at: record?.created_at,
     unlocked: Boolean(active),
     unlock_expires_at: active ? new Date(active.expiresAt).toISOString() : null,

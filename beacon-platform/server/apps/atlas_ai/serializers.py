@@ -4,11 +4,19 @@ from .models import AtlasAiMessage, AtlasAiThread
 
 
 class AtlasAiThreadSerializer(serializers.ModelSerializer):
-    message_count = serializers.IntegerField(read_only=True)
+    message_count = serializers.SerializerMethodField()
 
     class Meta:
         model = AtlasAiThread
         fields = ["id", "title", "created_at", "updated_at", "deleted_at", "message_count"]
+
+    def get_message_count(self, obj: AtlasAiThread) -> int:
+        if hasattr(obj, "message_count") and obj.message_count is not None:
+            try:
+                return int(obj.message_count)
+            except (TypeError, ValueError):
+                return obj.messages.count()
+        return obj.messages.count()
 
 
 class AtlasAiMessageSerializer(serializers.ModelSerializer):
