@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { clsx } from 'clsx'
-import { PageHeader } from '@/components/layout/AppLayout'
 import {
   Button,
-  Card,
   Input,
   Textarea,
   LoadingState,
@@ -18,20 +19,23 @@ import type { AtlasAiThread } from '@/api'
 import {
   Bot,
   CheckCircle2,
-  Clock,
-  KeyRound,
-  Loader2,
+  ChevronLeft,
   Lock,
-  PenLine,
+  Loader2,
+  Menu,
   Plus,
-  RefreshCw,
   Search,
   Send,
-  ShieldCheck,
+  Settings,
   Trash2,
   Unlock,
   User,
+  X,
+  PenLine,
+  RefreshCw,
+  KeyRound,
 } from 'lucide-react'
+import { useUiStore } from '@/store/uiStore'
 
 export function AiAnalystPage() {
   const {
@@ -64,38 +68,46 @@ export function AiAnalystPage() {
     setProvider,
     setModel,
     setBaseUrl,
-  } = useAtlasAiStore(useShallow((state) => ({
-    threads: state.threads,
-    activeThreadId: state.activeThreadId,
-    messages: state.messages,
-    pending: state.pending,
-    sending: state.sending,
-    error: state.error,
-    keyStatus: state.keyStatus,
-    keyLoading: state.keyLoading,
-    keyWorking: state.keyWorking,
-    loadingThreads: state.loadingThreads,
-    loadingMessages: state.loadingMessages,
-    threadRenameLoading: state.threadRenameLoading,
-    provider: state.provider,
-    model: state.model,
-    baseUrl: state.baseUrl,
-    loadThreads: state.loadThreads,
-    selectThread: state.selectThread,
-    startThread: state.startThread,
-    deleteThread: state.deleteThread,
-    renameThread: state.renameThread,
-    refreshKeyStatus: state.refreshKeyStatus,
-    storeKey: state.storeKey,
-    unlockKey: state.unlockKey,
-    lockKey: state.lockKey,
-    send: state.send,
-    confirm: state.confirm,
-    setProvider: state.setProvider,
-    setModel: state.setModel,
-    setBaseUrl: state.setBaseUrl,
-  })))
+    panelOpen,
+    panelWidth,
+  } = useAtlasAiStore(
+    useShallow((state) => ({
+      threads: state.threads,
+      activeThreadId: state.activeThreadId,
+      messages: state.messages,
+      pending: state.pending,
+      sending: state.sending,
+      error: state.error,
+      keyStatus: state.keyStatus,
+      keyLoading: state.keyLoading,
+      keyWorking: state.keyWorking,
+      loadingThreads: state.loadingThreads,
+      loadingMessages: state.loadingMessages,
+      threadRenameLoading: state.threadRenameLoading,
+      provider: state.provider,
+      model: state.model,
+      baseUrl: state.baseUrl,
+      loadThreads: state.loadThreads,
+      selectThread: state.selectThread,
+      startThread: state.startThread,
+      deleteThread: state.deleteThread,
+      renameThread: state.renameThread,
+      refreshKeyStatus: state.refreshKeyStatus,
+      storeKey: state.storeKey,
+      unlockKey: state.unlockKey,
+      lockKey: state.lockKey,
+      send: state.send,
+      confirm: state.confirm,
+      setProvider: state.setProvider,
+      setModel: state.setModel,
+      setBaseUrl: state.setBaseUrl,
+      panelOpen: state.open,
+      panelWidth: state.panelWidth,
+    }))
+  )
 
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState('')
   const [apiKeyInput, setApiKeyInput] = useState('')
@@ -106,6 +118,18 @@ export function AiAnalystPage() {
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [isMounted, setIsMounted] = useState(false)
+  const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed)
+
+  const openSettings = useCallback(() => {
+    setKeyFormError(null)
+    setSettingsOpen(true)
+  }, [setKeyFormError, setSettingsOpen])
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    setKeyFormError(null)
+  }, [setKeyFormError, setSettingsOpen])
 
   useEffect(() => {
     refreshKeyStatus().catch(() => undefined)
@@ -118,15 +142,45 @@ export function AiAnalystPage() {
     }
   }, [messages, sending])
 
+  useEffect(() => {
+    setIsMounted(true)
+    return () => setIsMounted(false)
+  }, [])
+
+  useEffect(() => {
+    if (!settingsOpen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previous
+    }
+  }, [settingsOpen])
+
+  useEffect(() => {
+    if (!settingsOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeSettings()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [settingsOpen, closeSettings])
+
   const filteredThreads = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return threads
-    return threads.filter((thread) => (thread.title || 'untitled thread').toLowerCase().includes(term))
+    return threads.filter((thread) =>
+      (thread.title || 'untitled thread').toLowerCase().includes(term)
+    )
   }, [threads, search])
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
-    [threads, activeThreadId],
+    [threads, activeThreadId]
   )
 
   const hasStoredKey = Boolean(keyStatus?.hasKey)
@@ -190,7 +244,13 @@ export function AiAnalystPage() {
 
   const handleStoreKey = async () => {
     setKeyFormError(null)
-    if (!passphraseInput.trim()) {
+    const trimmedKey = apiKeyInput.trim()
+    const trimmedPass = passphraseInput.trim()
+    if (!trimmedKey) {
+      setKeyFormError('API key is required to store credentials.')
+      return
+    }
+    if (!trimmedPass) {
       setKeyFormError('Passphrase is required to encrypt the key.')
       return
     }
@@ -198,12 +258,13 @@ export function AiAnalystPage() {
       setKeyFormError('Local models require an inference base URL.')
       return
     }
-    await storeKey(provider, apiKeyInput.trim(), passphraseInput.trim(), {
+    await storeKey(provider, trimmedKey, trimmedPass, {
       model: model.trim() || undefined,
       baseUrl: baseUrl.trim() || undefined,
     })
     setApiKeyInput('')
     setPassphraseInput('')
+    closeSettings()
   }
 
   const handleUnlock = async () => {
@@ -219,7 +280,11 @@ export function AiAnalystPage() {
   const handleSend = async () => {
     const next = draft.trim()
     if (!next) return
-    await send(next, 'ai-analyst', activeThread ? { threadId: activeThread.id } : undefined)
+    await send(
+      next,
+      'ai-analyst',
+      activeThread ? { threadId: activeThread.id } : undefined
+    )
     setDraft('')
   }
 
@@ -230,439 +295,554 @@ export function AiAnalystPage() {
     }
   }
 
-  const keyStatusBadge = keyLoading ? (
-    <span className="inline-flex items-center gap-2 rounded-full border border-[--color-border] px-2 py-1 text-[10px] uppercase tracking-wide text-[--color-text-muted]">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking…
-    </span>
-  ) : isUnlocked ? (
-    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-emerald-200">
-      <CheckCircle2 className="h-3.5 w-3.5" /> Unlocked
-    </span>
-  ) : hasStoredKey ? (
-    <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-amber-200">
-      <Lock className="h-3.5 w-3.5" /> Locked
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-red-200">
-      <KeyRound className="h-3.5 w-3.5" /> Key Missing
-    </span>
-  )
-
   const isComposerDisabled = sending || !isUnlocked
+  const layoutLeft = sidebarCollapsed ? 48 : 176
+  const layoutRight = panelOpen ? panelWidth + 24 : 0
 
-  return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title={
-          <span className="inline-flex items-center gap-2">
-            <ShieldCheck size={16} /> AI Analyst
-          </span>
-        }
-        subtitle="Claude-inspired conversational analyst with full Atlas context"
-      />
+  if (!isMounted) return null
 
-      {error && <ErrorState error={error} />}
+  return createPortal(
+    <div
+      className="fixed inset-y-0 z-30 flex overflow-hidden bg-zinc-950"
+      style={{ left: layoutLeft, right: layoutRight }}
+    >
+      {/* Sidebar */}
+      <div
+        className={clsx(
+          'flex flex-col border-r border-zinc-800 bg-zinc-900 transition-all duration-300 ease-out overflow-hidden',
+          sidebarOpen ? 'w-64' : 'w-0'
+        )}
+      >
+        {/* Sidebar Header */}
+        <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-4 flex-shrink-0">
+          <h1 className="text-sm font-semibold text-white">Conversations</h1>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-zinc-400 hover:text-zinc-200"
+            aria-label="Close sidebar"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        </div>
 
-      <div className="relative overflow-hidden rounded-3xl border border-[--color-border]/70 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.12),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(167,139,250,0.12),transparent_40%)] shadow-[0_30px_120px_-60px_rgba(59,130,246,0.65)]">
-        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.85),rgba(17,24,39,0.6))] backdrop-blur-[2px]" />
-        <div className="relative flex flex-col gap-6 p-6 lg:flex-row">
-          <div className="w-full space-y-4 lg:w-80">
-            <Card className="space-y-4 border-[--color-border]/80 bg-[--color-surface-2]/70 backdrop-blur">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-mono uppercase tracking-[0.4em] text-[--color-text-dim]">Access Control</p>
-                  <h2 className="text-sm font-mono font-semibold text-[--color-text]">Model & API Key</h2>
-                </div>
-                {keyStatusBadge}
-              </div>
+        {/* New Thread Button */}
+        <div className="border-b border-zinc-800 px-3 py-3 flex-shrink-0">
+          <button
+            onClick={() => void handleNewThread()}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-zinc-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-700"
+          >
+            <Plus size={16} /> New chat
+          </button>
+        </div>
 
-              <div className="space-y-3">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wide text-[--color-text-muted]">Provider</label>
-                    <div className="relative mt-1">
-                      <select
-                        value={provider}
-                        onChange={(event) => setProvider(event.target.value as typeof provider)}
-                        className="h-9 w-full rounded-lg border border-[--color-border] bg-[--color-surface] px-3 text-xs font-mono text-[--color-text] focus:border-blue-500 focus:outline-none"
-                      >
-                        <option value="openai">OpenAI</option>
-                        <option value="local">Local</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wide text-[--color-text-muted]">Model</label>
-                    <Input
-                      value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                      placeholder={provider === 'openai' ? 'e.g. gpt-4o-mini' : 'e.g. llama-3'}
-                      className="mt-1 h-9 text-xs"
-                    />
-                  </div>
-                  {provider === 'local' && (
-                    <div className="md:col-span-2">
-                      <label className="text-[10px] font-mono uppercase tracking-wide text-[--color-text-muted]">Base URL</label>
-                      <Input
-                        value={baseUrl}
-                        onChange={(event) => setBaseUrl(event.target.value)}
-                        placeholder="https://model-host/v1"
-                        className="mt-1 h-9 text-xs"
-                      />
-                    </div>
-                  )}
-                </div>
+        {/* Search */}
+        <div className="border-b border-zinc-800 px-3 py-3 flex-shrink-0">
+          <div className="relative">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search..."
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-9 pr-3 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+            />
+          </div>
+        </div>
 
-                <div>
-                  <label className="text-[10px] font-mono uppercase tracking-wide text-[--color-text-muted]">API Key</label>
-                  <Input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(event) => setApiKeyInput(event.target.value)}
-                    placeholder={provider === 'local' ? 'Optional for local deployments' : 'sk-...'}
-                    className="mt-1 h-9 text-xs"
-                  />
-                </div>
+        {/* Threads List */}
+        <div className="flex-1 overflow-y-auto">
+          {loadingThreads ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 size={18} className="animate-spin text-zinc-500" />
+            </div>
+          ) : filteredThreads.length === 0 ? (
+            <div className="px-3 py-8 text-center text-xs text-zinc-500">
+              {search ? 'No conversations found.' : 'No conversations yet.'}
+            </div>
+          ) : (
+            <div className="space-y-2 p-3">
+              {filteredThreads.map((thread) => {
+                const isActive = thread.id === activeThreadId
+                const isEditing = editingThreadId === thread.id
 
-                <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wide text-[--color-text-muted]">Passphrase</label>
-                    <Input
-                      type="password"
-                      value={passphraseInput}
-                      onChange={(event) => setPassphraseInput(event.target.value)}
-                      placeholder="Used to encrypt locally"
-                      className="mt-1 h-9 text-xs"
-                    />
-                  </div>
-                  <Button
-                    variant="primary"
-                    onClick={() => void handleStoreKey()}
-                    disabled={keyWorking}
-                    className="mt-4 md:mt-[22px]"
-                  >
-                    {keyWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Store key
-                  </Button>
-                </div>
-
-                {keyFormError && (
-                  <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] font-mono text-red-200">
-                    {keyFormError}
-                  </div>
-                )}
-
-                <div className="flex flex-col gap-3 rounded-lg border border-[--color-border] bg-[--color-surface]/70 p-3">
-                  <div className="flex items-center justify-between text-[11px] font-mono text-[--color-text-muted]">
-                    <span>Runtime unlock</span>
-                    {unlockExpiresAt && (
-                      <span className="text-[--color-text-dim]">Expires {new Date(unlockExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    )}
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
-                    <Input
-                      type="password"
-                      value={unlockInput}
-                      onChange={(event) => setUnlockInput(event.target.value)}
-                      placeholder="Enter passphrase to unlock"
-                      className="h-9 text-xs"
-                    />
-                    <Button
-                      variant="secondary"
-                      onClick={() => void handleUnlock()}
-                      disabled={keyWorking}
-                      className="flex items-center justify-center gap-2"
-                    >
-                      <Unlock size={14} /> Unlock
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => void lockKey()}
-                      disabled={keyWorking || !isUnlocked}
-                      className="flex items-center justify-center gap-2 text-[--color-text-muted] hover:text-[--color-text]"
-                    >
-                      <Lock size={14} /> Lock
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-[--color-text-dim]">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void refreshKeyStatus()}
-                      className="flex items-center gap-2 text-[--color-text-muted] hover:text-[--color-text]"
-                    >
-                      <RefreshCw size={14} /> Refresh status
-                    </Button>
-                    {keyStatus?.created_at && (
-                      <span>Stored {timeAgo(keyStatus.created_at)}</span>
-                    )}
-                    {isUnlocked && !unlockExpiresAt && <span>Session stays unlocked until you lock it.</span>}
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            <Card className="space-y-3 border-[--color-border]/70 bg-[--color-surface-2]/70 backdrop-blur">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-mono uppercase tracking-[0.4em] text-[--color-text-dim]">Threads</p>
-                  <h2 className="text-sm font-mono font-semibold text-[--color-text]">Your conversations</h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => loadThreads().catch(() => undefined)}
-                    className="flex items-center gap-2 text-[--color-text-muted] hover:text-[--color-text]"
-                  >
-                    <RefreshCw size={14} />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => void handleNewThread()} className="flex items-center gap-2">
-                    <Plus size={14} /> New
-                  </Button>
-                </div>
-              </div>
-
-              <div className="relative">
-                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[--color-text-dim]" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search threads"
-                  className="pl-9 text-xs"
-                />
-              </div>
-
-              <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-                {loadingThreads ? (
-                  <LoadingState label="Loading threads..." />
-                ) : filteredThreads.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[--color-border] bg-[--color-surface]/60 px-3 py-6 text-center text-xs font-mono text-[--color-text-muted]">
-                    No threads yet. Start a new conversation.
-                  </div>
-                ) : (
-                  filteredThreads.map((thread) => {
-                    const isActive = thread.id === activeThreadId
-                    const isEditing = editingThreadId === thread.id
-                    const lastUpdated = thread.updated_at ? timeAgo(thread.updated_at) : 'just now'
-                    return (
+                return (
+                  <div key={thread.id}>
+                    {isEditing ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingTitle}
+                          autoFocus
+                          onChange={(e) => {
+                            setRenameError(null)
+                            setEditingTitle(e.target.value)
+                          }}
+                          onBlur={() => {
+                            if (!threadRenameLoading) void submitRename()
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              void submitRename()
+                            } else if (e.key === 'Escape') {
+                              abortRename()
+                            }
+                          }}
+                          className="flex-1 rounded-lg border border-zinc-600 bg-zinc-800 px-2 py-1 text-xs text-white focus:outline-none"
+                        />
+                        <button
+                          onClick={() => void submitRename()}
+                          disabled={threadRenameLoading}
+                          className="text-zinc-400 hover:text-white disabled:opacity-50"
+                        >
+                          {threadRenameLoading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <CheckCircle2 size={14} />
+                          )}
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        key={thread.id}
-                        type="button"
                         onClick={() => void handleSelectThread(thread.id)}
                         className={clsx(
-                          'w-full rounded-2xl border px-3 py-3 text-left transition hover:border-blue-500/60 hover:bg-[--color-surface]/60',
+                          'group relative w-full overflow-hidden rounded-lg px-3 py-2 text-left text-sm transition',
                           isActive
-                            ? 'border-blue-500/60 bg-[linear-gradient(135deg,rgba(59,130,246,0.20),rgba(14,23,42,0.75))]' : 'border-[--color-border]/70 bg-[--color-surface-2]/60',
+                            ? 'bg-zinc-700 text-white'
+                            : 'text-zinc-300 hover:bg-zinc-800'
                         )}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          {isEditing ? (
-                            <Input
-                              value={editingTitle}
-                              autoFocus
-                              onChange={(event) => {
-                                setRenameError(null)
-                                setEditingTitle(event.target.value)
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">
+                              {thread.title?.trim() || 'Untitled conversation'}
+                            </p>
+                            <p className="truncate text-xs text-zinc-500">
+                              {thread.message_count} messages
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                beginRename(thread)
                               }}
-                              onBlur={() => { if (!threadRenameLoading) void submitRename() }}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault()
-                                  void submitRename()
-                                } else if (event.key === 'Escape') {
-                                  abortRename()
-                                }
-                              }}
-                              className="h-8 text-xs"
-                            />
-                          ) : (
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium text-[--color-text]">
-                                {thread.title?.trim() || 'Untitled conversation'}
-                              </span>
-                              <span className="text-[10px] font-mono uppercase tracking-wide text-[--color-text-dim]">
-                                {thread.message_count} messages · {lastUpdated}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2 text-[--color-text-muted]">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 rounded-full p-0 hover:text-[--color-text]"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                isEditing ? void submitRename() : beginRename(thread)
-                              }}
-                              disabled={threadRenameLoading && isEditing}
-                              aria-label="Rename thread"
+                              className="rounded p-1 hover:bg-zinc-600"
+                              aria-label="Rename"
                             >
-                              {threadRenameLoading && isEditing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PenLine size={14} />}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 rounded-full p-0 hover:text-red-400"
-                              onClick={(event) => {
-                                event.stopPropagation()
+                              <PenLine size={12} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
                                 void handleDeleteThread(thread.id)
                               }}
-                              aria-label="Delete thread"
+                              className="rounded p-1 hover:bg-red-500/20 hover:text-red-400"
+                              aria-label="Delete"
                             >
-                              <Trash2 size={14} />
-                            </Button>
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         </div>
-                        {isEditing && renameError && (
-                          <p className="mt-2 text-[10px] font-mono text-red-300">{renameError}</p>
+                        {renameError && isEditing && (
+                          <p className="mt-1 text-xs text-red-400">{renameError}</p>
                         )}
                       </button>
-                    )
-                  })
-                )}
-              </div>
-            </Card>
-          </div>
-
-          <Card padding={false} className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-3xl border-[--color-border]/70 bg-[--color-surface]/70 backdrop-blur">
-            <div className="border-b border-[--color-border] px-6 py-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.4em] text-[--color-text-dim]">
-                    <MessageHeaderIcon />
-                    <span>Conversation</span>
+                    )}
                   </div>
-                  <h2 className="mt-1 text-lg font-mono font-semibold text-[--color-text]">
-                    {activeThread?.title?.trim() || 'Untitled conversation'}
-                  </h2>
-                  <p className="text-[11px] font-mono text-[--color-text-muted]">
-                    {activeThread ? `Last activity ${timeAgo(activeThread.updated_at)}` : 'Start by creating a thread on the left.'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void refreshKeyStatus()}
-                    className="flex items-center gap-2 text-[--color-text-muted] hover:text-[--color-text]"
-                  >
-                    <RefreshCw size={14} /> Refresh
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void handleNewThread()}
-                    className="flex items-center gap-2 text-[--color-text-muted] hover:text-[--color-text]"
-                  >
-                    <Plus size={14} /> New thread
-                  </Button>
-                </div>
-              </div>
+                )
+              })}
             </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4" ref={scrollRef}>
-              {(!hasStoredKey || !isUnlocked) && (
-                <div
-                  className={clsx(
-                    'mb-4 rounded-2xl border px-4 py-3 text-xs font-mono',
-                    hasStoredKey ? 'border-amber-500/40 bg-amber-500/10 text-amber-100' : 'border-red-500/40 bg-red-500/10 text-red-100',
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <KeyRound size={14} />
-                    <span>
-                      {hasStoredKey
-                        ? 'Unlock your key in the sidebar to send new messages.'
-                        : 'Store an API key or local model credentials to start chatting.'}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {pending.length > 0 && (
-                <div className="mb-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs font-mono text-amber-100">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="uppercase tracking-[0.3em]">Pending actions</span>
-                    <span>{pending.length}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {pending.map((action, index) => (
-                      <div key={`${action.name}-${index}`} className="rounded-xl border border-amber-500/30 bg-black/10 p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="font-semibold text-amber-100">{action.name}</span>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => void confirm(action)}
-                            disabled={sending}
-                            className="flex items-center gap-2"
-                          >
-                            <CheckCircle2 size={14} /> Confirm
-                          </Button>
-                        </div>
-                        <pre className="max-h-40 overflow-auto rounded bg-black/20 px-2 py-1 text-[10px] text-amber-200">
-                          {JSON.stringify(action.arguments, null, 2)}
-                        </pre>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {loadingMessages ? (
-                <LoadingState label="Loading conversation..." />
-              ) : messages.length === 0 ? (
-                <div className="flex h-full min-h-[280px] items-center justify-center rounded-2xl border border-dashed border-[--color-border] bg-[--color-surface-2]/40 p-8 text-center text-sm font-mono text-[--color-text-muted]">
-                  {activeThread
-                    ? 'No messages yet. Say hello to your analyst assistant.'
-                    : 'Select a thread or create a new one to begin.'}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {messages.map((entry) => (
-                    <MessageBubble key={entry.id} entry={entry} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-[--color-border] bg-[--color-surface] px-6 py-4">
-              <div className="rounded-2xl border border-[--color-border] bg-[--color-surface-2] p-3 shadow-inner">
-                <Textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={handleDraftKeyDown}
-                  placeholder={isUnlocked ? 'Ask Atlas anything about your fleet…' : 'Unlock your key to enable the composer.'}
-                  rows={3}
-                  className="resize-none border-none bg-transparent text-sm focus:outline-none"
-                  spellCheck={false}
-                  disabled={isComposerDisabled}
-                />
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-[10px] font-mono text-[--color-text-dim]">
-                    Press <span className="rounded bg-[--color-surface] px-1">Shift</span> + <span className="rounded bg-[--color-surface] px-1">Enter</span> for a newline
-                  </div>
-                  <Button
-                    variant="primary"
-                    onClick={() => void handleSend()}
-                    disabled={isComposerDisabled || !draft.trim()}
-                    className="flex items-center gap-2"
-                  >
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send size={16} />}
-                    Send
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
+          )}
         </div>
       </div>
-    </div>
+
+      {/* Main Content */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-6 py-4 flex-shrink-0">
+          <div className="flex items-center gap-4 min-w-0">
+            {!sidebarOpen && (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="text-zinc-400 hover:text-white flex-shrink-0"
+                aria-label="Open sidebar"
+              >
+                <Menu size={20} />
+              </button>
+            )}
+            <div className="min-w-0">
+              <h1 className="text-base font-semibold text-white truncate">
+                {activeThread?.title?.trim() || 'AI Analyst'}
+              </h1>
+              <p className="text-xs text-zinc-500 truncate">
+                {activeThread
+                  ? `Last activity ${timeAgo(activeThread.updated_at)}`
+                  : 'Select a conversation or start a new one'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={openSettings}
+            className="text-zinc-400 transition hover:text-white flex-shrink-0 ml-4"
+            aria-label="Settings"
+          >
+            <Settings size={20} />
+          </button>
+        </div>
+
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto px-6 py-6 min-h-0" ref={scrollRef}>
+          {error && (
+            <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <p className="font-semibold">Error</p>
+              <p className="mt-1">{error}</p>
+            </div>
+          )}
+
+          {(!hasStoredKey || !isUnlocked) && (
+            <div
+              className={clsx(
+                'mb-4 rounded-lg border px-4 py-3 text-sm',
+                hasStoredKey
+                  ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                  : 'border-red-500/40 bg-red-500/10 text-red-300'
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <KeyRound size={16} />
+                <span>
+                  {hasStoredKey
+                    ? 'Unlock your key in settings to send messages.'
+                    : 'Store an API key in settings to start chatting.'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {pending.length > 0 && (
+            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-semibold text-amber-300">Pending Actions</span>
+                <span className="text-xs text-amber-300">({pending.length})</span>
+              </div>
+              <div className="space-y-2">
+                {pending.map((action, idx) => (
+                  <div
+                    key={`${action.name}-${idx}`}
+                    className="rounded-lg border border-amber-500/20 bg-black/20 p-3"
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-amber-200">
+                        {action.name}
+                      </span>
+                      <button
+                        onClick={() => void confirm(action)}
+                        disabled={sending}
+                        className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        Confirm
+                      </button>
+                    </div>
+                    <pre className="max-h-32 overflow-auto rounded bg-black/40 px-2 py-1 text-[10px] text-amber-100">
+                      {JSON.stringify(action.arguments, null, 2)}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {loadingMessages ? (
+            <div className="flex h-96 items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <Loader2
+                  size={28}
+                  className="animate-spin text-zinc-500"
+                />
+                <p className="text-sm text-zinc-500">Loading conversation...</p>
+              </div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex h-96 items-center justify-center rounded-lg border border-dashed border-zinc-700 bg-zinc-800/50">
+              <div className="text-center">
+                <p className="text-sm font-medium text-zinc-300">
+                  {activeThread
+                    ? 'No messages yet'
+                    : 'Select a conversation to get started'}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {activeThread && 'Say hello to start chatting'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((entry) => (
+                <ChatMessage key={entry.id} entry={entry} />
+              ))}
+              {sending && <TypingIndicator />}
+            </div>
+          )}
+        </div>
+
+        {/* Composer */}
+        <div className="border-t border-zinc-800 px-6 py-4 bg-zinc-900 flex-shrink-0">
+          <div className="space-y-2">
+            <div className="relative rounded-xl border border-zinc-700 bg-zinc-800">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleDraftKeyDown}
+                placeholder={
+                  isUnlocked
+                    ? 'Ask anything about your fleet…'
+                    : 'Unlock your key to chat'
+                }
+                disabled={isComposerDisabled}
+                rows={3}
+                className="w-full resize-none border-none bg-transparent px-4 py-3 pr-24 text-sm text-white placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+                spellCheck={false}
+              />
+              <button
+                onClick={() => void handleSend()}
+                disabled={isComposerDisabled || !draft.trim()}
+                className="absolute bottom-3 right-3 flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-40"
+              >
+                {sending ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send size={16} />
+                    Send
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500">
+              <span className="rounded bg-zinc-800 px-1.5 py-0.5">Shift</span> +{' '}
+              <span className="rounded bg-zinc-800 px-1.5 py-0.5">Enter</span> for new line
+            </p>
+          </div>
+        </div>
+      </div>
+      {settingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+          onClick={closeSettings}
+        >
+          <div
+            className="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-white">ATLAS-AI Settings</h2>
+                <p className="mt-1 text-xs text-zinc-500">Manage encrypted keys and runtime options.</p>
+              </div>
+              <button
+                onClick={closeSettings}
+                className="rounded-full p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
+                aria-label="Close settings"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[80vh] overflow-y-auto px-6 py-6 space-y-6">
+              <section className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Key Status</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  {keyLoading ? (
+                    <span className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300">
+                      <Loader2 size={14} className="animate-spin" />
+                      Checking...
+                    </span>
+                  ) : isUnlocked ? (
+                    <span className="flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300">
+                      <CheckCircle2 size={14} />
+                      Unlocked
+                    </span>
+                  ) : hasStoredKey ? (
+                    <span className="flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
+                      <Lock size={14} />
+                      Locked
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
+                      <KeyRound size={14} />
+                      No Key
+                    </span>
+                  )}
+                  <button
+                    onClick={() => void refreshKeyStatus()}
+                    className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-700"
+                  >
+                    <RefreshCw size={14} /> Refresh
+                  </button>
+                </div>
+              </section>
+
+              {keyFormError && (
+                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                  {keyFormError}
+                </div>
+              )}
+
+              <section className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <h3 className="text-sm font-semibold text-white">Unlock Key</h3>
+                  {unlockExpiresAt && (
+                    <span className="text-xs text-zinc-400">
+                      Expires {new Date(unlockExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                    Passphrase
+                  </label>
+                  <input
+                    type="password"
+                    value={unlockInput}
+                    onChange={(e) => setUnlockInput(e.target.value)}
+                    placeholder="Enter passphrase"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+                  />
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      onClick={() => void handleUnlock()}
+                      disabled={keyWorking || !hasStoredKey}
+                      className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {keyWorking ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 size={14} className="animate-spin" />
+                          Working...
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center gap-2">
+                          <Unlock size={14} /> Unlock
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => void lockKey()}
+                      disabled={keyWorking || !isUnlocked}
+                      className="flex-1 rounded-lg bg-zinc-800 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+                    >
+                      <span className="flex items-center justify-center gap-2">
+                        <Lock size={14} /> Lock
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
+                <h3 className="text-sm font-semibold text-white">Store API Key</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                      Provider
+                    </label>
+                    <select
+                      value={provider}
+                      onChange={(e) => setProvider(e.target.value as typeof provider)}
+                      className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:border-zinc-600 focus:outline-none"
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="local">Local</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                      Model
+                    </label>
+                    <input
+                      type="text"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder={provider === 'openai' ? 'e.g. gpt-4o-mini' : 'e.g. llama-3'}
+                      className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                {provider === 'local' && (
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                      Base URL
+                    </label>
+                    <input
+                      type="text"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder="https://model-host/v1"
+                      className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                )}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                      API Key
+                    </label>
+                    <input
+                      type="password"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                      Passphrase (to encrypt key)
+                    </label>
+                    <input
+                      type="password"
+                      value={passphraseInput}
+                      onChange={(e) => setPassphraseInput(e.target.value)}
+                      placeholder="Enter a secure passphrase"
+                      className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={() => void handleStoreKey()}
+                    disabled={
+                      keyWorking ||
+                      !apiKeyInput.trim() ||
+                      !passphraseInput.trim() ||
+                      (provider === 'local' && !baseUrl.trim())
+                    }
+                    className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {keyWorking ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 size={14} className="animate-spin" />
+                        Storing...
+                      </span>
+                    ) : (
+                      'Store Key'
+                    )}
+                  </button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>,
+    document.body
   )
 }
 
-function MessageBubble({ entry }: { entry: ChatEntry }) {
+function ChatMessage({ entry }: { entry: ChatEntry }) {
   const isUser = entry.role === 'user'
   const createdAt = entry.created_at ? timeAgo(entry.created_at) : null
 
@@ -670,32 +850,37 @@ function MessageBubble({ entry }: { entry: ChatEntry }) {
     <div className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
         className={clsx(
-          'max-w-[min(85%,720px)] rounded-3xl border px-4 py-4 shadow-lg transition',
+          'max-w-2xl rounded-lg px-4 py-3',
           isUser
-            ? 'border-[--color-border]/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.18),rgba(12,17,23,0.85))] text-[--color-text]'
-            : 'border-[#2c3448] bg-[linear-gradient(135deg,rgba(12,19,35,0.92),rgba(20,27,43,0.88))] text-[--color-text] backdrop-blur-sm',
+            ? 'rounded-br-none bg-blue-600 text-white'
+            : 'rounded-bl-none border border-zinc-700 bg-zinc-800 text-zinc-100'
         )}
       >
-        <div className="mb-2 flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.3em] text-[--color-text-dim]">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-[--color-border] bg-black/20 text-[--color-text]">
-            {isUser ? <User size={14} /> : <Bot size={14} />}
+        <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-700">
+            {isUser ? (
+              <User size={12} />
+            ) : (
+              <Bot size={12} className="text-blue-400" />
+            )}
           </span>
-          <span>{entry.role}</span>
-          {createdAt && <span className="lowercase text-[--color-text-muted]">{createdAt}</span>}
+          <span className="capitalize">{entry.role}</span>
+          {createdAt && <span className="text-zinc-500">{createdAt}</span>}
         </div>
         {entry.content && (
-          <AtlasAiMarkdown className="space-y-3 text-sm leading-relaxed text-[--color-text]">
-            {entry.content}
-          </AtlasAiMarkdown>
+          <div className="prose prose-invert max-w-none space-y-2 text-sm">
+            <AtlasAiMarkdown>{entry.content}</AtlasAiMarkdown>
+          </div>
         )}
         {entry.role === 'assistant' && entry.content && (
-          <div className="mt-3 flex justify-end">
+          <div className="mt-2 flex justify-end">
             <CopyButton
               variant="ghost"
               size="sm"
               iconSize={14}
               text={entry.content}
-              aria-label="Copy assistant response"
+              aria-label="Copy"
+              className="text-zinc-400 hover:text-white"
             />
           </div>
         )}
@@ -704,11 +889,24 @@ function MessageBubble({ entry }: { entry: ChatEntry }) {
   )
 }
 
-function MessageHeaderIcon() {
+function TypingIndicator() {
   return (
-    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[--color-border] bg-[--color-surface] text-[--color-text]">
-      <Clock size={14} />
-    </span>
+    <div className="flex items-end gap-2">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800">
+        <Bot size={14} className="text-blue-400" />
+      </div>
+      <div className="flex gap-1 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3">
+        <div className="h-2 w-2 animate-bounce rounded-full bg-zinc-500" />
+        <div
+          className="h-2 w-2 animate-bounce rounded-full bg-zinc-500"
+          style={{ animationDelay: '0.1s' }}
+        />
+        <div
+          className="h-2 w-2 animate-bounce rounded-full bg-zinc-500"
+          style={{ animationDelay: '0.2s' }}
+        />
+      </div>
+    </div>
   )
 }
 

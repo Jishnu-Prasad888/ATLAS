@@ -281,6 +281,8 @@ export function AtlasAiPanel() {
     </span>
   )
 
+  const hideToggle = location.pathname.startsWith('/ai-analyst')
+
   const panelInner = (
     <div
       id="atlas-ai-panel"
@@ -694,20 +696,22 @@ export function AtlasAiPanel() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={toggle}
-        className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full bg-[--color-surface] border border-[--color-border] px-3 py-2 text-xs font-mono text-[--color-text] shadow-lg hover:border-[--color-border-strong]"
-        aria-label="Toggle ATLAS-AI"
-      >
-        <MessageCircle size={16} />
-        ATLAS-AI
-        {pending.length > 0 && (
-          <span className="ml-1 rounded-full bg-amber-500/20 text-amber-300 px-2 py-0.5 text-[10px] border border-amber-500/30">
-            {pending.length}
-          </span>
-        )}
-      </button>
+      {!hideToggle && (
+        <button
+          type="button"
+          onClick={toggle}
+          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full bg-[--color-surface] border border-[--color-border] px-3 py-2 text-xs font-mono text-[--color-text] shadow-lg hover:border-[--color-border-strong]"
+          aria-label="Toggle ATLAS-AI"
+        >
+          <MessageCircle size={16} />
+          ATLAS-AI
+          {pending.length > 0 && (
+            <span className="ml-1 rounded-full bg-amber-500/20 text-amber-300 px-2 py-0.5 text-[10px] border border-amber-500/30">
+              {pending.length}
+            </span>
+          )}
+        </button>
+      )}
 
       {open && (modalMode ? <div className={panelWrapperClass}>{panelInner}</div> : panelInner)}
     </div>
