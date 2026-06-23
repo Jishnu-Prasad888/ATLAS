@@ -113,26 +113,34 @@ interface SectionHeaderProps {
   count?: number | string
   right?: React.ReactNode
   color?: string
+  description?: string
 }
-export function SectionHeader({ title, count, right, color = '#3a4555' }: SectionHeaderProps) {
+export function SectionHeader({ title, count, right, color = '#3a4555', description }: SectionHeaderProps) {
   const { palette: c } = useTheme()
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-      <Text style={{
-        fontSize: 10, color: color || c.textMuted, fontFamily: 'SpaceMono-Regular',
-        textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700',
-      }}>
-        {title}
-      </Text>
-      {count != null && (
-        <View style={{
-          marginLeft: 8, backgroundColor: c.surface2, borderWidth: 1,
-          borderColor: c.border, borderRadius: 20, paddingHorizontal: 6, paddingVertical: 1,
+    <View style={{ marginBottom: description ? 12 : 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={{
+          fontSize: 10, color: color || c.textMuted, fontFamily: 'SpaceMono-Regular',
+          textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700',
         }}>
-          <Text style={{ fontSize: 9, color: c.textMuted, fontFamily: 'SpaceMono-Regular' }}>{count}</Text>
-        </View>
+          {title}
+        </Text>
+        {count != null && (
+          <View style={{
+            marginLeft: 8, backgroundColor: c.surface2, borderWidth: 1,
+            borderColor: c.border, borderRadius: 20, paddingHorizontal: 6, paddingVertical: 1,
+          }}>
+            <Text style={{ fontSize: 9, color: c.textMuted, fontFamily: 'SpaceMono-Regular' }}>{count}</Text>
+          </View>
+        )}
+        {right && <View style={{ marginLeft: 'auto' }}>{right}</View>}
+      </View>
+      {description && (
+        <Text style={{ fontSize: 11, color: c.textMuted, fontFamily: 'SpaceMono-Regular', marginTop: 4 }}>
+          {description}
+        </Text>
       )}
-      {right && <View style={{ marginLeft: 'auto' }}>{right}</View>}
     </View>
   )
 }
@@ -151,12 +159,17 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 
 // ─── EmptyState ───────────────────────────────────────────────────────────────
 
-export function EmptyState({ label = 'No data', icon = '○' }: { label?: string; icon?: string }) {
+export function EmptyState({ label = 'No data', detail, icon = '○' }: { label?: string; detail?: string; icon?: string }) {
   const { palette: c } = useTheme()
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 32 }}>
       <Text style={{ fontSize: 28, color: c.textMuted }}>{icon}</Text>
       <Text style={{ color: c.textMuted, fontSize: 12, fontFamily: 'SpaceMono-Regular' }}>{label}</Text>
+      {detail && (
+        <Text style={{ color: c.textDim, fontSize: 10, fontFamily: 'SpaceMono-Regular', textAlign: 'center', paddingHorizontal: 12 }}>
+          {detail}
+        </Text>
+      )}
     </View>
   )
 }
@@ -194,13 +207,50 @@ interface MonoTextProps {
   size?: number
   color?: string
   style?: object
+  numberOfLines?: number
 }
-export function MonoText({ children, size = 12, color, style }: MonoTextProps) {
+export function MonoText({ children, size = 12, color, style, numberOfLines }: MonoTextProps) {
   const { palette: c } = useTheme()
   return (
-    <Text style={[{ fontSize: size, color: color ?? c.text, fontFamily: 'SpaceMono-Regular' }, style]}>
+    <Text
+      style={[{ fontSize: size, color: color ?? c.text, fontFamily: 'SpaceMono-Regular' }, style]}
+      numberOfLines={numberOfLines}
+    >
       {children}
     </Text>
+  )
+}
+
+// ─── Toggle ─────────────────────────────────────────────────────────────────
+
+export function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  const { palette: c } = useTheme()
+  return (
+    <TouchableOpacity
+      onPress={() => onChange(!checked)}
+      activeOpacity={0.8}
+      disabled={disabled}
+      style={{
+        width: 44,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: checked ? c.primary : c.border,
+        backgroundColor: checked ? c.primary + '33' : c.surface2,
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+      }}
+    >
+      <View
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: 9,
+          backgroundColor: checked ? c.primary : c.textMuted,
+          alignSelf: checked ? 'flex-end' : 'flex-start',
+        }}
+      />
+    </TouchableOpacity>
   )
 }
 

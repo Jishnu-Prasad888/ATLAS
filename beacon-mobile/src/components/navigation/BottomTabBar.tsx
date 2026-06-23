@@ -12,7 +12,8 @@ import { useTheme } from '@/theme'
 export interface BottomTabItem<T extends string = string> {
   id: T
   label: string
-  icon: string
+  icon?: string
+  renderIcon?: (color: string) => React.ReactNode
 }
 
 interface BottomTabBarProps<T extends string = string> {
@@ -103,6 +104,19 @@ export function BottomTabBar<T extends string = string>({
         >
           {tabs.map(tab => {
             const isActive = tab.id === active
+            const iconColor = isActive ? '#FFFFFF' : c.textMuted
+            const iconElement = tab.renderIcon
+              ? tab.renderIcon(iconColor)
+              : (
+                <Text
+                  style={{
+                    fontSize: 16,
+                    color: iconColor,
+                  }}
+                >
+                  {tab.icon}
+                </Text>
+              )
 
             return (
               <Pressable
@@ -129,16 +143,7 @@ export function BottomTabBar<T extends string = string>({
                       : 'transparent',
                   }}
                 >
-                  <Text
-                    style={{
-                      fontSize: 16,
-                      color: isActive
-                        ? '#FFFFFF'
-                        : c.textMuted,
-                    }}
-                  >
-                    {tab.icon}
-                  </Text>
+                  {iconElement}
 
                   <Text
                     numberOfLines={1}

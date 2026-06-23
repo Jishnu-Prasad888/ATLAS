@@ -5,6 +5,7 @@ import {
   TelemetryQueryParams, LogEntry, LogQueryParams,
   LogSource, LogSeverity,
   AuditLog, AuditQueryParams, ServerConfig, RetentionPolicy,
+  RegistrationRequest, Organization,
 } from '@/types'
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -60,6 +61,9 @@ export const agentsApi = {
 
   disable: (agentId: string) =>
     getApiClient().post<Agent>(`/agents/${agentId}/disable/`),
+
+  killProcess: (agentId: string, pid: number) =>
+    getApiClient().post<{ status: string; request_id?: number; pid: number }>(`/agents/${agentId}/kill_process/`, { pid }),
 
   collectorsHealth: (agentId: string, data: { collector: string; status: string; last_run?: string; last_success?: string; last_failure?: string; failure_count?: number }) =>
     getApiClient().post(`/agents/${agentId}/collectors/health/`, data),
@@ -136,23 +140,41 @@ export const usersApi = {
   get: (id: number) =>
     getApiClient().get<User>(`/users/${id}/`),
 
-  create: (data: { username: string; email?: string; password: string; role?: Role }) =>
+  create: (data: { username: string; email?: string; password: string; role: Role; access_all_agents?: boolean; agent_ids?: string[]; organization_ids?: number[]; approval_status?: 'approved' | 'pending' | 'rejected'; start_at?: string | null; expires_at?: string | null }) =>
     getApiClient().post<User>('/users/', data),
 
-  update: (id: number, data: Partial<User>) =>
+  update: (id: number, data: Partial<Pick<User, 'email' | 'is_active'>>) =>
     getApiClient().patch<User>(`/users/${id}/`, data),
 
   delete: (id: number) =>
     getApiClient().delete(`/users/${id}/`),
 
-  setRole: (id: number, role: Role) =>
+  assignRole: (id: number, role: Role) =>
     getApiClient().post<User>(`/users/${id}/role/`, { role }),
 
   enable: (id: number) =>
-    getApiClient().post<User>(`/users/${id}/enable/`),
+    getApiClient().post<User>(`/users/${id}/enable/`, {}),
 
   disable: (id: number) =>
-    getApiClient().post<User>(`/users/${id}/disable/`),
+    getApiClient().post<User>(`/users/${id}/disable/`, {}),
+
+  registrations: () =>
+    getApiClient().get<RegistrationRequest[]>('/users/registrations/'),
+
+  decideRegistration: (id: number, payload: { action: 'approve' | 'reject'; role?: Role; access_all_agents?: boolean; agent_ids?: string[]; organization_ids?: number[]; start_at?: string | null; expires_at?: string | null }) =>
+    getApiClient().post(`/users/registrations/${id}/decision/`, payload),
+
+  organizations: () =>
+    getApiClient().get<Organization[]>('/users/organizations/'),
+
+  createOrganization: (data: { name: string; description?: string; agent_ids?: string[] }) =>
+    getApiClient().post<Organization>('/users/organizations/', data),
+
+  updateOrganization: (id: number, data: { name?: string; description?: string; agent_ids?: string[] }) =>
+    getApiClient().patch<Organization>(`/users/organizations/${id}/`, data),
+
+  deleteOrganization: (id: number) =>
+    getApiClient().delete(`/users/organizations/${id}/`),
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -221,4 +243,75 @@ export const dashboardApi = {
       logs_last_hour: logsCount,
     }
   },
+}
+
+// ─── Commander (AI Analyst) ───────────────────────────────────────────────────
+
+export type CommanderMessageRole = 'system' | 'user' | 'assistant' | 'tool'
+
+export interface CommanderToolCall {
+  id?: string
+  type?: string
+  function?: { name?: string; arguments?: string }
+}
+
+export interface CommanderMessage {
+  role: CommanderMessageRole
+  content?: string
+  name?: string
+  tool_call_id?: string
+  tool_calls?: CommanderToolCall[]
+}
+
+export interface CommanderResponse {
+  transcript: Array<{
+    role: CommanderMessageRole
+    content?: string
+    name?: string
+    tool_calls?: CommanderToolCall[]
+    tool_call_id?: string
+  }>
+}
+
+export const commanderApi = {
+  chat: (payload: { messages: CommanderMessage[]; question?: string; apiKey?: string; provider?: 'openai' | 'local'; model?: string; baseUrl?: string }) =>
+    getApiClient().post<CommanderResponse>('/ai/commander/', {
+      messages: payload.messages,
+      question: payload.question,
+      api_key: payload.apiKey,
+      provider: payload.provider,
+      model: payload.model,
+      base_url: payload.baseUrl,
+    }),
+}
+
+// ─── AI Workbench ─────────────────────────────────────────────────────────────
+
+export interface AiRunPayload {
+  fetch: {
+    url: string
+    params?: Record<string, unknown>
+    method?: 'GET' | 'POST' | 'PUT' | 'PATCH'
+  }
+  code: string
+  input_data?: Record<string, unknown>
+  timeout_s?: number
+  mem_limit?: string
+  cpu_quota?: number
+  retries?: number
+}
+
+export interface AiRunResponse {
+  duration_ms: number
+  fetch_result: Record<string, unknown>
+  exec_result: {
+    exit_code?: number
+    stdout?: string
+    output_json?: unknown
+  }
+}
+
+export const aiApi = {
+  runGraph: (payload: AiRunPayload) =>
+    getApiClient().post<AiRunResponse>('/ai/run-graph/', payload),
 }

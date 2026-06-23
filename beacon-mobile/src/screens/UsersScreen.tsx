@@ -15,7 +15,9 @@ import { useTheme } from '@/theme'
 
 const ROLE_COLORS: Record<Role, string> = {
   administrator: '#a855f7',
+  moderator: '#38bdf8',
   viewer: '#6b7280',
+  guest: '#94a3b8',
 }
 
 function UserCard({ user, onAction }: { user: User; onAction: (u: User) => void }) {
@@ -87,6 +89,15 @@ export function UsersScreen() {
     onError: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
   })
 
+  const roleMut = useMutation({
+    mutationFn: ({ id, role }: { id: number; role: Role }) => usersApi.assignRole(id, role),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    },
+    onError: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+  })
+
   const handleAction = useCallback((user: User) => {
     if (!isAdmin) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
@@ -112,15 +123,15 @@ export function UsersScreen() {
     if (!actionUser) return
     const target = actionUser
     closeActions()
-    const roles: Role[] = ['administrator', 'viewer']
+    const roles: Role[] = ['administrator', 'moderator', 'viewer', 'guest']
     Alert.alert('Change Role', `Current: ${target.role}`, [
       ...roles.map(r => ({
         text: r,
-        onPress: () => updateMut.mutate({ id: target.id, data: { role: r } }),
+        onPress: () => roleMut.mutate({ id: target.id, role: r }),
       })),
       { text: 'Cancel', style: 'cancel' as const },
     ])
-  }, [actionUser, closeActions, updateMut])
+  }, [actionUser, closeActions, roleMut])
 
   const handleDelete = useCallback(() => {
     if (!actionUser) return

@@ -13,6 +13,18 @@ export function formatPct(v: number | null | undefined, decimals = 1): string {
   return v.toFixed(decimals) + '%'
 }
 
+export function formatBandwidth(bytesPerSec: number | null | undefined): string {
+  if (bytesPerSec == null || Number.isNaN(bytesPerSec)) return '–'
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s']
+  let value = Math.max(bytesPerSec, 0)
+  let idx = 0
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024
+    idx += 1
+  }
+  return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`
+}
+
 export function timeAgo(ts: string | null | undefined): string {
   if (!ts) return '–'
   try {

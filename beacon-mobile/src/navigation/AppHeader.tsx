@@ -3,15 +3,28 @@ import { View, Text } from 'react-native'
 import { useTheme } from '@/theme'
 
 export type TabId =
-  | 'dashboard' | 'agents' | 'metrics' | 'logs'
-  | 'health' | 'operations' | 'audit' | 'users' | 'settings' | 'config'
+  | 'dashboard'
+  | 'agents'
+  | 'metrics'
+  | 'logs'
+  | 'health'
+  | 'operations'
+  | 'audit'
+  | 'users'
+  | 'settings'
+  | 'config'
+  | 'organizations'
+  | 'reports'
+  | 'ai-analyst'
+  | 'ai-workbench'
 
 export interface TabDef {
   id: TabId
   label: string
-  icon: string
-  adminOnly?: boolean
-  operatorPlus?: boolean
+  icon?: string
+  renderIcon?: (color: string) => React.ReactNode
+  allowedRoles?: string[]
+  requiresApproval?: boolean
 }
 
 export function AppHeader({ tab }: { tab: TabDef }) {
@@ -27,6 +40,10 @@ export function AppHeader({ tab }: { tab: TabDef }) {
     users: '#ec4899',
     config: '#f59e0b',
     settings: '#64748b',
+    organizations: '#34d399',
+    reports: '#38bdf8',
+    'ai-analyst': '#f472b6',
+    'ai-workbench': '#a855f7',
   }
 
   const accent = accentMap[tab.id] ?? '#3b82f6'
@@ -56,14 +73,18 @@ export function AppHeader({ tab }: { tab: TabDef }) {
           marginRight: 14,
         }}
       >
-        <Text
-          style={{
-            fontSize: 18,
-            color: accent,
-          }}
-        >
-          {tab.icon}
-        </Text>
+        {tab.renderIcon ? (
+          tab.renderIcon(accent)
+        ) : (
+          <Text
+            style={{
+              fontSize: 18,
+              color: accent,
+            }}
+          >
+            {tab.icon}
+          </Text>
+        )}
       </View>
 
       <View style={{ flex: 1 }}>

@@ -11,7 +11,10 @@ import { useTheme } from '@/theme'
 
 function AgentCard({ agent }: { agent: Agent }) {
   const color = statusColor(agent.status)
-  const failedCols = agent.collector_health.filter(c => c.status !== 'ok' && c.status !== 'healthy').length
+  const failedCols = agent.collector_health.filter((c) => {
+    const status = c.status?.toLowerCase?.() ?? ''
+    return status !== 'ok' && status !== 'healthy'
+  }).length
 
   return (
     <Card style={{ marginBottom: 10 }}>
@@ -44,13 +47,15 @@ function AgentCard({ agent }: { agent: Agent }) {
           </View>
           <View style={{ borderTopWidth: 1, borderTopColor: '#1e252e' }}>
             {agent.collector_health.map((col, i) => {
-              const ok = col.status === 'ok' || col.status === 'healthy'
-              const c = ok ? '#22c55e' : col.status === 'running' ? '#3b82f6' : '#ef4444'
-              return (
-                <View key={col.collector + i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 }}>
-                  <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: c }} />
-                  <MonoText size={11} style={{ flex: 1 }}>{col.collector}</MonoText>
-                  <MonoText size={10} color={c}>{col.status}</MonoText>
+               const normalized = col.status?.toLowerCase?.() ?? ''
+               const ok = normalized === 'ok' || normalized === 'healthy'
+               const running = normalized === 'running'
+               const c = ok ? '#22c55e' : running ? '#3b82f6' : '#ef4444'
+               return (
+                 <View key={col.collector + i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 }}>
+                   <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: c }} />
+                   <MonoText size={11} style={{ flex: 1 }}>{col.collector}</MonoText>
+                   <MonoText size={10} color={c}>{col.status}</MonoText>
                   {col.failure_count > 0 && (
                     <View style={{ backgroundColor: '#2a0f0f', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 }}>
                       <MonoText size={9} color="#ef4444">{col.failure_count} fail</MonoText>

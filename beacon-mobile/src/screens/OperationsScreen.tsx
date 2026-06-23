@@ -12,7 +12,7 @@ import { Agent, Metric, LogEntry } from '@/types'
 import {
   Card, SectionHeader, MonoText, LoadingState, EmptyState, Badge, StatusDot,
 } from '@/components/common'
-import { statusColor, severityColor, timeAgo, formatTs, formatBytes, formatPct } from '@/utils/format'
+import { statusColor, severityColor, timeAgo, formatTs, formatBytes, formatPct, formatBandwidth } from '@/utils/format'
 import { useTheme } from '@/theme'
 
 const DOCKER_SOURCES = new Set(['docker', 'docker_engine'])
@@ -148,6 +148,34 @@ function KubernetesCard({ metric, loading }: { metric?: Metric; loading: boolean
   )
 }
 
+function NetworkOverviewCard({ metric, loading }: { metric?: Metric; loading: boolean }) {
+  const data = metric?.data as Record<string, any> | undefined
+  const interfaces: Array<Record<string, any>> = data?.interfaces ?? []
+
+  return (
+    <Card>
+      <SectionHeader title="Network" right={metric ? <MonoText size={9} color="#3a4555">{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null} />
+      {loading ? (
+        <LoadingState label="Loading network…" />
+      ) : !interfaces.length ? (
+        <EmptyState label="No network data" icon="⇄" />
+      ) : (
+        <View style={{ gap: 10 }}>
+          {interfaces.map((iface) => (
+            <View key={iface.name} style={{ borderWidth: 1, borderColor: '#1e252e', borderRadius: 10, padding: 10, gap: 6 }}>
+              <MonoText size={12} color="#d4dae3" style={{ fontWeight: '600' }}>{iface.name}</MonoText>
+              <LabeledStat label="RX" value={formatBytes(iface.rx_bytes ?? 0)} accent="#22c55e" />
+              <LabeledStat label="RX rate" value={formatBandwidth(iface.rx_bytes_rate ?? 0)} />
+              <LabeledStat label="TX" value={formatBytes(iface.tx_bytes ?? 0)} accent="#3b82f6" />
+              <LabeledStat label="TX rate" value={formatBandwidth(iface.tx_bytes_rate ?? 0)} />
+            </View>
+          ))}
+        </View>
+      )}
+    </Card>
+  )
+}
+
 export function OperationsScreen() {
   const qc = useQueryClient()
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
@@ -182,6 +210,7 @@ export function OperationsScreen() {
 
   const dockerMetric = metricsQ.data?.docker as Metric | undefined
   const k8sMetric = metricsQ.data?.kubernetes as Metric | undefined
+  const networkMetric = metricsQ.data?.network as Metric | undefined
 
   const filteredLogs = useMemo(() => {
     const logs = logsQ.data ?? []
@@ -264,6 +293,8 @@ export function OperationsScreen() {
           <DockerCard metric={dockerMetric} loading={metricsQ.isLoading} />
           <KubernetesCard metric={k8sMetric} loading={metricsQ.isLoading} />
         </View>
+
+        <NetworkOverviewCard metric={networkMetric} loading={metricsQ.isLoading} />
 
         {/* Logs */}
         <Card style={{ padding: 0 }}>
