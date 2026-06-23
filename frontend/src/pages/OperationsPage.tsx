@@ -682,11 +682,11 @@ export function OperationsPage() {
   ]
 
   return (
-    <div className="atlas-dash flex flex-col" style={{ height: '100%', color: 'var(--color-text)', margin: '0 -2rem', width: 'calc(100% + 4rem)' }}>
+    <>
       <style>{CSS}</style>
-        <PageHeader
-          title="Operations"
-          subtitle="Docker, Kubernetes & Network"
+      <PageHeader
+        title="Operations"
+        subtitle="Docker, Kubernetes & Network"
         actions={
           <div className="flex items-center gap-3">
             <span className="text-[10px] font-mono text-[--color-text-dim]">
@@ -782,6 +782,6 @@ export function OperationsPage() {
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }

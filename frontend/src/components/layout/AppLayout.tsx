@@ -20,7 +20,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
         )}
         style={aiOpen ? { paddingRight: panelWidth + 24 } : undefined}
       >
-        <div className="p-4 md:p-6 max-w-screen-2xl mx-auto">{children}</div>
+        <div className="atlas-shell max-w-screen-2xl mx-auto">
+          <div className="atlas-shell__surface">
+            <div className="atlas-shell__content atlas-dash">
+              {children}
+            </div>
+          </div>
+        </div>
       </main>
       <NotificationStack />
       <AtlasAiPanel />

@@ -35,3 +35,12 @@ dummy creds for frontend for testing :
 
 test
 test
+
+Sandbox notes
+- `run_code` tool executes inside the ephemeral sandbox container (`atlas-sandbox`) with 256 MiB RAM, ~15s CPU, no outbound network.
+- Artifacts larger than ~2 MB are rejected; keep uploads small or stream results.
+- Temporary files live under `/tmp/sandbox` and are wiped after each run, so persist anything important externally before the sandbox exits.
+- Build/update sandbox image:
+  - `cd beacon-platform/server/sandbox`
+  - `docker build -t sandbox-python:1.0 .`
+  - (optional) `docker push <registry>/sandbox-python:1.0`
