@@ -348,7 +348,15 @@ def _tool_agents_list(args: Dict[str, Any], request: Any | None = None) -> Any:
     params = {
         "status": args.get("status"),
         "tag": args.get("tag"),
+        "q": args.get("search") or args.get("query"),
     }
+    limit_arg = args.get("limit")
+    if limit_arg is not None:
+        try:
+            limit_int = max(1, min(int(limit_arg), 500))
+            params["limit"] = str(limit_int)
+        except (TypeError, ValueError):
+            pass
     result = _call_ops_view(
         AgentListView,
         request,
@@ -798,6 +806,7 @@ TOOL_SPECS = [
                 "properties": {
                     "status": {"type": "string", "description": "Filter by agent status"},
                     "tag": {"type": "string", "description": "Filter by tag"},
+                    "search": {"type": "string", "description": "Filter by hostname, agent_id, OS, or tag"},
                     "limit": {"type": "integer", "default": 200, "description": "Maximum agents to return (<=500)"},
                 },
                 "required": [],

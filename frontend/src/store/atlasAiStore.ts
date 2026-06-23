@@ -13,6 +13,16 @@ import { env } from '@/config/env'
 
 const getErrorMessage = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
+const MAX_HISTORY_MESSAGES = 12
+const MAX_COMMANDER_MESSAGE_CHARS = 4000
+const MAX_SAVED_ASSISTANT_CHARS = 6000
+
+function truncateMessage(content: string, limit: number): string {
+  if (!content) return content
+  if (content.length <= limit) return content
+  return `${content.slice(0, limit)}\n\n…[truncated ${content.length - limit} chars]`
+}
+
 export type ChatRole = AtlasAiMessage['role']
 
 export interface ChatEntry {
@@ -357,12 +367,13 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       }
 
       const existing = get().threadMessages[threadId] ?? get().messages
-      const userMsg: ChatEntry = { id: `m-${++idCounter}`, role: 'user', content: trimmed, created_at: new Date().toISOString() }
+      const userContent = truncateMessage(trimmed, MAX_COMMANDER_MESSAGE_CHARS)
+      const userMsg: ChatEntry = { id: `m-${++idCounter}`, role: 'user', content: userContent, created_at: new Date().toISOString() }
       let workingMessages = [...existing, userMsg]
       applyThreadState(threadId, workingMessages)
 
       try {
-        const savedUser = await atlasAiApi.appendMessages(threadId, [{ role: 'user', content: trimmed }])
+        const savedUser = await atlasAiApi.appendMessages(threadId, [{ role: 'user', content: userContent }])
         const base = workingMessages.slice(0, workingMessages.length - savedUser.length)
         workingMessages = [...base, ...savedUser.map(mapStoredToChat)]
         applyThreadState(threadId, workingMessages)
@@ -391,13 +402,15 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
           contextParts.push(`UI context: ${serialized.slice(0, 1600)}`)
         }
         if (contextParts.length > 0) {
-          commanderHistory.push({ role: 'system', content: contextParts.join('. ') })
+          const contextMessage = truncateMessage(contextParts.join('. '), MAX_COMMANDER_MESSAGE_CHARS)
+          commanderHistory.push({ role: 'system', content: contextMessage })
         }
 
+        const recentMessages = workingMessages.slice(-MAX_HISTORY_MESSAGES)
         commanderHistory.push(
-          ...workingMessages.map((msg) => ({
+          ...recentMessages.map((msg) => ({
             role: msg.role,
-            content: msg.content,
+            content: truncateMessage(msg.content, MAX_COMMANDER_MESSAGE_CHARS),
           })),
         )
 
@@ -422,7 +435,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
           baseUrl: providerNow === 'local' ? baseUrlNow : undefined,
           question: trimmed,
         })
-        const assistantContent = [...res.transcript].reverse().find((m) => m.role === 'assistant')?.content || 'No response.'
+        const assistantContentRaw = [...res.transcript].reverse().find((m) => m.role === 'assistant')?.content || 'No response.'
+        const assistantContent = truncateMessage(assistantContentRaw, MAX_COMMANDER_MESSAGE_CHARS)
 
         const assistantMsg: ChatEntry = {
           id: `m-${++idCounter}`,
@@ -435,7 +449,8 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
         applyThreadState(threadId, workingMessages, [])
 
         try {
-          const savedAssistant = await atlasAiApi.appendMessages(threadId, [{ role: 'assistant', content: assistantContent }])
+          const savedAssistantContent = truncateMessage(assistantContentRaw, MAX_SAVED_ASSISTANT_CHARS)
+          const savedAssistant = await atlasAiApi.appendMessages(threadId, [{ role: 'assistant', content: savedAssistantContent }])
           const base = workingMessages.slice(0, workingMessages.length - savedAssistant.length)
           workingMessages = [...base, ...savedAssistant.map(mapStoredToChat)]
           applyThreadState(threadId, workingMessages, [])

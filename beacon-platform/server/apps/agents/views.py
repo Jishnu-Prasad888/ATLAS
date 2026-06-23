@@ -3,6 +3,7 @@ Beacon Agents Views — /api/v1/agents/
 """
 import logging
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
@@ -75,6 +76,26 @@ class AgentListView(APIView):
         if status_filter:
             logger.debug("AgentListView filtering by status=%s", status_filter)
             agents = agents.filter(status=status_filter)
+        search = request.query_params.get("q") or request.query_params.get("search")
+        if search:
+            logger.debug("AgentListView searching for=%s", search)
+            agents = agents.filter(
+                Q(hostname__icontains=search)
+                | Q(agent_id__icontains=search)
+                | Q(os__icontains=search)
+                | Q(tags__contains=[search])
+                | Q(tags__contains=[search.lower()])
+                | Q(tags__contains=[search.upper()])
+            )
+        limit_param = request.query_params.get("limit")
+        if limit_param:
+            try:
+                limit_value = max(1, min(int(limit_param), 500))
+                agents = agents.order_by("hostname")[:limit_value]
+            except (TypeError, ValueError):
+                agents = agents.order_by("hostname")
+        else:
+            agents = agents.order_by("hostname")
         logger.debug("AgentListView returning %d agents", agents.count())
         return Response(AgentSerializer(agents, many=True).data)
 
