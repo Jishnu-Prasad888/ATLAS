@@ -106,6 +106,13 @@ const Icon = {
       <path d="M13.3 6.3l-.9-.5a5.4 5.4 0 0 0 0-1.6l.9-.5a.5.5 0 0 0 .2-.7l-1-1.7a.5.5 0 0 0-.7-.2l-.9.5a5.4 5.4 0 0 0-1.4-.8V.5A.5.5 0 0 0 9 0H7a.5.5 0 0 0-.5.5v1.3a5.4 5.4 0 0 0-1.4.8l-.9-.5a.5.5 0 0 0-.7.2l-1 1.7a.5.5 0 0 0 .2.7l.9.5a5.4 5.4 0 0 0 0 1.6l-.9.5a.5.5 0 0 0-.2.7l1 1.7a.5.5 0 0 0 .7.2l.9-.5c.4.3.9.6 1.4.8v1.3c0 .3.2.5.5.5h2c.3 0 .5-.2.5-.5v-1.3a5.4 5.4 0 0 0 1.4-.8l.9.5a.5.5 0 0 0 .7-.2l1-1.7a.5.5 0 0 0-.2-.7z" stroke="currentColor" strokeWidth="1.25" fill="none"/>
     </svg>
   ),
+  Analyst: () => (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="2" width="13" height="11.5" rx="2" stroke="currentColor" strokeWidth="1.25"/>
+      <path d="M4 6.5h3L5.5 10h3L6.5 12.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="11.5" cy="6.5" r="1.3" stroke="currentColor" strokeWidth="1.1"/>
+    </svg>
+  ),
   SignOut: () => (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
       <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M14 8H6"
@@ -134,6 +141,7 @@ const CORE_NAV_ADMIN: NavItem[] = [
   { path: '/logs',       label: 'Logs',       icon: <Icon.Logs />      },
   { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
   { path: '/reports',    label: 'Reports',    icon: <Icon.Reports />   },
+  { path: '/ai-analyst', label: 'AI Analyst', icon: <Icon.Analyst />  },
 ]
 
 const CORE_NAV_MODERATOR: NavItem[] = [
@@ -145,6 +153,7 @@ const CORE_NAV_MODERATOR: NavItem[] = [
   { path: '/logs',       label: 'Logs',       icon: <Icon.Logs />      },
   { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
   { path: '/reports',    label: 'Reports',    icon: <Icon.Reports />   },
+  { path: '/ai-analyst', label: 'AI Analyst', icon: <Icon.Analyst />  },
 ]
 
 const CORE_NAV_VIEWER: NavItem[] = [
@@ -155,6 +164,7 @@ const CORE_NAV_VIEWER: NavItem[] = [
   { path: '/health',     label: 'Health',     icon: <Icon.Health />    },
   { path: '/organizations', label: 'Organizations', icon: <Icon.Organizations /> },
   { path: '/reports',    label: 'Reports',    icon: <Icon.Reports />   },
+  { path: '/ai-analyst', label: 'AI Analyst', icon: <Icon.Analyst />  },
 ]
 
 const CORE_NAV_GUEST: NavItem[] = [

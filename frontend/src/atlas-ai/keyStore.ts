@@ -20,7 +20,7 @@ interface PlainKey {
   apiKey: string
 }
 
-const unlocked = new Map<string, { value: PlainKey; expiresAt: number }>()
+const unlockedMeta = new Map<string, { provider: Provider; expiresAt: number }>()
 
 function readStore(): StoreShape {
   try {
@@ -83,7 +83,7 @@ export async function storeApiKey(userId: string, provider: Provider, apiKey: st
   const store = readStore()
   store.users[userId] = record
   writeStore(store)
-  unlocked.delete(userId)
+  unlockedMeta.delete(userId)
 }
 
 export function hasStoredKey(userId: string): boolean {
@@ -105,35 +105,25 @@ export async function unlockKey(userId: string, passphrase: string): Promise<Pla
   const apiKey = new TextDecoder().decode(plaintext)
 
   const plain: PlainKey = { provider: record.provider, apiKey }
-  unlocked.set(userId, { value: plain, expiresAt: Date.now() + UNLOCK_TTL_MS })
+  unlockedMeta.set(userId, { provider: record.provider, expiresAt: Date.now() + UNLOCK_TTL_MS })
   return plain
 }
 
 export function lockKey(userId: string) {
-  unlocked.delete(userId)
-}
-
-export function getUnlockedKey(userId: string): PlainKey | null {
-  const entry = unlocked.get(userId)
-  if (!entry) return null
-  if (Date.now() > entry.expiresAt) {
-    unlocked.delete(userId)
-    return null
-  }
-  return entry.value
+  unlockedMeta.delete(userId)
 }
 
 export function keyStatus(userId: string) {
   const store = readStore()
   const record = store.users[userId]
-  const cached = unlocked.get(userId)
-  if (cached && Date.now() > cached.expiresAt) {
-    unlocked.delete(userId)
+  const meta = unlockedMeta.get(userId)
+  if (meta && Date.now() > meta.expiresAt) {
+    unlockedMeta.delete(userId)
   }
-  const active = cached && Date.now() < cached.expiresAt ? cached : null
+  const active = meta && Date.now() < meta.expiresAt ? meta : null
   return {
     hasKey: Boolean(record),
-    provider: record?.provider as Provider | undefined,
+    provider: (active?.provider ?? record?.provider) as Provider | undefined,
     created_at: record?.created_at,
     unlocked: Boolean(active),
     unlock_expires_at: active ? new Date(active.expiresAt).toISOString() : null,

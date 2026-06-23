@@ -2,7 +2,7 @@ import { request } from './client'
 import { whoAmI, tools, allowedToolsForRole, mutatingTools } from '@/atlas-ai/beacon'
 import { toOpenAITools } from '@/atlas-ai/tooling'
 import { runChat } from '@/atlas-ai/model'
-import { keyStatus as ks, storeApiKey, unlockKey, lockKey, getUnlockedKey } from '@/atlas-ai/keyStore'
+import { keyStatus as ks, storeApiKey, unlockKey, lockKey } from '@/atlas-ai/keyStore'
 import { writeAudit } from '@/atlas-ai/audit'
 
 export interface AtlasAiMessage {
@@ -48,10 +48,17 @@ export interface AtlasAiStoredMessage extends AtlasAiMessage {
 export type ProviderOption = 'openai' | 'local'
 
 export const atlasAiApi = {
-  async chat(payload: { messages: AtlasAiMessage[]; page?: string; context?: Record<string, unknown>; provider?: 'openai' | 'local' }): Promise<AtlasAiChatResponse> {
+  async chat(payload: {
+    messages: AtlasAiMessage[]
+    page?: string
+    context?: Record<string, unknown>
+    provider?: 'openai' | 'local'
+    apiKey?: string
+  }): Promise<AtlasAiChatResponse> {
     const { user, scope } = await whoAmI()
-    const key = getUnlockedKey(String(user.id))
     const kStatus = ks(String(user.id))
+    const provider = payload.provider ?? kStatus.provider ?? 'openai'
+    const runtimeKey = payload.apiKey
 
     if (!kStatus.hasKey) {
       const err = new Error('No API key stored') as Error & { needs_key: boolean; key_status: KeyStatus }
@@ -59,7 +66,7 @@ export const atlasAiApi = {
       err.key_status = kStatus
       throw err
     }
-    if (!key) {
+    if (!runtimeKey) {
       const err = new Error('API key locked. Unlock to continue.') as Error & { needs_unlock: boolean; key_status: KeyStatus }
       err.needs_unlock = true
       err.key_status = kStatus
@@ -79,8 +86,8 @@ export const atlasAiApi = {
       system,
       messages: modelMessages,
       tools: toolsForModel,
-      provider: key.provider,
-      apiKeyOverride: key.apiKey,
+      provider,
+      apiKeyOverride: runtimeKey,
     })
     const choice = result.choices[0]
 
@@ -91,7 +98,7 @@ export const atlasAiApi = {
       role: user.role,
       action: 'atlas-ai.chat',
       status: 'ok',
-      details: { page: payload.page, messages: payload.messages.length, provider: key.provider },
+      details: { page: payload.page, messages: payload.messages.length, provider },
     })
 
     const pending: PendingAction[] = []
@@ -151,8 +158,8 @@ export const atlasAiApi = {
           ...toolResponses.map((tr) => ({ role: 'tool' as const, name: tr.name, content: JSON.stringify(tr.content), tool_call_id: tr.id })),
         ],
         tools: toolsForModel,
-        provider: key.provider,
-        apiKeyOverride: key.apiKey,
+        provider,
+        apiKeyOverride: runtimeKey,
       })
       assistantMessage = followUp.choices[0].message.content ?? assistantMessage
     }
@@ -230,13 +237,19 @@ export const atlasAiApi = {
     return { ok: true }
   },
 
-  async unlockKey(passphrase: string): Promise<{ ok: boolean; provider: ProviderOption }> {
+  async unlockKey(passphrase: string): Promise<{
+    ok: boolean
+    provider: ProviderOption
+    apiKey: string
+    key_status: KeyStatus
+  }> {
     const { user } = await whoAmI()
     const plain = await unlockKey(String(user.id), passphrase)
-    return { ok: true, provider: plain.provider }
+    const status = ks(String(user.id))
+    return { ok: true, provider: plain.provider, apiKey: plain.apiKey, key_status: status }
   },
 
-  async lockKey(): Promise<{ ok: boolean }> {
+  async lockKey(): Promise<{ ok: boolean; key_status: KeyStatus }> {
     const { user } = await whoAmI()
     lockKey(String(user.id))
     writeAudit({
@@ -248,7 +261,8 @@ export const atlasAiApi = {
       status: 'ok',
       details: {},
     })
-    return { ok: true }
+    const status = ks(String(user.id))
+    return { ok: true, key_status: status }
   },
 }
 

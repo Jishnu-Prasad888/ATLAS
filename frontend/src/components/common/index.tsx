@@ -1,9 +1,10 @@
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
+import { forwardRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import type { AgentStatus, CollectorStatus, LogSeverity } from '@/types'
 import { useUiStore } from '@/store/uiStore'
 import logoDark from '@/assets/logo-dark-theme.png'
 import logoLight from '@/assets/logo-light-theme.png'
+import { Copy as CopyIcon, Check as CheckIcon } from 'lucide-react'
 import {
   agentStatusVariant,
   collectorStatusVariant,
@@ -524,8 +525,35 @@ export function Sparkline({
 
 // ─── Copy button ─────────────────────────────────────────────────────────────
 
-export function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = React.useState(false)
+type CopyButtonProps = {
+  text: string
+  className?: string
+  label?: string
+  variant?: 'ghost' | 'solid'
+  size?: 'xs' | 'sm'
+  iconSize?: number
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'onClick'>
+
+export function CopyButton({
+  text,
+  className,
+  label = 'Copy to clipboard',
+  variant = 'ghost',
+  size = 'sm',
+  iconSize = 14,
+  ...props
+}: CopyButtonProps) {
+  const [copied, setCopied] = useState(false)
+
+  const base = 'inline-flex items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500'
+  const variants: Record<typeof variant, string> = {
+    ghost: 'bg-transparent text-[--color-text-dim] hover:text-[--color-text] hover:bg-[--color-surface-2]',
+    solid: 'bg-[--color-text] text-[--color-bg] hover:opacity-85',
+  }
+  const sizes: Record<typeof size, string> = {
+    xs: 'h-6 px-2 text-[10px] font-mono',
+    sm: 'h-7 px-3 text-xs font-mono',
+  }
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(text)
@@ -535,12 +563,13 @@ export function CopyButton({ text, className }: { text: string; className?: stri
 
   return (
     <button
+      type="button"
       onClick={handleCopy}
-      className={clsx('text-xs font-mono text-[--color-text-muted] hover:text-[--color-text] transition-colors', className)}
+      aria-label={label}
+      className={clsx(base, variants[variant], sizes[size], className)}
+      {...props}
     >
-      {copied ? 'copied' : 'copy'}
+      {copied ? <CheckIcon size={iconSize} strokeWidth={1.75} /> : <CopyIcon size={iconSize} strokeWidth={1.75} />}
     </button>
   )
 }
-
-import React from 'react'

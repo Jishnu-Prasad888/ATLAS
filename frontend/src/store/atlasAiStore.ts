@@ -8,9 +8,7 @@ import {
   type AtlasAiThread,
   type AtlasAiStoredMessage,
 } from '@/api'
-import { askCommander } from '@/api/commander'
-import { getUnlockedKey } from '@/atlas-ai/keyStore'
-import { useAuthStore } from '@/store/authStore'
+import { askCommander, type CommanderMessage } from '@/api/commander'
 import { env } from '@/config/env'
 
 const getErrorMessage = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
@@ -40,6 +38,9 @@ interface AtlasAiState {
   threadPending: Record<string, PendingAction[]>
   loadingThreads: boolean
   loadingMessages: boolean
+  sessionKey: string | null
+  sessionKeyExpiry: number | null
+  sessionKeyTimer: ReturnType<typeof setTimeout> | null
 }
 
 interface AtlasAiActions {
@@ -147,6 +148,9 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
     threadPending: {},
     loadingThreads: false,
     loadingMessages: false,
+    sessionKey: null,
+    sessionKeyExpiry: null,
+    sessionKeyTimer: null,
 
     toggle() {
       set((s) => ({ open: !s.open }))
@@ -274,15 +278,15 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       }
     },
 
-    async send(content, _page, _context) {
-      void _page
-      void _context
+    async send(content, page, ctx) {
       const trimmed = content.trim()
       if (!trimmed) return
       if (!env.atlasAiEnabled) {
         set({ error: 'ATLAS-AI is disabled' })
         return
       }
+
+      const contextData = ctx ?? {}
 
       set({ sending: true, error: null })
 
@@ -313,11 +317,40 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       }
 
       try {
-        const authUser = useAuthStore.getState().user
-        const key = authUser ? getUnlockedKey(String(authUser.id)) : null
+        const sessionKey = get().sessionKey
 
-        // Call commander endpoint; pick last assistant message as reply
-        const res = await askCommander(trimmed, key?.apiKey)
+        const commanderHistory: CommanderMessage[] = []
+
+        const contextParts: string[] = []
+        if (page) contextParts.push(`Current page: ${page}`)
+        const focusAgent = contextData && typeof contextData === 'object' ? (contextData as Record<string, unknown>).agentId : null
+        if (typeof focusAgent === 'string' && focusAgent.length > 0) {
+          contextParts.push(`Focused agent ID: ${focusAgent}`)
+        }
+        if (page && page.includes('logs')) {
+          contextParts.push('When answering log questions, query relevant severities (Info, Warning, Error, Critical) for the focused agent and report counts found.')
+          contextParts.push('Log severity names are case-sensitive: use Trace, Debug, Info, Warning, Error, Critical.')
+        }
+        if (contextData && Object.keys(contextData).length > 0) {
+          const serialized = JSON.stringify(contextData)
+          contextParts.push(`UI context: ${serialized.slice(0, 1600)}`)
+        }
+        if (contextParts.length > 0) {
+          commanderHistory.push({ role: 'system', content: contextParts.join('. ') })
+        }
+
+        commanderHistory.push(
+          ...workingMessages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+        )
+
+        const res = await askCommander({
+          messages: commanderHistory,
+          apiKey: sessionKey ?? undefined,
+          question: trimmed,
+        })
         const assistantContent = [...res.transcript].reverse().find((m) => m.role === 'assistant')?.content || 'No response.'
 
         const assistantMsg: ChatEntry = {
@@ -397,7 +430,20 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
       set({ keyLoading: true })
       try {
         const status = await atlasAiApi.keyStatus()
-        set({ keyStatus: status, keyLoading: false })
+        set((state) => {
+          let timer = state.sessionKeyTimer
+          if (!status.unlocked && timer) {
+            clearTimeout(timer)
+            timer = null
+          }
+          return {
+            keyStatus: status,
+            keyLoading: false,
+            sessionKey: status.unlocked ? state.sessionKey : null,
+            sessionKeyExpiry: status.unlocked ? state.sessionKeyExpiry : null,
+            sessionKeyTimer: status.unlocked ? timer : null,
+          }
+        })
       } catch (err: unknown) {
         set({ keyLoading: false, error: getErrorMessage(err, 'Key status error') })
       }
@@ -418,24 +464,56 @@ export const useAtlasAiStore = create<AtlasAiState & AtlasAiActions>((set, get) 
     async unlockKey(passphrase) {
       set({ keyWorking: true, error: null })
       try {
-        await atlasAiApi.unlockKey(passphrase)
-        await get().refreshKeyStatus()
+        const res = await atlasAiApi.unlockKey(passphrase)
+        const unlockExpiresAt = res.key_status.unlock_expires_at
+        const expiryMs = unlockExpiresAt ? new Date(unlockExpiresAt).getTime() : null
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+        if (expiryMs) {
+          const delay = Math.max(0, expiryMs - Date.now())
+          timeoutHandle = setTimeout(() => {
+            set((state) => ({
+              sessionKey: null,
+              sessionKeyExpiry: null,
+              sessionKeyTimer: null,
+              keyStatus: state.keyStatus
+                ? { ...state.keyStatus, unlocked: false, unlock_expires_at: null }
+                : state.keyStatus,
+            }))
+            void get().refreshKeyStatus()
+          }, delay)
+        }
+
+        set((s) => {
+          if (s.sessionKeyTimer) clearTimeout(s.sessionKeyTimer)
+          return {
+            keyWorking: false,
+            keyStatus: res.key_status,
+            sessionKey: res.apiKey,
+            sessionKeyExpiry: expiryMs,
+            sessionKeyTimer: timeoutHandle,
+          }
+        })
       } catch (err: unknown) {
-        set({ error: getErrorMessage(err, 'Unlock failed') })
-      } finally {
-        set({ keyWorking: false })
+        set({ keyWorking: false, error: getErrorMessage(err, 'Unlock failed') })
       }
     },
 
     async lockKey() {
       set({ keyWorking: true, error: null })
       try {
-        await atlasAiApi.lockKey()
-        await get().refreshKeyStatus()
+        const res = await atlasAiApi.lockKey()
+        set((s) => {
+          if (s.sessionKeyTimer) clearTimeout(s.sessionKeyTimer)
+          return {
+            keyWorking: false,
+            keyStatus: res.key_status,
+            sessionKey: null,
+            sessionKeyExpiry: null,
+            sessionKeyTimer: null,
+          }
+        })
       } catch (err: unknown) {
-        set({ error: getErrorMessage(err, 'Lock failed') })
-      } finally {
-        set({ keyWorking: false })
+        set({ keyWorking: false, error: getErrorMessage(err, 'Lock failed') })
       }
     },
 
