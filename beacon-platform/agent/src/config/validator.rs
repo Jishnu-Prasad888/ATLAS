@@ -15,7 +15,8 @@ pub struct ConfigValidator;
 
 impl ConfigValidator {
     pub fn validate(config: &AgentConfig) -> Result<()> {
-        Self::check_server_addr(&config.server_addr)?;
+        Self::check_rest_base_url(&config.rest_base_url)?;
+        Self::check_nats_config(&config.nats)?;
         Self::check_interval(config.interval_seconds)?;
         Self::check_queue(
             &config.queue.max_queue_size,
@@ -26,9 +27,22 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn check_server_addr(addr: &str) -> Result<()> {
-        if !addr.starts_with("ws://") && !addr.starts_with("wss://") {
-            bail!("server_addr must start with ws:// or wss://, got: {addr}");
+    fn check_rest_base_url(addr: &str) -> Result<()> {
+        if !(addr.starts_with("http://") || addr.starts_with("https://")) {
+            bail!("rest_base_url must start with http:// or https://, got: {addr}");
+        }
+        Ok(())
+    }
+
+    fn check_nats_config(nats: &crate::config::NatsConfig) -> Result<()> {
+        if !(nats.url.starts_with("nats://") || nats.url.starts_with("tls://")) {
+            bail!("nats.url must start with nats:// or tls://, got: {}", nats.url);
+        }
+        if nats.subject_prefix.trim().is_empty() {
+            bail!("nats.subject_prefix must not be empty");
+        }
+        if nats.command_prefix.trim().is_empty() {
+            bail!("nats.command_prefix must not be empty");
         }
         Ok(())
     }
@@ -72,7 +86,7 @@ mod tests {
     #[test]
     fn ws_scheme_is_accepted() {
         let mut cfg = AgentConfig::default();
-        cfg.server_addr = "ws://localhost:8000/ws/".to_string();
+        cfg.rest_base_url = "http://localhost:8000".to_string();
         assert!(ConfigValidator::validate(&cfg).is_ok());
     }
 
@@ -84,7 +98,7 @@ mod tests {
     #[test]
     fn http_scheme_is_rejected() {
         let mut cfg = AgentConfig::default();
-        cfg.server_addr = "http://example.com".to_string();
+        cfg.rest_base_url = "ftp://example.com".to_string();
         assert!(ConfigValidator::validate(&cfg).is_err());
     }
 

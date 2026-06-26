@@ -2612,6 +2612,14 @@ docker compose exec server python manage.py beacon_init
 docker compose exec server python manage.py collectstatic --noinput
 ```
 
+> The compose stack now starts PostgreSQL, Redis, NATS JetStream (`nats://localhost:4222`), and the Django ASGI server automatically.
+
+Need a scratch Python environment? A sandbox container is included:
+
+```bash
+docker compose exec sandbox bash
+```
+
 ### 26.2 Agent (Bare Metal)
 
 ```bash

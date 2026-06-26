@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
+use url::Url;
 use tokio::sync::RwLock;
 
 pub use validator::ConfigValidator;
@@ -59,8 +60,12 @@ pub fn create_collector_flags(config: &AgentConfig) -> CollectorFlags {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// WebSocket server address (wss://...)
-    pub server_addr: String,
+    /// Base REST URL (https://...)
+    #[serde(alias = "server_addr", default = "AgentConfig::default_rest_base_url")]
+    pub rest_base_url: String,
+    /// NATS transport configuration
+    #[serde(default)]
+    pub nats: NatsConfig,
     /// Username for API authentication
     pub username: String,
     /// Password for API authentication
@@ -159,7 +164,8 @@ impl Default for LoggingConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            server_addr: "wss://localhost:8000/ws/ingest/".to_string(),
+            rest_base_url: "https://localhost:8000".to_string(),
+            nats: NatsConfig::default(),
             username: "admin".to_string(),
             password: String::new(),
             secret: String::new(),
@@ -199,6 +205,79 @@ impl Default for AgentConfig {
     }
 }
 
+impl AgentConfig {
+    fn default_rest_base_url() -> String {
+        "https://localhost:8000".to_string()
+    }
+
+    fn migrate_legacy_fields(&mut self) {
+        if self.rest_base_url.starts_with("ws://") || self.rest_base_url.starts_with("wss://") {
+            if let Ok(url) = Url::parse(&self.rest_base_url) {
+                if let Some(host) = url.host_str() {
+                    let scheme = match url.scheme() {
+                        "ws" => "http",
+                        "wss" => "https",
+                        other => other,
+                    };
+                    let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+                    self.rest_base_url = format!("{}://{}{}", scheme, host, port);
+                }
+            }
+        }
+
+        if self.nats.subject_prefix.trim().is_empty() {
+            self.nats.subject_prefix = NatsConfig::default_subject_prefix();
+        }
+        if self.nats.command_prefix.trim().is_empty() {
+            self.nats.command_prefix = NatsConfig::default_command_prefix();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NatsConfig {
+    /// NATS server URL (nats://...)
+    pub url: String,
+    /// JetStream domain (optional)
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// Optional credentials file path (*.creds)
+    #[serde(default)]
+    pub creds_path: Option<String>,
+    /// Optional connection timeout in seconds
+    #[serde(default)]
+    pub connect_timeout: Option<u64>,
+    /// Subject prefix for agent messages (defaults to "agent")
+    #[serde(default = "NatsConfig::default_subject_prefix")]
+    pub subject_prefix: String,
+    /// Subject prefix for control plane messages (defaults to "agent")
+    #[serde(default = "NatsConfig::default_command_prefix")]
+    pub command_prefix: String,
+}
+
+impl Default for NatsConfig {
+    fn default() -> Self {
+        Self {
+            url: "nats://localhost:4222".to_string(),
+            domain: None,
+            creds_path: None,
+            connect_timeout: None,
+            subject_prefix: "agent".to_string(),
+            command_prefix: "agent_cmd".to_string(),
+        }
+    }
+}
+
+impl NatsConfig {
+    fn default_subject_prefix() -> String {
+        "agent".to_string()
+    }
+
+    fn default_command_prefix() -> String {
+        "agent_cmd".to_string()
+    }
+}
+
 // ─── I/O ──────────────────────────────────────────────────────────────────────
 
 impl AgentConfig {
@@ -207,7 +286,8 @@ impl AgentConfig {
             return Ok(Self::default());
         }
         let content = fs::read_to_string(path).await?;
-        let config: Self = toml::from_str(&content)?;
+        let mut config: Self = toml::from_str(&content)?;
+        config.migrate_legacy_fields();
         ConfigValidator::validate(&config)?;
         Ok(config)
     }
@@ -221,7 +301,7 @@ impl AgentConfig {
         Ok(())
     }
 
-    /// Apply a config update payload (from server WebSocket) and return the modified config.
+    /// Apply a config update payload (from server control channel) and return the modified config.
     /// Fields like `cpu_enabled`, `docker_enabled`, `interval_seconds` are mapped
     /// to the corresponding AgentConfig fields.
     pub fn apply_update(mut self, payload: &serde_json::Value) -> Self {
@@ -299,9 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_server_addr_fails_validation() {
+    fn invalid_rest_base_url_fails_validation() {
         let mut cfg = AgentConfig::default();
-        cfg.server_addr = "http://not-a-ws-url".to_string();
+        cfg.rest_base_url = "ftp://not-valid".to_string();
         assert!(ConfigValidator::validate(&cfg).is_err());
     }
 
@@ -326,7 +406,7 @@ mod tests {
     fn missing_secret_field_deserializes_to_empty_string() {
         // Old config files without a secret field should still load cleanly.
         let toml_no_secret = r#"
-server_addr = "wss://localhost:8000/ws/ingest/"
+server_addr = "https://localhost:8000"
 username = "admin"
 password = "pass"
 storage_dir = "/tmp"

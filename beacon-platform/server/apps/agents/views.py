@@ -8,8 +8,6 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 
 from apps.auth_rbac.permissions import (
     AgentSharedSecretPermission,
@@ -29,7 +27,6 @@ from .serializers import (
 )
 
 logger = logging.getLogger("beacon")
-channel_layer = get_channel_layer()
 
 VALID_STATUSES = [s.value for s in AgentStatus]
 
@@ -308,24 +305,24 @@ class AgentKillProcessView(APIView):
             return Response({"error": "pid must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
         req = ProcessKillRequest.objects.create(agent_id=agent_id, pid=pid_int, status=ProcessKillRequest.Status.PENDING)
-        safe_id = agent_id.replace(":", "_").replace("#", "_").replace(" ", "_")
-        try:
-            async_to_sync(channel_layer.group_send)(
-                f"agent_{safe_id}",
-                {
-                    "type": "agent.command",
-                    "data": {
-                        "type": "process_kill",
-                        "payload": {"pid": pid_int, "request_id": req.id},
-                    },
-                },
-            )
+        from apps.transport.nats_worker import publish_command
+
+        if publish_command(
+            agent_id,
+            "process_kill",
+            {"pid": pid_int, "request_id": req.id},
+        ):
             req.mark_dispatched()
-            audit_log(request, action="AGENT_KILL_PROCESS", resource="agents", resource_id=agent_id,
-                      details={"pid": pid_int, "request_id": req.id})
-        except Exception as exc:  # pragma: no cover
-            logger.warning("AgentKillProcessView failed to dispatch: %s", exc)
-            req.mark_failed(str(exc))
+            audit_log(
+                request,
+                action="AGENT_KILL_PROCESS",
+                resource="agents",
+                resource_id=agent_id,
+                details={"pid": pid_int, "request_id": req.id},
+            )
+        else:
+            logger.warning("AgentKillProcessView failed to dispatch via NATS")
+            req.mark_failed("nats_dispatch_failed")
             return Response({"error": "failed to dispatch"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"status": req.status, "pid": pid_int, "request_id": req.id}, status=status.HTTP_202_ACCEPTED)

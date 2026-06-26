@@ -1,5 +1,5 @@
 // engines/tui.rs — Terminal User Interface (TUI)
-// Built with Ratatui. Keyboard-driven, live WebSocket-backed updates.
+// Built with Ratatui. Keyboard-driven, live updates via NATS/control events.
 // Views: Dashboard | Agents | Metrics | Logs | Health | Network | Configuration
 
 use anyhow::Result;
@@ -114,7 +114,8 @@ pub struct AppState {
     pub tab_index: usize,
     pub agent_id: String,
     pub hostname: String,
-    pub server_addr: String,
+    pub rest_base_url: String,
+    pub nats_url: String,
     pub status: String,
     pub uptime_secs: u64,
     pub logs: Vec<LogEntry>,
@@ -143,7 +144,8 @@ impl AppState {
             tab_index: 0,
             agent_id: agent_id.to_string(),
             hostname: hostname.to_string(),
-            server_addr: config.server_addr.clone(),
+            rest_base_url: config.rest_base_url.clone(),
+            nats_url: config.nats.url.clone(),
             status: "ONLINE".to_string(),
             uptime_secs: 0,
             logs: Vec::new(),
@@ -910,10 +912,17 @@ fn draw_configuration(f: &mut Frame, state: &AppState, area: Rect) {
         Line::from(""),
         Line::from(vec![
             Span::styled(
-                "  server_addr:       ",
+                "  rest_base_url:     ",
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::styled(&state.server_addr, Style::default().fg(Color::Yellow)),
+            Span::styled(&state.rest_base_url, Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  nats_url:          ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(&state.nats_url, Style::default().fg(Color::Yellow)),
         ]),
         Line::from(vec![
             Span::styled(
@@ -927,7 +936,7 @@ fn draw_configuration(f: &mut Frame, state: &AppState, area: Rect) {
                 "  transport:         ",
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::styled("TLS 1.3 WebSocket", Style::default().fg(Color::Green)),
+            Span::styled("NATS JetStream", Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
             Span::styled(

@@ -26,7 +26,7 @@ use engines::{
     logging::LogEngine, queue::QueueEngine,
 };
 use storage::StorageManager;
-use transport::WebSocketTransport;
+use transport::JetstreamTransport;
 
 #[derive(Parser)]
 #[command(
@@ -434,8 +434,8 @@ async fn run_daemon(config_path: &str) -> Result<()> {
     // Create shared collector flags for dynamic server-side toggle
     let collector_flags = create_collector_flags(&config);
 
-    // Start WebSocket transport (persists config changes to disk on config_update)
-    let transport = WebSocketTransport::new(
+    // Start JetStream transport (persists config changes to disk on config_update)
+    let transport = JetstreamTransport::new(
         config.clone(),
         config_path.to_string(),
         identity.clone(),
@@ -502,18 +502,42 @@ async fn run_init(config_path: &str) -> Result<()> {
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
 
-    // ── Server address ────────────────────────────────────────────────────────
-    print!("Server address (e.g. wss://beacon.example.com/ws/ingest/): ");
+    // ── REST base URL ─────────────────────────────────────────────────────────
+    print!("REST base URL (e.g. https://beacon.example.com): ");
     io::stdout().flush()?;
-    let server_addr = loop {
+    let rest_base_url = loop {
         let s = lines.next().unwrap_or(Ok(String::new()))?;
         let s = s.trim().to_string();
-        if s.starts_with("ws://") || s.starts_with("wss://") {
+        if s.starts_with("http://") || s.starts_with("https://") {
             break s;
         }
-        eprintln!("  ✗ Must start with ws:// or wss://. Try again.");
-        print!("Server address: ");
+        eprintln!("  ✗ Must start with http:// or https://. Try again.");
+        print!("REST base URL: ");
         io::stdout().flush()?;
+    };
+
+    // ── NATS URL ──────────────────────────────────────────────────────────────
+    print!("NATS URL [nats://localhost:4222]: ");
+    io::stdout().flush()?;
+    let nats_url = {
+        let s = lines
+            .next()
+            .unwrap_or(Ok(String::new()))?
+            .trim()
+            .to_string();
+        let value = if s.is_empty() {
+            "nats://localhost:4222".to_string()
+        } else {
+            s
+        };
+        if !(value.starts_with("nats://") || value.starts_with("tls://")) {
+            eprintln!(
+                "  ✗ NATS URL must start with nats:// or tls://. Using default nats://localhost:4222"
+            );
+            "nats://localhost:4222".to_string()
+        } else {
+            value
+        }
     };
 
     // ── Username ──────────────────────────────────────────────────────────────
@@ -591,8 +615,8 @@ async fn run_init(config_path: &str) -> Result<()> {
         .unwrap_or(5);
 
     // ── Build and save config ─────────────────────────────────────────────────
-    let config = AgentConfig {
-        server_addr: server_addr.clone(),
+    let mut config = AgentConfig {
+        rest_base_url: rest_base_url.clone(),
         username: username.clone(),
         password,
         secret,
@@ -600,6 +624,7 @@ async fn run_init(config_path: &str) -> Result<()> {
         storage_dir: "/var/lib/beacon/agent".to_string(),
         ..Default::default()
     };
+    config.nats.url = nats_url.clone();
 
     config.save(config_path).await?;
     println!("\n✓ Configuration written to {}", config_path);
@@ -647,7 +672,8 @@ async fn run_status(config_path: &str) -> Result<()> {
 
     println!("Agent ID:     {}", identity.agent_id);
     println!("Hostname:     {}", identity.hostname);
-    println!("Server:       {}", config.server_addr);
+    println!("REST base:    {}", config.rest_base_url);
+    println!("NATS URL:     {}", config.nats.url);
     println!("Storage:      {}", config.storage_dir);
     println!("Interval:     {}s", config.interval_seconds);
     println!("Registration: {}", reg_status);
@@ -960,11 +986,18 @@ async fn handle_queue_cmd(action: QueueAction, config_path: &str) -> Result<()> 
 async fn handle_server_cmd(action: ServerAction, config_path: &str) -> Result<()> {
     let config = AgentConfig::load(config_path).await?;
     match action {
-        ServerAction::Connect => println!("Connecting to {}...", config.server_addr),
-        ServerAction::Disconnect => println!("Disconnecting from server."),
-        ServerAction::Status => println!("Server: {}", config.server_addr),
-        ServerAction::Ping => println!("Pinging {}...", config.server_addr),
-        ServerAction::Test => println!("Testing connection to {}...", config.server_addr),
+        ServerAction::Connect => println!("Connecting to NATS {}...", config.nats.url),
+        ServerAction::Disconnect => println!("Disconnecting from transport."),
+        ServerAction::Status => {
+            println!("REST base: {}", config.rest_base_url);
+            println!("NATS URL:  {}", config.nats.url);
+        }
+        ServerAction::Ping => println!("Pinging REST {}...", config.rest_base_url),
+        ServerAction::Test => println!(
+            "Testing connectivity to REST {} and NATS {}...",
+            config.rest_base_url,
+            config.nats.url
+        ),
     }
     Ok(())
 }

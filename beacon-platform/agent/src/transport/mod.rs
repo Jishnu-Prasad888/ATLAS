@@ -1,17 +1,18 @@
-// transport/mod.rs — Secure WebSocket Transport
-// TLS 1.3 WebSocket. Auto-reconnects with exponential backoff.
-// Agent protocol: register → heartbeat loop + telemetry flush.
-
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use async_nats::{jetstream, Client, ConnectOptions};
 use base64::Engine as _;
-use futures_util::{SinkExt, StreamExt};
+use bytes::Bytes;
+use chrono::Utc;
+use futures_util::StreamExt;
 use serde_json::json;
+use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
 use tokio::time::sleep;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
 use tracing::{debug, error, info, warn};
+
+use async_nats::jetstream::consumer::pull::Config as PullConsumerConfig;
+use async_nats::jetstream::consumer::AckPolicy;
 
 use crate::config::{AgentConfig, CollectorFlags, ConfigValidator};
 use crate::engines::encryption::EncryptionEngine;
@@ -25,8 +26,15 @@ const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 const FLUSH_BATCH_SIZE: usize = 50;
 
+const CONTROL_STREAM: &str = "agent_control";
+
+const FRAME_VERSION: u8 = 1;
+const ENCODING_NONE: u8 = 0;
+const ENCODING_ZSTD: u8 = 1;
+const ZSTD_LEVEL: i32 = 6;
+
 #[derive(Clone)]
-pub struct WebSocketTransport {
+pub struct JetstreamTransport {
     config: AgentConfig,
     config_path: String,
     identity: AgentIdentity,
@@ -36,7 +44,7 @@ pub struct WebSocketTransport {
     collector_flags: CollectorFlags,
 }
 
-impl WebSocketTransport {
+impl JetstreamTransport {
     pub fn new(
         config: AgentConfig,
         config_path: String,
@@ -57,12 +65,16 @@ impl WebSocketTransport {
         }
     }
 
-    /// Run forever — reconnects automatically with exponential backoff.
     pub async fn run(&self) -> Result<()> {
         let mut backoff = RECONNECT_BASE_DELAY;
         let mut first_connect = true;
+
         loop {
-            info!("Connecting to {}", self.config.server_addr);
+            info!(
+                "Connecting to NATS at {} (agent={})",
+                self.config.nats.url, self.identity.agent_id
+            );
+
             match self.connect_and_run().await {
                 Ok(()) => {
                     info!("Transport disconnected cleanly — reconnecting...");
@@ -79,7 +91,7 @@ impl WebSocketTransport {
                             .log_engine
                             .warn(
                                 "queue_engine",
-                                &format!("Network unavailable, buffering messages"),
+                                "Network unavailable, buffering messages",
                             )
                             .await;
                     }
@@ -92,20 +104,16 @@ impl WebSocketTransport {
     }
 
     async fn connect_and_run(&self) -> Result<()> {
-        // Connect directly — the WebSocket consumer authenticates agents via the
-        // registration message, not JWT. The middleware gracefully handles the
-        // absence of a token by setting AnonymousUser.
-        let url = url::Url::parse(&self.config.server_addr)
-            .map_err(|e| anyhow!("Invalid server URL: {e}"))?;
-        let connector = self.build_tls_connector()?;
+        let (_, js) = self.connect_nats().await?;
+        let js = Arc::new(js);
 
-        let (ws_stream, _) = connect_async_tls_with_config(url, None, false, Some(connector))
-            .await
-            .map_err(|e| anyhow!("WebSocket connect failed: {e}"))?;
+        info!(
+            "Connected to NATS {} (prefix={}, command_prefix={})",
+            self.config.nats.url,
+            self.config.nats.subject_prefix,
+            self.config.nats.command_prefix,
+        );
 
-        info!("WebSocket connected to {}", self.config.server_addr);
-
-        // Log connection recovery and replay count
         let queue_count = self
             .queue
             .status()
@@ -130,13 +138,8 @@ impl WebSocketTransport {
                 .await;
         }
 
-        let (mut writer, mut reader) = ws_stream.split();
-
-        let secret = resolve_secret(&self.config)
-            .map_err(|e| anyhow!("Missing agent secret for WebSocket registration: {e}"))?;
-
-        // Send registration
-        let register_msg = json!({
+        let secret = resolve_secret(&self.config)?;
+        let register_envelope = json!({
             "type": "register",
             "payload": {
                 "agent_id":     self.identity.agent_id,
@@ -149,86 +152,159 @@ impl WebSocketTransport {
                 "secret":       secret,
             }
         });
-        writer
-            .send(Message::Text(register_msg.to_string()))
-            .await
-            .map_err(|e| anyhow!("Registration send failed: {e}"))?;
+        let register_subject =
+            ingest_subject(&self.config.nats.subject_prefix, &self.identity.agent_id, "register");
+        Self::publish_envelope(js.clone(), &register_subject, register_envelope, None).await?;
         info!(
-            "Registration sent for agent {}",
+            "Registration event published to {register_subject} for agent {}",
             &self.identity.agent_id[..16.min(self.identity.agent_id.len())]
         );
 
-        // Send config request to sync collector flags from server
-        let config_req = json!({
+        let config_request_subject = ingest_subject(
+            &self.config.nats.subject_prefix,
+            &self.identity.agent_id,
+            "config_request",
+        );
+        let config_request = json!({
             "type": "config_request",
             "agent_id": self.identity.agent_id,
         });
-        let _ = writer.send(Message::Text(config_req.to_string())).await;
-        debug!("Config request sent");
+        let _ = Self::publish_envelope(js.clone(), &config_request_subject, config_request, None)
+            .await;
+        debug!("Config request published");
 
-        let queue = self.queue.clone();
-        let identity = self.identity.clone();
-        let enc = self.encryption.clone();
-        let flags = self.collector_flags.clone();
-        let config = self.config.clone();
-        let config_path = self.config_path.clone();
-        let log_engine = self.log_engine.clone();
-        let retention_days = self.config.logging.warning_audit_retention_days as i64;
-        let compress_retained = self.config.logging.compress_warning_audit;
-        let queue_sent_retention_hours = self.config.queue.sent_retention_hours as i64;
+        let heartbeat_subject = ingest_subject(
+            &self.config.nats.subject_prefix,
+            &self.identity.agent_id,
+            "heartbeat",
+        );
 
-        // Wrap writer in Arc<Mutex> so heartbeat and flush loops can share it
-        let writer = Arc::new(Mutex::new(writer));
+        let command_filter = command_filter_subject(
+            &self.config.nats.command_prefix,
+            &self.identity.agent_id,
+        );
+        let durable_name = command_durable_name(&self.identity.agent_id);
 
-        // Run all loops concurrently; abort all on first error
+        let heartbeat_task = Self::heartbeat_loop(
+            js.clone(),
+            heartbeat_subject,
+            self.identity.clone(),
+        );
+
+        let flush_task = Self::flush_loop(
+            js.clone(),
+            self.config.nats.subject_prefix.clone(),
+            self.identity.clone(),
+            self.queue.clone(),
+            self.encryption.clone(),
+            self.config.logging.warning_audit_retention_days as i64,
+            self.config.logging.compress_warning_audit,
+            self.config.queue.sent_retention_hours as i64,
+        );
+
+        let command_task = Self::command_loop(
+            js,
+            command_filter,
+            durable_name,
+            self.config.clone(),
+            self.config_path.clone(),
+            self.collector_flags.clone(),
+            self.log_engine.clone(),
+            self.identity.clone(),
+        );
+
         tokio::select! {
-            r = Self::heartbeat_loop(Arc::clone(&writer), identity.clone())            => r,
-            r = Self::flush_loop(
-                Arc::clone(&writer),
-                queue,
-                enc,
-                identity.clone(),
-                retention_days,
-                compress_retained,
-                queue_sent_retention_hours,
-            )     => r,
-            r = Self::read_loop(&mut reader, flags, config, config_path, log_engine, identity)    => r,
+            res = heartbeat_task => res,
+            res = flush_task => res,
+            res = command_task => res,
         }
     }
 
-    async fn heartbeat_loop<S>(writer: Arc<Mutex<S>>, identity: AgentIdentity) -> Result<()>
-    where
-        S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
-    {
+    async fn connect_nats(&self) -> Result<(Client, jetstream::Context)> {
+        let mut options = ConnectOptions::new()
+            .name(format!("beacon-agent-{}", &self.identity.agent_id[..8.min(self.identity.agent_id.len())]))
+            .retry_on_initial_connect()
+            .max_reconnects(None);
+
+        if let Some(path) = &self.config.nats.creds_path {
+            options = options
+                .credentials_file(path)
+                .await
+                .map_err(|e| anyhow!("Failed to load NATS credentials {}: {e}", path))?;
+        }
+
+        if let Some(timeout) = self.config.nats.connect_timeout {
+            options = options.connection_timeout(Duration::from_secs(timeout));
+        }
+
+        let client = options
+            .connect(self.config.nats.url.clone())
+            .await
+            .map_err(|e| anyhow!("Failed to connect to NATS: {e}"))?;
+
+        let js = match &self.config.nats.domain {
+            Some(domain) if !domain.is_empty() => jetstream::with_domain(client.clone(), domain),
+            _ => jetstream::new(client.clone()),
+        };
+
+        Ok((client, js))
+    }
+
+    async fn publish_envelope(
+        js: Arc<jetstream::Context>,
+        subject: &str,
+        envelope: serde_json::Value,
+        message_id: Option<&str>,
+    ) -> Result<()> {
+        let json_bytes = serde_json::to_vec(&envelope)?;
+        let frame = encode_frame(&json_bytes)?;
+        let publish = match message_id {
+            Some(id) => jetstream::context::Publish::build()
+                .payload(Bytes::from(frame))
+                .message_id(id),
+            None => jetstream::context::Publish::build().payload(Bytes::from(frame)),
+        };
+
+        let subject_owned = subject.to_string();
+        let ack = js
+            .send_publish(subject_owned, publish)
+            .await
+            .map_err(|e| anyhow!("Failed to publish to {subject}: {e}"))?;
+        ack.await
+            .map_err(|e| anyhow!("Publish to {subject} not acknowledged: {e}"))?;
+        Ok(())
+    }
+
+    async fn heartbeat_loop(
+        js: Arc<jetstream::Context>,
+        subject: String,
+        identity: AgentIdentity,
+    ) -> Result<()> {
         loop {
             sleep(HEARTBEAT_INTERVAL).await;
-            let hb = json!({
+            let envelope = json!({
                 "type":     "heartbeat",
                 "agent_id": identity.agent_id,
                 "status":   "ONLINE",
+                "timestamp": Utc::now().to_rfc3339(),
             });
-            writer
-                .lock()
-                .await
-                .send(Message::Text(hb.to_string()))
-                .await
-                .map_err(|e| anyhow!("Heartbeat send failed: {e}"))?;
-            debug!("Heartbeat sent");
+            if let Err(e) = Self::publish_envelope(js.clone(), &subject, envelope, None).await {
+                return Err(anyhow!("Heartbeat send failed: {e}"));
+            }
+            debug!("Heartbeat published");
         }
     }
 
-    async fn flush_loop<S>(
-        writer: Arc<Mutex<S>>,
-        queue: QueueEngine,
-        enc: EncryptionEngine,
+    async fn flush_loop(
+        js: Arc<jetstream::Context>,
+        subject_prefix: String,
         identity: AgentIdentity,
+        queue: QueueEngine,
+        encryption: EncryptionEngine,
         retention_days: i64,
         compress_retained: bool,
         queue_sent_retention_hours: i64,
-    ) -> Result<()>
-    where
-        S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
-    {
+    ) -> Result<()> {
         let mut last_cleanup = Instant::now() - Duration::from_secs(15);
         loop {
             let batch = queue.dequeue_batch(FLUSH_BATCH_SIZE).await?;
@@ -267,12 +343,14 @@ impl WebSocketTransport {
             }
 
             for msg in &batch {
-                // Decrypt locally-encrypted payload before transmitting
-                let plaintext = if enc.is_enabled() {
+                let subject = ingest_subject(&subject_prefix, &identity.agent_id, &msg.msg_type);
+
+                let plaintext = if encryption.is_enabled() {
                     let ep = crate::engines::encryption::EncryptedPayload {
                         data: msg.payload.clone(),
                     };
-                    enc.decrypt(&ep)
+                    encryption
+                        .decrypt(&ep)
                         .await
                         .unwrap_or_else(|_| msg.payload.clone())
                 } else {
@@ -289,14 +367,17 @@ impl WebSocketTransport {
                 let envelope = json!({
                     "type":     msg.msg_type,
                     "agent_id": identity.agent_id,
+                    "message_id": msg.message_id,
                     "payload":  payload_json,
                 });
 
-                match writer
-                    .lock()
-                    .await
-                    .send(Message::Text(envelope.to_string()))
-                    .await
+                match Self::publish_envelope(
+                    js.clone(),
+                    &subject,
+                    envelope,
+                    Some(&msg.message_id),
+                )
+                .await
                 {
                     Ok(_) => {
                         queue.ack(msg.id).await?;
@@ -314,99 +395,125 @@ impl WebSocketTransport {
         }
     }
 
-    async fn read_loop<S>(
-        reader: &mut S,
-        collector_flags: CollectorFlags,
+    async fn command_loop(
+        js: Arc<jetstream::Context>,
+        filter_subject: String,
+        durable_name: String,
         agent_config: AgentConfig,
         config_path: String,
-        log_engine: LogEngine,
+        collector_flags: CollectorFlags,
+        _log_engine: LogEngine,
         identity: AgentIdentity,
-    ) -> Result<()>
-    where
-        S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-    {
-        while let Some(msg) = reader.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        match parsed.get("type").and_then(|t| t.as_str()) {
-                            Some("registered") => info!("Agent registration confirmed by server"),
-                            Some("heartbeat_ack") => debug!("Heartbeat acknowledged"),
-                            Some("config_update") => {
-                                info!("Received config update from server");
-                                if let Some(payload) = parsed.get("payload") {
-                                    Self::apply_config_update(
-                                        &collector_flags,
-                                        payload,
-                                        &agent_config,
-                                        &config_path,
-                                    )
-                                    .await;
-                                }
+    ) -> Result<()> {
+        let log_engine = _log_engine;
+        let stream = js
+            .get_stream(CONTROL_STREAM)
+            .await
+            .with_context(|| format!("JetStream stream '{CONTROL_STREAM}' not found"))?;
+
+        let consumer_config = PullConsumerConfig {
+            durable_name: Some(durable_name.clone()),
+            name: Some(durable_name.clone()),
+            filter_subject: filter_subject.clone(),
+            ack_policy: AckPolicy::Explicit,
+            ..Default::default()
+        };
+
+        let consumer = stream
+            .get_or_create_consumer(&durable_name, consumer_config)
+            .await
+            .map_err(|e| anyhow!("Failed to create command consumer: {e}"))?;
+
+        let mut messages = consumer
+            .messages()
+            .await
+            .map_err(|e| anyhow!("Failed to pull command messages: {e}"))?;
+
+        while let Some(message) = messages.next().await {
+            let message = message.map_err(|e| anyhow!("Command fetch failed: {e}"))?;
+            let decoded = decode_frame(message.payload.as_ref())?;
+
+            if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(&decoded) {
+                if let Some(msg_type) = parsed.get("type").and_then(|t| t.as_str()) {
+                    match msg_type {
+                        "registered" => {
+                            info!("Agent registration confirmed by server");
+                        }
+                        "heartbeat_ack" => {
+                            debug!("Heartbeat acknowledged");
+                        }
+                        "config_update" => {
+                            info!("Received config update from server");
+                            if let Some(payload) = parsed.get("payload") {
+                                Self::apply_config_update(
+                                    &collector_flags,
+                                    payload,
+                                    &agent_config,
+                                    &config_path,
+                                )
+                                .await;
                             }
-                            Some("process_kill") => {
-                                if let Some(payload) = parsed.get("payload") {
-                                    if let Some(pid) = payload.get("pid").and_then(|p| p.as_i64()) {
-                                        let req_id =
-                                            payload.get("request_id").and_then(|r| r.as_i64());
-                                        info!(
-                                            "Received process_kill for pid {} (req {:?})",
-                                            pid, req_id
+                        }
+                        "process_kill" => {
+                            if let Some(payload) = parsed.get("payload") {
+                                if let Some(pid) = payload.get("pid").and_then(|p| p.as_i64()) {
+                                    let req_id =
+                                        payload.get("request_id").and_then(|r| r.as_i64());
+                                    info!(
+                                        "Received process_kill for pid {} (req {:?})",
+                                        pid, req_id
+                                    );
+                                    let result = Self::kill_process(pid as i32, &log_engine).await;
+                                    if let Err(e) = &result {
+                                        error!("process_kill failed for pid {}: {}", pid, e);
+                                    }
+                                    if let Err(e) = Self::send_kill_result(
+                                        &agent_config,
+                                        &identity,
+                                        pid as i32,
+                                        req_id,
+                                        result.as_ref().err(),
+                                    )
+                                    .await
+                                    {
+                                        warn!(
+                                            "Failed to send kill result for pid {}: {}", pid, e
                                         );
-                                        let result =
-                                            Self::kill_process(pid as i32, &log_engine).await;
-                                        if let Err(e) = &result {
-                                            error!("process_kill failed for pid {}: {}", pid, e);
-                                        }
-                                        if let Err(e) = Self::send_kill_result(
-                                            &agent_config,
-                                            &identity,
-                                            pid as i32,
-                                            req_id,
-                                            result.as_ref().err(),
-                                        )
-                                        .await
-                                        {
-                                            warn!(
-                                                "Failed to send kill result for pid {}: {}",
-                                                pid, e
-                                            );
-                                        }
                                     }
                                 }
                             }
-                            _ => debug!("Server message: {}", &text[..text.len().min(120)]),
+                        }
+                        other => {
+                            debug!(
+                                "Server command: {}",
+                                other
+                            );
                         }
                     }
                 }
-                Ok(Message::Close(frame)) => {
-                    info!("Server closed connection: {:?}", frame);
-                    return Ok(());
-                }
-                Ok(Message::Ping(_)) => debug!("Received ping"),
-                Ok(_) => {}
-                Err(e) => return Err(anyhow!("WebSocket read error: {e}")),
             }
+
+            message
+                .ack()
+                .await
+                .map_err(|e| anyhow!("Failed to ack command message: {e}"))?;
         }
+
         Ok(())
     }
 
-    /// Apply a config_update payload to the shared collector flags and persist to disk.
-    /// The payload is expected to contain boolean fields like "docker_enabled".
     async fn apply_config_update(
         flags: &CollectorFlags,
         payload: &serde_json::Value,
         config: &AgentConfig,
         config_path: &str,
     ) {
-        // Apply and validate config before mutating runtime flags or disk
         let updated = config.clone().apply_update(payload);
         if let Err(e) = ConfigValidator::validate(&updated) {
             warn!("Rejected config update: {e}");
             return;
         }
 
-        // Update in-memory flags for all collectors
         {
             let mut map = flags.write().await;
             let mappings = [
@@ -431,7 +538,6 @@ impl WebSocketTransport {
             }
         }
 
-        // Persist updated config to disk so changes survive agent restart
         if let Err(e) = updated.save(config_path).await {
             error!("Failed to persist config update to disk: {e}");
         } else {
@@ -440,7 +546,6 @@ impl WebSocketTransport {
     }
 
     async fn kill_process(pid: i32, log_engine: &LogEngine) -> Result<()> {
-        // Use libc kill to send SIGKILL. Fall back to /bin/kill if needed.
         unsafe {
             let res = libc::kill(pid, libc::SIGKILL);
             if res == 0 {
@@ -453,7 +558,6 @@ impl WebSocketTransport {
                 return Ok(());
             }
         }
-        // If libc kill failed, attempt shell kill
         let status = std::process::Command::new("/bin/kill")
             .arg("-9")
             .arg(pid.to_string())
@@ -473,32 +577,6 @@ impl WebSocketTransport {
         }
     }
 
-    fn build_tls_connector(&self) -> Result<Connector> {
-        use rustls::{ClientConfig, RootCertStore};
-        use std::sync::Arc;
-
-        let mut root_store = RootCertStore::empty();
-
-        if self.config.tls.verify_cert {
-            let native_certs = rustls_native_certs::load_native_certs()
-                .map_err(|e| anyhow!("Failed to load native certs: {e}"))?;
-            for cert in native_certs {
-                root_store
-                    .add(cert)
-                    .map_err(|e| anyhow!("Invalid cert: {e}"))?;
-            }
-        } else {
-            warn!("TLS certificate verification DISABLED — not for production!");
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        }
-
-        let tls_config = ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        Ok(Connector::Rustls(Arc::new(tls_config)))
-    }
-
     async fn send_kill_result(
         config: &AgentConfig,
         identity: &AgentIdentity,
@@ -506,18 +584,7 @@ impl WebSocketTransport {
         request_id: Option<i64>,
         error: Option<&anyhow::Error>,
     ) -> Result<()> {
-        // Derive REST base from WS URL
-        let ws_url = url::Url::parse(&config.server_addr)?;
-        let scheme = match ws_url.scheme() {
-            "wss" => "https",
-            "ws" => "http",
-            other => other,
-        };
-        let host = ws_url
-            .host_str()
-            .ok_or_else(|| anyhow!("Invalid server host"))?;
-        let port = ws_url.port().map(|p| format!(":{p}")).unwrap_or_default();
-        let base = format!("{}://{}{}", scheme, host, port);
+        let base = config.rest_base_url.trim_end_matches('/');
         let url = format!(
             "{}/api/v1/agents/{}/kill_process_result/",
             base, identity.agent_id
@@ -545,5 +612,45 @@ impl WebSocketTransport {
             .await?
             .error_for_status()?;
         Ok(())
+    }
+}
+
+fn ingest_subject(prefix: &str, agent_id: &str, msg_type: &str) -> String {
+    format!("{}.{}.{}", prefix, agent_id, msg_type)
+}
+
+fn command_filter_subject(prefix: &str, agent_id: &str) -> String {
+    format!("{}.{}.>", prefix, agent_id)
+}
+
+fn command_durable_name(agent_id: &str) -> String {
+    format!("agent-commands-{}", agent_id)
+}
+
+fn encode_frame(json_bytes: &[u8]) -> Result<Vec<u8>> {
+    let compressed = zstd::stream::encode_all(Cursor::new(json_bytes), ZSTD_LEVEL)
+        .map_err(|e| anyhow!("zstd compression failed: {e}"))?;
+    let mut out = Vec::with_capacity(2 + compressed.len());
+    out.push(FRAME_VERSION);
+    out.push(ENCODING_ZSTD);
+    out.extend_from_slice(&compressed);
+    Ok(out)
+}
+
+fn decode_frame(frame: &[u8]) -> Result<Vec<u8>> {
+    if frame.len() < 2 {
+        return Err(anyhow!("Frame too short"));
+    }
+    let version = frame[0];
+    if version != FRAME_VERSION {
+        return Err(anyhow!("Unsupported frame version: {}", version));
+    }
+    let encoding = frame[1];
+    let body = &frame[2..];
+    match encoding {
+        ENCODING_NONE => Ok(body.to_vec()),
+        ENCODING_ZSTD => zstd::stream::decode_all(Cursor::new(body))
+            .map_err(|e| anyhow!("zstd decompression failed: {e}")),
+        other => Err(anyhow!("Unsupported frame encoding: {}", other)),
     }
 }

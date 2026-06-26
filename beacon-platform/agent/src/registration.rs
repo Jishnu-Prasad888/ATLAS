@@ -88,7 +88,7 @@ pub async fn register(
     // ── Validate secret is present ────────────────────────────────────────────
     let secret = resolve_secret(config)?;
 
-    let base_url = extract_base_url(&config.server_addr)?;
+    let base_url = config.rest_base_url.trim_end_matches('/');
     let register_url = format!("{}/api/v1/agents/register/", base_url);
 
     info!(
@@ -290,25 +290,6 @@ pub fn resolve_secret(config: &AgentConfig) -> Result<String> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Extract HTTP(S) base URL from a WebSocket URL.
-fn extract_base_url(ws_url: &str) -> Result<String> {
-    let url = url::Url::parse(ws_url).map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
-
-    let scheme = match url.scheme() {
-        "ws" => "http",
-        "wss" => "https",
-        s => bail!("Invalid WebSocket scheme: {}", s),
-    };
-
-    let host = url
-        .host_str()
-        .ok_or_else(|| anyhow!("No host in URL: {}", ws_url))?;
-
-    let port = url.port().map(|p| format!(":{}", p)).unwrap_or_default();
-
-    Ok(format!("{}://{}{}", scheme, host, port))
-}
-
 /// Build a `reqwest::Client` that respects the TLS configuration.
 pub(crate) fn build_http_client(config: &AgentConfig) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
@@ -339,27 +320,6 @@ pub(crate) fn build_http_client(config: &AgentConfig) -> Result<reqwest::Client>
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
-
-    #[test]
-    fn extract_base_url_ws() {
-        assert_eq!(
-            extract_base_url("ws://localhost:8000/ws/ingest/").unwrap(),
-            "http://localhost:8000"
-        );
-    }
-
-    #[test]
-    fn extract_base_url_wss() {
-        assert_eq!(
-            extract_base_url("wss://beacon.example.com/ws/ingest/").unwrap(),
-            "https://beacon.example.com"
-        );
-    }
-
-    #[test]
-    fn extract_base_url_invalid_scheme() {
-        assert!(extract_base_url("http://example.com").is_err());
-    }
 
     #[test]
     fn resolve_secret_from_config() {

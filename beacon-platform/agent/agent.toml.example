@@ -1,8 +1,14 @@
 # Beacon Agent Configuration
 # /etc/beacon/agent.toml
 
-# Beacon server WebSocket address (TLS required in production)
-server_addr = "wss://beacon.example.com/ws/ingest/"
+# Beacon server REST base URL (TLS required in production)
+rest_base_url = "https://beacon.example.com"
+
+# NATS JetStream transport configuration
+[nats]
+url = "nats://beacon.example.com:4222"
+subject_prefix = "agent"
+command_prefix = "agent_cmd"
 
 # Username for API authentication
 username = "admin"

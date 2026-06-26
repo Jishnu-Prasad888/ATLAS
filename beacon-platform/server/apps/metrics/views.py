@@ -229,21 +229,11 @@ class MetricConfigView(APIView):
         serializer.save()
         logger.debug("MetricConfigView config updated for agent %s", agent_id)
 
-        # Push updated config to agent via WebSocket
-        safe_id = agent_id.replace(":", "_").replace("#", "_").replace(" ", "_")
-        try:
-            async_to_sync(channel_layer.group_send)(
-                f"agent_{safe_id}",
-                {
-                    "type": "agent.command",
-                    "data": {
-                        "type": "config_update",
-                        "payload": serializer.data,
-                    },
-                },
-            )
-            logger.debug("MetricConfigView config_update sent via group_send to agent_%s", safe_id)
-        except Exception as e:
-            logger.warning("MetricConfigView WebSocket group_send failed: %s", e)
+        from apps.transport.nats_worker import publish_command
+
+        if not publish_command(agent_id, "config_update", {"payload": serializer.data}):
+            logger.warning("MetricConfigView failed to dispatch config_update via NATS")
+        else:
+            logger.debug("MetricConfigView config_update dispatched to agent %s", agent_id)
 
         return Response(serializer.data)

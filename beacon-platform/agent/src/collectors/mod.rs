@@ -47,7 +47,7 @@ pub use payload::TelemetryPayload;
 /// When `log_engine` is provided, collectors that support log emission
 /// (docker, kubernetes) will emit state-change events.
 /// `collector_flags` allows the server to dynamically toggle collectors
-/// at runtime via WebSocket config_update messages.
+/// at runtime via server control messages.
 pub fn build_collectors(
     config: &AgentConfig,
     identity: &AgentIdentity,

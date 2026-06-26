@@ -1,6 +1,6 @@
 // engines/health.rs — Health Engine
 // Tracks agent-level and per-collector health state.
-// Status is readable via TUI, REST API, and WebSocket.
+// Status is readable via TUI, REST API, and streamed via control channel.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

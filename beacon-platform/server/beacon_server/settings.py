@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.config",
     "apps.health",
     "apps.atlas_ai",
+    "apps.transport",
     "apps.websocket",
     "apps.operations",
     "apps.tools",
@@ -183,9 +184,23 @@ REST_FRAMEWORK = {
 }
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
-CORS_ALLOWED_ORIGINS = os.environ.get(
+_cors_origins_raw = os.environ.get(
     "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000"
-).split(",")
+)
+
+def _parse_cors_origins(raw: str) -> tuple[bool, list[str]]:
+    if raw is None:
+        return False, []
+    trimmed = raw.strip()
+    if not trimmed:
+        return False, []
+    candidates = [origin.strip() for origin in trimmed.split(",") if origin.strip()]
+    if any(origin.strip().strip('"').strip("'") == "*" for origin in candidates):
+        return True, []
+    return False, candidates
+
+CORS_ALLOW_ALL_ORIGINS, CORS_ALLOWED_ORIGINS = _parse_cors_origins(_cors_origins_raw)
+CORS_ALLOW_ALL_HEADERS = CORS_ALLOW_ALL_ORIGINS
 CORS_ALLOW_CREDENTIALS = True
 
 # ─── Encryption ───────────────────────────────────────────────────────────────
@@ -198,6 +213,15 @@ BEACON_TLS_KEY = os.environ.get("BEACON_TLS_KEY", "certs/server.key")
 BEACON_AGENT_HEARTBEAT_TIMEOUT = int(os.environ.get("BEACON_AGENT_HEARTBEAT_TIMEOUT", "60"))  # seconds
 BEACON_MAX_AGENTS = int(os.environ.get("BEACON_MAX_AGENTS", "1000"))
 BEACON_WEBSOCKET_BUFFER_SIZE = int(os.environ.get("BEACON_WEBSOCKET_BUFFER_SIZE", "1000"))
+
+# ─── NATS Transport ───────────────────────────────────────────────────────────
+BEACON_ENABLE_NATS_WORKER = os.environ.get("BEACON_ENABLE_NATS_WORKER", "1") != "0"
+BEACON_NATS_URL = os.environ.get("BEACON_NATS_URL", "nats://localhost:4222")
+BEACON_NATS_SUBJECT_PREFIX = os.environ.get("BEACON_NATS_SUBJECT_PREFIX", "agent")
+BEACON_NATS_COMMAND_PREFIX = os.environ.get("BEACON_NATS_COMMAND_PREFIX", "agent_cmd")
+BEACON_NATS_STREAM_INGEST = os.environ.get("BEACON_NATS_STREAM_INGEST", "agent_ingest")
+BEACON_NATS_STREAM_CONTROL = os.environ.get("BEACON_NATS_STREAM_CONTROL", "agent_control")
+BEACON_NATS_INGEST_CONSUMER = os.environ.get("BEACON_NATS_INGEST_CONSUMER", "beacon-server")
 BEACON_RATE_LIMIT_PER_AGENT = int(os.environ.get("BEACON_RATE_LIMIT_PER_AGENT", "100"))  # msgs/sec
 
 # ─── Sandbox Execution Defaults ───────────────────────────────────────────────

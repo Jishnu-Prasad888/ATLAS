@@ -44,3 +44,11 @@ Sandbox notes
   - `cd beacon-platform/server/sandbox`
   - `docker build -t sandbox-python:1.0 .`
   - (optional) `docker push <registry>/sandbox-python:1.0`
+
+
+
+cd server
+cp .env.example .env   # fill secrets
+docker compose up -d
+docker compose exec server python manage.py beacon_init  # one-time admin bootstrap
+That command set now gives you the database, Redis, JetStream, and Django server in one go

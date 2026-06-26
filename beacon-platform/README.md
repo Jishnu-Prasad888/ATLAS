@@ -46,6 +46,10 @@ cp .env.example .env
 docker compose up -d
 docker compose exec server python manage.py migrate
 docker compose exec server python manage.py beacon_init
+
+# NATS JetStream will be available on nats://localhost:4222 once the stack is up.
+# Optional: open a shell in the sandbox data-science container
+# docker compose exec sandbox bash
 ```
 
 The server starts on **http://localhost:8000** (REST + UI) and listens for NATS at **nats://localhost:4222**.
