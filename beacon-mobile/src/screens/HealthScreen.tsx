@@ -11,6 +11,7 @@ import { useTheme } from '@/theme'
 
 function AgentCard({ agent }: { agent: Agent }) {
   const color = statusColor(agent.status)
+  const { palette: c } = useTheme()
   const failedCols = agent.collector_health.filter((c) => {
     const status = c.status?.toLowerCase?.() ?? ''
     return status !== 'ok' && status !== 'healthy'
@@ -26,39 +27,39 @@ function AgentCard({ agent }: { agent: Agent }) {
         </View>
       </View>
 
-      <MonoText size={9} color="#5a6878">last seen {timeAgo(agent.last_seen)}</MonoText>
+      <MonoText size={9} color={c.textMuted}>last seen {timeAgo(agent.last_seen)}</MonoText>
 
       {agent.is_stale && (
         <View style={{
-          marginTop: 8, backgroundColor: '#2a2200', borderRadius: 6,
-          borderWidth: 1, borderColor: '#eab30830', padding: 8,
+          marginTop: 8, backgroundColor: c.warning + '18', borderRadius: 6,
+          borderWidth: 1, borderColor: c.warning + '40', padding: 8,
         }}>
-          <MonoText size={10} color="#eab308">⚠ Agent is stale — not recently reporting</MonoText>
+          <MonoText size={10} color={c.warning}>⚠ Agent is stale — not recently reporting</MonoText>
         </View>
       )}
 
       {agent.collector_health.length > 0 && (
         <View style={{ marginTop: 12 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <MonoText size={9} color="#3a4555" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Collectors</MonoText>
+            <MonoText size={9} color={c.textDim} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Collectors</MonoText>
             {failedCols > 0 && (
               <MonoText size={9} color="#ef4444">{failedCols} issue{failedCols > 1 ? 's' : ''}</MonoText>
             )}
           </View>
-          <View style={{ borderTopWidth: 1, borderTopColor: '#1e252e' }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: c.border }}>
             {agent.collector_health.map((col, i) => {
                const normalized = col.status?.toLowerCase?.() ?? ''
                const ok = normalized === 'ok' || normalized === 'healthy'
                const running = normalized === 'running'
-               const c = ok ? '#22c55e' : running ? '#3b82f6' : '#ef4444'
+               const statusTone = ok ? '#22c55e' : running ? '#3b82f6' : '#ef4444'
                return (
                  <View key={col.collector + i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 }}>
-                   <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: c }} />
+                   <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: statusTone }} />
                    <MonoText size={11} style={{ flex: 1 }}>{col.collector}</MonoText>
-                   <MonoText size={10} color={c}>{col.status}</MonoText>
+                   <MonoText size={10} color={statusTone}>{col.status}</MonoText>
                   {col.failure_count > 0 && (
-                    <View style={{ backgroundColor: '#2a0f0f', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 }}>
-                      <MonoText size={9} color="#ef4444">{col.failure_count} fail</MonoText>
+                    <View style={{ backgroundColor: c.danger + '18', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 }}>
+                      <MonoText size={9} color={c.danger}>{col.failure_count} fail</MonoText>
                     </View>
                   )}
                 </View>

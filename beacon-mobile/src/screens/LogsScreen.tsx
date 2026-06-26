@@ -19,13 +19,14 @@ const SOURCES: (LogSource | 'all')[] = ['all', 'systemd-journald', 'syslog', 'ke
 
 function SevChip({ sev, active, onPress }: { sev: string; active: boolean; onPress: () => void }) {
   const color = severityColor(sev)
+  const { palette: c } = useTheme()
   return (
     <TouchableOpacity
       onPress={onPress}
       style={{
         paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
         borderWidth: 1,
-        borderColor: active ? color : '#1e252e',
+        borderColor: active ? color : c.border,
         backgroundColor: active ? color + '22' : 'transparent',
       }}
     >
@@ -36,16 +37,17 @@ function SevChip({ sev, active, onPress }: { sev: string; active: boolean; onPre
 
 function LogRow({ entry }: { entry: LogEntry }) {
   const color = severityColor(entry.severity)
+  const { palette: c } = useTheme()
   return (
-    <View style={{ paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#1e252e' }}>
+    <View style={{ paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border }}>
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 3 }}>
         <View style={{ width: 3, height: 12, backgroundColor: color, borderRadius: 2 }} />
         <MonoText size={9} color={color} style={{ textTransform: 'uppercase' }}>{entry.severity}</MonoText>
-        <MonoText size={9} color="#3a4555">{formatTs(entry.timestamp)}</MonoText>
-        <MonoText size={9} color="#3a4555">·</MonoText>
-        <MonoText size={9} color="#5a6878">{entry.source}</MonoText>
+        <MonoText size={9} color={c.textDim}>{formatTs(entry.timestamp)}</MonoText>
+        <MonoText size={9} color={c.textDim}>·</MonoText>
+        <MonoText size={9} color={c.textMuted}>{entry.source}</MonoText>
       </View>
-      <Text style={{ fontSize: 12, color: '#d4dae3', fontFamily: 'SpaceMono-Regular', lineHeight: 18, paddingLeft: 11 }}>
+      <Text style={{ fontSize: 12, color: c.text, fontFamily: 'SpaceMono-Regular', lineHeight: 18, paddingLeft: 11 }}>
         {entry.message}
       </Text>
     </View>
@@ -105,7 +107,7 @@ export function LogsScreen() {
             value={search}
             onChangeText={setSearch}
             placeholder="Search logs…"
-            placeholderTextColor="#3a4555"
+            placeholderTextColor={c.textDim}
             editable={!liveMode}
             style={{
               flex: 1, backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder,

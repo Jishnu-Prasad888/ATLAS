@@ -12,6 +12,7 @@ import { useTheme } from '@/theme'
 function AuditRow({ log }: { log: AuditLog }) {
   const [expanded, setExpanded] = useState(false)
   const color = log.success ? '#22c55e' : '#ef4444'
+  const { palette: c } = useTheme()
 
   return (
     <TouchableOpacity
@@ -24,20 +25,20 @@ function AuditRow({ log }: { log: AuditLog }) {
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <MonoText size={13} style={{ fontWeight: '700' }}>{log.action}</MonoText>
-              <MonoText size={9} color="#3a4555">{timeAgo(log.timestamp)}</MonoText>
+              <MonoText size={9} color={c.textDim}>{timeAgo(log.timestamp)}</MonoText>
             </View>
-            <MonoText size={11} color="#5a6878">{log.resource} · {log.resource_id}</MonoText>
+            <MonoText size={11} color={c.textMuted}>{log.resource} · {log.resource_id}</MonoText>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
-              <MonoText size={10} color="#3b82f6">{log.user}</MonoText>
-              {log.ip_address && <MonoText size={10} color="#3a4555">{log.ip_address}</MonoText>}
+              <MonoText size={10} color={c.primary}>{log.user}</MonoText>
+              {log.ip_address && <MonoText size={10} color={c.textDim}>{log.ip_address}</MonoText>}
               <View style={{ backgroundColor: color + '20', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 }}>
                 <MonoText size={9} color={color}>{log.success ? 'success' : 'failed'}</MonoText>
               </View>
             </View>
             {expanded && Object.keys(log.details).length > 0 && (
-              <View style={{ marginTop: 10, backgroundColor: '#181c22', borderRadius: 6, padding: 10 }}>
-                <MonoText size={9} color="#3a4555" style={{ marginBottom: 4 }}>DETAILS</MonoText>
-                <MonoText size={10} color="#5a6878">{JSON.stringify(log.details, null, 2)}</MonoText>
+              <View style={{ marginTop: 10, backgroundColor: c.surface2, borderRadius: 6, padding: 10 }}>
+                <MonoText size={9} color={c.textDim} style={{ marginBottom: 4 }}>DETAILS</MonoText>
+                <MonoText size={10} color={c.textMuted}>{JSON.stringify(log.details, null, 2)}</MonoText>
               </View>
             )}
           </View>
@@ -74,7 +75,7 @@ export function AuditScreen() {
           value={search}
           onChangeText={setSearch}
           placeholder="Filter by user…"
-          placeholderTextColor="#3a4555"
+          placeholderTextColor={c.textDim}
           style={{
             backgroundColor: c.inputBg, borderWidth: 1, borderColor: c.inputBorder,
             borderRadius: 8, padding: 10, color: c.text,

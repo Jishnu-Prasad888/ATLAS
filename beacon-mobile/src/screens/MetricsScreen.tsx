@@ -86,6 +86,7 @@ function Chip({
   color: string
   onPress: () => void
 }) {
+  const { palette: c } = useTheme()
   return (
     <TouchableOpacity
       activeOpacity={0.82}
@@ -95,24 +96,25 @@ function Chip({
         justifyContent: 'center',
         borderRadius: 7,
         borderWidth: 1,
-        borderColor: active ? color : '#1e252e',
+        borderColor: active ? color : c.border,
         backgroundColor: active ? color + '22' : 'transparent',
         paddingHorizontal: 10,
         paddingVertical: 6,
       }}
     >
-      <MonoText size={10} color={active ? color : '#6b7280'} style={{ fontWeight: active ? '700' : '500' }}>
+      <MonoText size={10} color={active ? color : c.textMuted} style={{ fontWeight: active ? '700' : '500' }}>
         {label}
       </MonoText>
     </TouchableOpacity>
   )
 }
 
-function StatLine({ label, value, color = '#d4dae3' }: { label: string; value: string; color?: string }) {
+function StatLine({ label, value, color }: { label: string; value: string; color?: string }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-      <MonoText size={10} color="#6b7280">{label}</MonoText>
-      <MonoText size={10} color={color} style={{ flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</MonoText>
+      <MonoText size={10} color={c.textMuted}>{label}</MonoText>
+      <MonoText size={10} color={color ?? c.text} style={{ flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</MonoText>
     </View>
   )
 }
@@ -130,11 +132,12 @@ function GaugeCard({
   timestamp?: string
   children?: React.ReactNode
 }) {
+  const { palette: c } = useTheme()
   const clamped = clamp(safeNumber(value), 0, 100)
   const color = gaugeColor(clamped)
   return (
     <Card style={{ flex: 1, padding: 12, minHeight: 150 }}>
-      <MonoText size={10} color="#6b7280" style={{ textTransform: 'uppercase', fontWeight: '700', marginBottom: 8 }}>
+      <MonoText size={10} color={c.textMuted} style={{ textTransform: 'uppercase', fontWeight: '700', marginBottom: 8 }}>
         {title}
       </MonoText>
       <Text style={{
@@ -147,9 +150,9 @@ function GaugeCard({
         {clamped.toFixed(1)}%
       </Text>
       <MetricBar value={clamped} color={color} height={4} style={{ marginVertical: 9 }} />
-      {detail ? <MonoText size={10} color="#d4dae3" numberOfLines={1}>{detail}</MonoText> : null}
+      {detail ? <MonoText size={10} color={c.text} numberOfLines={1}>{detail}</MonoText> : null}
       {children ? <View style={{ marginTop: 7, gap: 4 }}>{children}</View> : null}
-      {timestamp ? <MonoText size={8} color="#3a4555" style={{ marginTop: 'auto' }}>{formatTs(timestamp, 'HH:mm:ss')}</MonoText> : null}
+      {timestamp ? <MonoText size={8} color={c.textDim} style={{ marginTop: 'auto' }}>{formatTs(timestamp, 'HH:mm:ss')}</MonoText> : null}
     </Card>
   )
 }
@@ -167,6 +170,7 @@ function ChartCard({
   color: string
   suffix: string
 }) {
+  const { palette: c } = useTheme()
   const latest = data.length ? data[data.length - 1] : null
   const max = data.length ? Math.max(...data, 0) : 0
   return (
@@ -176,14 +180,14 @@ function ChartCard({
         paddingTop: 12,
         paddingBottom: 8,
         borderBottomWidth: 1,
-        borderBottomColor: '#1e252e',
+        borderBottomColor: c.border,
         flexDirection: 'row',
         justifyContent: 'space-between',
         gap: 10,
       }}>
         <View style={{ flex: 1 }}>
-          <MonoText size={10} color="#6b7280" style={{ textTransform: 'uppercase', fontWeight: '700' }}>{title}</MonoText>
-          <MonoText size={9} color="#3a4555">{subtitle}</MonoText>
+          <MonoText size={10} color={c.textMuted} style={{ textTransform: 'uppercase', fontWeight: '700' }}>{title}</MonoText>
+          <MonoText size={9} color={c.textDim}>{subtitle}</MonoText>
         </View>
         <MonoText size={11} color={color} style={{ fontWeight: '700' }}>
           {latest == null ? '--' : `${latest.toFixed(suffix === '%' ? 1 : 0)}${suffix}`}
@@ -199,11 +203,11 @@ function ChartCard({
             svg={{ stroke: color, strokeWidth: 2 }}
             contentInset={{ top: 12, bottom: 12, left: 4, right: 4 }}
           >
-            <Grid svg={{ stroke: '#1e252e' }} />
+            <Grid svg={{ stroke: c.border }} />
           </LineChart>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-            <MonoText size={9} color="#3a4555">{data.length} points</MonoText>
-            <MonoText size={9} color="#3a4555">max {max.toFixed(suffix === '%' ? 1 : 0)}{suffix}</MonoText>
+            <MonoText size={9} color={c.textDim}>{data.length} points</MonoText>
+            <MonoText size={9} color={c.textDim}>max {max.toFixed(suffix === '%' ? 1 : 0)}{suffix}</MonoText>
           </View>
         </View>
       )}
@@ -212,31 +216,32 @@ function ChartCard({
 }
 
 function InterfaceMiniCard({ iface }: { iface: NetworkData['interfaces'][number] }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{
       borderWidth: 1,
-      borderColor: '#1e252e',
+      borderColor: c.border,
       borderRadius: 8,
       overflow: 'hidden',
-      backgroundColor: '#0d1117',
+      backgroundColor: c.surface,
     }}>
-      <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1e252e' }}>
-        <MonoText size={11} color="#d4dae3" style={{ fontWeight: '700' }} numberOfLines={1}>{iface.name}</MonoText>
+      <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: c.border }}>
+        <MonoText size={11} color={c.text} style={{ fontWeight: '700' }} numberOfLines={1}>{iface.name}</MonoText>
       </View>
       <View style={{ flexDirection: 'row' }}>
-        <View style={{ flex: 1, padding: 9, borderRightWidth: 1, borderRightColor: '#1e252e' }}>
+        <View style={{ flex: 1, padding: 9, borderRightWidth: 1, borderRightColor: c.border }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <ArrowDownRight size={12} color="#22c55e" />
-            <MonoText size={9} color="#6b7280">In</MonoText>
+            <MonoText size={9} color={c.textMuted}>In</MonoText>
           </View>
-          <MonoText size={11} color="#d4dae3">{formatBandwidth(iface.rx_bytes_rate)}</MonoText>
+          <MonoText size={11} color={c.text}>{formatBandwidth(iface.rx_bytes_rate)}</MonoText>
         </View>
         <View style={{ flex: 1, padding: 9 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <ArrowUpRight size={12} color="#3b82f6" />
-            <MonoText size={9} color="#6b7280">Out</MonoText>
+            <MonoText size={9} color={c.textMuted}>Out</MonoText>
           </View>
-          <MonoText size={11} color="#d4dae3">{formatBandwidth(iface.tx_bytes_rate)}</MonoText>
+          <MonoText size={11} color={c.text}>{formatBandwidth(iface.tx_bytes_rate)}</MonoText>
         </View>
       </View>
     </View>
@@ -250,6 +255,7 @@ function StorageLayout({
   disks: StorageDisk[]
   partitions: StoragePartition[]
 }) {
+  const { palette: c } = useTheme()
   if (!disks.length && !partitions.length) return null
 
   const partitionsByDisk = partitions.reduce<Record<string, StoragePartition[]>>((acc, part) => {
@@ -287,11 +293,11 @@ function StorageLayout({
           const pct = clamp(safeNumber(disk.usage_pct), 0, 100)
           const color = SERIES_COLORS[diskIdx % SERIES_COLORS.length]
           return (
-            <View key={disk.device} style={{ borderWidth: 1, borderColor: '#1e252e', borderRadius: 8, padding: 10, gap: 8 }}>
+            <View key={disk.device} style={{ borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 10, gap: 8 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                 <View style={{ flex: 1 }}>
-                  <MonoText size={12} color="#d4dae3" style={{ fontWeight: '700' }} numberOfLines={1}>{disk.name || disk.device}</MonoText>
-                  <MonoText size={9} color="#6b7280" numberOfLines={1}>{disk.mount_points?.join(', ') || disk.fs_type || 'unknown'}</MonoText>
+                  <MonoText size={12} color={c.text} style={{ fontWeight: '700' }} numberOfLines={1}>{disk.name || disk.device}</MonoText>
+                  <MonoText size={9} color={c.textMuted} numberOfLines={1}>{disk.mount_points?.join(', ') || disk.fs_type || 'unknown'}</MonoText>
                 </View>
                 <MonoText size={11} color={color}>{formatPct(pct)}</MonoText>
               </View>
@@ -300,10 +306,10 @@ function StorageLayout({
               {parts.map((part, idx) => {
                 const partPct = clamp(safeNumber(part.usage_pct), 0, 100)
                 return (
-                  <View key={`${part.device}-${idx}`} style={{ paddingLeft: 10, borderLeftWidth: 1, borderLeftColor: '#1e252e', gap: 5 }}>
+                  <View key={`${part.device}-${idx}`} style={{ paddingLeft: 10, borderLeftWidth: 1, borderLeftColor: c.border, gap: 5 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-                      <MonoText size={10} color="#d4dae3" numberOfLines={1}>{part.mount_point || part.name}</MonoText>
-                      <MonoText size={10} color="#6b7280">{part.fs_type}</MonoText>
+                      <MonoText size={10} color={c.text} numberOfLines={1}>{part.mount_point || part.name}</MonoText>
+                      <MonoText size={10} color={c.textMuted}>{part.fs_type}</MonoText>
                     </View>
                     <MetricBar value={partPct} color={SERIES_COLORS[(diskIdx + idx + 1) % SERIES_COLORS.length]} height={3} />
                   </View>
@@ -656,8 +662,8 @@ export function MetricsScreen() {
               ) : null}
               {primaryInterface ? (
                 <Card style={{ width: '48%', minHeight: 150 }}>
-                  <MonoText size={10} color="#6b7280" style={{ textTransform: 'uppercase', fontWeight: '700', marginBottom: 8 }}>Network</MonoText>
-                  <MonoText size={12} color="#d4dae3" style={{ marginBottom: 8 }} numberOfLines={1}>{primaryInterface.name}</MonoText>
+                  <MonoText size={10} color={c.textMuted} style={{ textTransform: 'uppercase', fontWeight: '700', marginBottom: 8 }}>Network</MonoText>
+                  <MonoText size={12} color={c.text} style={{ marginBottom: 8 }} numberOfLines={1}>{primaryInterface.name}</MonoText>
                   <StatLine label="RX" value={formatBandwidth(primaryInterface.rx_bytes_rate)} color="#22c55e" />
                   <StatLine label="TX" value={formatBandwidth(primaryInterface.tx_bytes_rate)} color="#3b82f6" />
                   <StatLine label="TCP" value={String(network?.tcp?.established ?? 0)} />
@@ -712,7 +718,7 @@ export function MetricsScreen() {
                     value={procSearch}
                     onChangeText={setProcSearch}
                     placeholder="Search by name or pid"
-                    placeholderTextColor="#3a4555"
+                    placeholderTextColor={c.textDim}
                     autoCapitalize="none"
                     autoCorrect={false}
                     style={{
@@ -746,11 +752,11 @@ export function MetricsScreen() {
 
               {procGrouping === 'byExe' ? (
                 processGroups.map(group => (
-                  <View key={group.key} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#1e252e', gap: 5 }}>
+                  <View key={group.key} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: c.border, gap: 5 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                       <View style={{ flex: 1 }}>
-                        <MonoText size={11} color="#d4dae3" numberOfLines={1}>{group.label}</MonoText>
-                        <MonoText size={9} color="#6b7280">{group.count} proc · {formatBytes(group.mem)}</MonoText>
+                        <MonoText size={11} color={c.text} numberOfLines={1}>{group.label}</MonoText>
+                        <MonoText size={9} color={c.textMuted}>{group.count} proc · {formatBytes(group.mem)}</MonoText>
                       </View>
                       <MonoText size={11} color={gaugeColor(group.cpu)}>{formatPct(group.cpu)}</MonoText>
                     </View>
@@ -761,15 +767,15 @@ export function MetricsScreen() {
                 ))
               ) : (
                 filteredProcesses.map(proc => (
-                  <View key={`${proc.pid}-${proc.start_time}`} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#1e252e', gap: 4 }}>
+                  <View key={`${proc.pid}-${proc.start_time}`} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: c.border, gap: 4 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                       <View style={{ flex: 1 }}>
-                        <MonoText size={11} color="#d4dae3" numberOfLines={1}>{proc.name || 'process'} · {proc.pid}</MonoText>
-                        <MonoText size={9} color="#6b7280" numberOfLines={1}>{proc.exe || 'unknown exe'}</MonoText>
+                        <MonoText size={11} color={c.text} numberOfLines={1}>{proc.name || 'process'} · {proc.pid}</MonoText>
+                        <MonoText size={9} color={c.textMuted} numberOfLines={1}>{proc.exe || 'unknown exe'}</MonoText>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
                         <MonoText size={11} color={gaugeColor(proc.cpu_pct)}>{formatPct(proc.cpu_pct)}</MonoText>
-                        <MonoText size={9} color="#6b7280">{formatBytes(proc.mem_bytes)}</MonoText>
+                        <MonoText size={9} color={c.textMuted}>{formatBytes(proc.mem_bytes)}</MonoText>
                       </View>
                     </View>
                     <TouchableOpacity onPress={() => confirmKill(proc.pid, proc.name)} disabled={killMutation.isPending} style={{ alignSelf: 'flex-end' }}>

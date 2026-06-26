@@ -29,10 +29,11 @@ interface BadgeProps {
   color?: string
   bg?: string
 }
-export function Badge({ label, color = '#d4dae3', bg = '#1e252e' }: BadgeProps) {
+export function Badge({ label, color, bg }: BadgeProps) {
+  const { palette: c } = useTheme()
   return (
-    <View style={{ backgroundColor: bg, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 }}>
-      <Text style={{ fontSize: 10, color, fontFamily: 'SpaceMono-Regular', fontWeight: '600' }}>
+    <View style={{ backgroundColor: bg ?? c.chipBg, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 }}>
+      <Text style={{ fontSize: 10, color: color ?? c.chipText, fontFamily: 'SpaceMono-Regular', fontWeight: '600' }}>
         {label}
       </Text>
     </View>
@@ -115,13 +116,13 @@ interface SectionHeaderProps {
   color?: string
   description?: string
 }
-export function SectionHeader({ title, count, right, color = '#3a4555', description }: SectionHeaderProps) {
+export function SectionHeader({ title, count, right, color, description }: SectionHeaderProps) {
   const { palette: c } = useTheme()
   return (
     <View style={{ marginBottom: description ? 12 : 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <Text style={{
-          fontSize: 10, color: color || c.textMuted, fontFamily: 'SpaceMono-Regular',
+          fontSize: 10, color: color || c.textDim, fontFamily: 'SpaceMono-Regular',
           textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700',
         }}>
           {title}

@@ -38,7 +38,7 @@ function SettingField({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#3a4555"
+        placeholderTextColor={c.textDim}
         secureTextEntry={secureTextEntry}
         keyboardType={keyboard as any}
         autoCapitalize="none"

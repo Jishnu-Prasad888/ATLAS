@@ -23,6 +23,7 @@ const ROLE_COLORS: Record<Role, string> = {
 function UserCard({ user, onAction }: { user: User; onAction: (u: User) => void }) {
   const color = user.is_active ? '#22c55e' : '#ef4444'
   const roleColor = ROLE_COLORS[user.role] ?? '#6b7280'
+  const { palette: c } = useTheme()
 
   return (
     <Card style={{ marginBottom: 10 }} onPress={() => onAction(user)}>
@@ -38,16 +39,16 @@ function UserCard({ user, onAction }: { user: User; onAction: (u: User) => void 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <MonoText size={14} style={{ fontWeight: '700' }}>{user.username}</MonoText>
             {!user.is_active && (
-              <View style={{ backgroundColor: '#2a0f0f', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 }}>
-                <MonoText size={9} color="#ef4444">inactive</MonoText>
+              <View style={{ backgroundColor: c.danger + '18', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 }}>
+                <MonoText size={9} color={c.danger}>inactive</MonoText>
               </View>
             )}
           </View>
-          <MonoText size={11} color="#5a6878">{user.email}</MonoText>
+          <MonoText size={11} color={c.textMuted}>{user.email}</MonoText>
           <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
             <Badge label={user.role} color={roleColor} bg={roleColor + '20'} />
           </View>
-          <MonoText size={9} color="#3a4555" style={{ marginTop: 4 }}>
+          <MonoText size={9} color={c.textDim} style={{ marginTop: 4 }}>
             joined {timeAgo(user.created_at)}
             {user.last_login ? ` · last login ${timeAgo(user.last_login)}` : ''}
           </MonoText>

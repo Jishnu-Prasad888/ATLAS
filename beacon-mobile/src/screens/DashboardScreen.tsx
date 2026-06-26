@@ -52,12 +52,13 @@ const shortAgentId = (id: string) => (id.length > 12 ? `${id.slice(0, 8)}...${id
 const isMetricLog = (severity: string) => severity !== 'Trace' && severity !== 'Debug'
 
 function InfoCell({ label, value }: { label: string; value: string }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ flex: 1, minWidth: 120 }}>
-      <MonoText size={9} color="#6b7280" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+      <MonoText size={9} color={c.textMuted} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
         {label}
       </MonoText>
-      <MonoText size={12} color="#d4dae3" numberOfLines={1} style={{ marginTop: 2 }}>
+      <MonoText size={12} color={c.text} numberOfLines={1} style={{ marginTop: 2 }}>
         {value}
       </MonoText>
     </View>
@@ -142,10 +143,10 @@ function AgentDropdown({
         }}
       >
         <View style={{ flex: 1 }}>
-          <MonoText size={10} color="#6b7280" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>Agent</MonoText>
-          <MonoText size={11} color="#d4dae3" numberOfLines={1}>{selected?.hostname ?? 'Select agent'}</MonoText>
+          <MonoText size={10} color={c.textMuted} style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>Agent</MonoText>
+          <MonoText size={11} color={c.text} numberOfLines={1}>{selected?.hostname ?? 'Select agent'}</MonoText>
         </View>
-        <MonoText size={13} color="#6b7280">⌄</MonoText>
+        <MonoText size={13} color={c.textMuted}>⌄</MonoText>
       </TouchableOpacity>
 
       <Modal
@@ -173,7 +174,7 @@ function AgentDropdown({
             overflow: 'hidden',
           }}>
             <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: c.border }}>
-              <MonoText size={10} color="#6b7280" style={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700' }}>Select agent</MonoText>
+              <MonoText size={10} color={c.textMuted} style={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700' }}>Select agent</MonoText>
             </View>
             <ScrollView>
               {agents.map(agent => {
@@ -200,8 +201,8 @@ function AgentDropdown({
                   >
                     <StatusDot color={color} size={8} />
                     <View style={{ flex: 1 }}>
-                      <MonoText size={12} color="#d4dae3" numberOfLines={1}>{agent.hostname}</MonoText>
-                      <MonoText size={9} color="#6b7280">{shortAgentId(agent.agent_id)} · {timeAgo(agent.last_seen)}</MonoText>
+                      <MonoText size={12} color={c.text} numberOfLines={1}>{agent.hostname}</MonoText>
+                      <MonoText size={9} color={c.textMuted}>{shortAgentId(agent.agent_id)} · {timeAgo(agent.last_seen)}</MonoText>
                     </View>
                     {active ? <Badge label="selected" color={color} bg={color + '22'} /> : null}
                   </TouchableOpacity>
@@ -226,11 +227,12 @@ function GuestDashboard({
   organizations: number
   expiresAt?: string | null
 }) {
+  const { palette: c } = useTheme()
   return (
     <View style={{ gap: 14 }}>
       <View>
         <MonoText size={18} style={{ fontWeight: '700' }}>Guest Monitoring Dashboard</MonoText>
-        <MonoText size={11} color="#6b7280">{username ? `Welcome, ${username}` : `Accessible agents: ${accessibleCount}`}</MonoText>
+        <MonoText size={11} color={c.textMuted}>{username ? `Welcome, ${username}` : `Accessible agents: ${accessibleCount}`}</MonoText>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         <StatCard label="Agents" value={accessibleCount} hint="Assigned access" accent="#93c5fd" />
@@ -239,11 +241,11 @@ function GuestDashboard({
       </View>
       <Card>
         <SectionHeader title="Guest access" />
-        <MonoText size={11} color="#6b7280">
+        <MonoText size={11} color={c.textMuted}>
           You can view assigned agents and organizations. Administration, audit, and controls are hidden for guest access.
         </MonoText>
         {expiresAt ? (
-          <MonoText size={11} color="#d4dae3" style={{ marginTop: 10 }}>
+          <MonoText size={11} color={c.text} style={{ marginTop: 10 }}>
             Expires {formatTs(expiresAt)}
           </MonoText>
         ) : null}
@@ -265,6 +267,7 @@ function AgentFocusCard({
   onSelect: (id: string) => void
   loading: boolean
 }) {
+  const { palette: c } = useTheme()
   if (loading) return <Card><LoadingState label="Loading agents..." /></Card>
   if (!activeAgent) return <Card><EmptyState label="No agents available for your account" icon="◎" /></Card>
 
@@ -278,20 +281,20 @@ function AgentFocusCard({
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <View style={{ flex: 1 }}>
-          <MonoText size={17} color="#d4dae3" style={{ fontWeight: '700' }} numberOfLines={1}>{activeAgent.hostname}</MonoText>
-          <MonoText size={10} color="#6b7280">{shortAgentId(activeAgent.agent_id)}</MonoText>
+          <MonoText size={17} color={c.text} style={{ fontWeight: '700' }} numberOfLines={1}>{activeAgent.hostname}</MonoText>
+          <MonoText size={10} color={c.textMuted}>{shortAgentId(activeAgent.agent_id)}</MonoText>
         </View>
         <Badge label={activeAgent.status.toLowerCase()} color={color} bg={color + '22'} />
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
-        <MonoText size={10} color="#6b7280">{timeAgo(activeAgent.last_seen)}</MonoText>
+        <MonoText size={10} color={c.textMuted}>{timeAgo(activeAgent.last_seen)}</MonoText>
         {activeAgent.is_stale ? <Badge label="stale" color="#eab308" bg="#eab30822" /> : null}
       </View>
 
       {activeAgent.tags.length > 0 ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-          {activeAgent.tags.slice(0, 5).map(tag => <Badge key={tag} label={tag} color="#d4dae3" bg="#1e252e" />)}
+          {activeAgent.tags.slice(0, 5).map(tag => <Badge key={tag} label={tag} />)}
         </View>
       ) : null}
 
@@ -319,6 +322,7 @@ function MetricPanel({
   agentsLoading: boolean
   onSelectAgent: (id: string) => void
 }) {
+  const { palette: c } = useTheme()
   const { latest, history } = useLiveMetrics(agentId)
   const cpu = latest.cpu?.data as unknown as CpuData | undefined
   const ram = latest.ram?.data as unknown as RamData | undefined
@@ -374,12 +378,12 @@ function MetricPanel({
           <SectionHeader title="Network" description={primaryInterface.name} />
           <View style={{ flexDirection: 'row', gap: 14 }}>
             <View style={{ flex: 1 }}>
-              <MonoText size={9} color="#6b7280" style={{ textTransform: 'uppercase' }}>RX</MonoText>
+              <MonoText size={9} color={c.textMuted} style={{ textTransform: 'uppercase' }}>RX</MonoText>
               <MonoText size={16} color="#22c55e" style={{ fontWeight: '700' }}>{formatBandwidth(primaryInterface.rx_bytes_rate)}</MonoText>
               <Sparkline data={netRxHistory} color="#22c55e" />
             </View>
             <View style={{ flex: 1 }}>
-              <MonoText size={9} color="#6b7280" style={{ textTransform: 'uppercase' }}>TX</MonoText>
+              <MonoText size={9} color={c.textMuted} style={{ textTransform: 'uppercase' }}>TX</MonoText>
               <MonoText size={16} color="#3b82f6" style={{ fontWeight: '700' }}>{formatBandwidth(primaryInterface.tx_bytes_rate)}</MonoText>
               <Sparkline data={netTxHistory} color="#3b82f6" />
             </View>
@@ -390,12 +394,12 @@ function MetricPanel({
       {hasGpuDevices && gpu ? (
         <View style={{ marginTop: 16, gap: 8 }}>
           {gpu.gpus.map(g => (
-            <View key={g.uuid || String(g.index)} style={{ borderWidth: 1, borderColor: '#1e252e', borderRadius: 8, padding: 10, gap: 4 }}>
+            <View key={g.uuid || String(g.index)} style={{ borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 10, gap: 4 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-                <MonoText size={11} color="#d4dae3" numberOfLines={1} style={{ flex: 1 }}>{g.name || `GPU ${g.index}`}</MonoText>
+                <MonoText size={11} color={c.text} numberOfLines={1} style={{ flex: 1 }}>{g.name || `GPU ${g.index}`}</MonoText>
                 <MonoText size={10} color="#a78bfa">{g.utilization_pct.toFixed(0)}%</MonoText>
               </View>
-              <MonoText size={10} color="#6b7280">
+              <MonoText size={10} color={c.textMuted}>
                 Mem {Math.round(g.memory_utilization_pct)}% · {formatBytes(g.memory_used_mb * 1024 * 1024)} / {formatBytes(g.memory_total_mb * 1024 * 1024)}
               </MonoText>
             </View>
@@ -426,15 +430,16 @@ function SignalsPanel({
   errorCount: number
   warningCount: number
 }) {
+  const { palette: c } = useTheme()
   const recentLogs = (logs.filter(log => isMetricLog(log.severity)).length
     ? logs.filter(log => isMetricLog(log.severity))
     : logs).slice(0, 4)
 
   return (
     <Card style={{ padding: 0, overflow: 'hidden' }}>
-      <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: '#1e252e', flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
+      <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: c.border, flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
         <SectionHeader title="Signals" />
-        <MonoText size={10} color="#6b7280">{errorCount} errors · {warningCount} warnings</MonoText>
+        <MonoText size={10} color={c.textMuted}>{errorCount} errors · {warningCount} warnings</MonoText>
       </View>
       {loading ? (
         <View style={{ padding: 16 }}><LoadingState label="Loading logs..." /></View>
@@ -443,13 +448,13 @@ function SignalsPanel({
       ) : recentLogs.map(log => {
         const color = severityColor(log.severity)
         return (
-          <View key={log.id} style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#1e252e', gap: 6 }}>
+          <View key={log.id} style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: c.border, gap: 6 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Badge label={log.severity} color={color} bg={color + '22'} />
-              <MonoText size={10} color="#6b7280">{timeAgo(log.timestamp)}</MonoText>
+              <MonoText size={10} color={c.textMuted}>{timeAgo(log.timestamp)}</MonoText>
             </View>
-            <MonoText size={11} color="#d4dae3" numberOfLines={2}>{log.message}</MonoText>
-            <MonoText size={9} color="#3a4555">{log.source}</MonoText>
+            <MonoText size={11} color={c.text} numberOfLines={2}>{log.message}</MonoText>
+            <MonoText size={9} color={c.textDim}>{log.source}</MonoText>
           </View>
         )
       })}
@@ -651,7 +656,7 @@ export function DashboardScreen() {
             <Card>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                 <SectionHeader title="Account" />
-                {isAdmin ? <MonoText size={10} color="#6b7280">Admin tools</MonoText> : null}
+                {isAdmin ? <MonoText size={10} color={c.textMuted}>Admin tools</MonoText> : null}
               </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
                 <InfoCell label="Role" value={user?.role ?? role ?? '—'} />

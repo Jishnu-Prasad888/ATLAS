@@ -17,6 +17,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 function AgentCard({ agent, onAction }: { agent: Agent; onAction: (a: Agent) => void }) {
   const color = agent.is_active ? '#22c55e' : '#ef4444'
   const status = agent.is_active ? 'active' : 'inactive'
+  const { palette: c } = useTheme()
 
   return (
     <Card style={{ marginBottom: 10 }} onPress={() => onAction(agent)}>
@@ -26,19 +27,19 @@ function AgentCard({ agent, onAction }: { agent: Agent; onAction: (a: Agent) => 
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <MonoText size={14} style={{ fontWeight: '700' }}>{agent.hostname}</MonoText>
-          <MonoText size={10} color="#5a6878">{agent.agent_id.slice(0, 20)}…</MonoText>
+          <MonoText size={10} color={c.textMuted}>{agent.agent_id.slice(0, 20)}…</MonoText>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
             {agent.os && (
-              <Badge label={agent.os} color="#5a6878" bg="#181c22" />
+              <Badge label={agent.os} />
             )}
             {agent.version && (
-              <Badge label={`v${agent.version}`} color="#5a6878" bg="#181c22" />
+              <Badge label={`v${agent.version}`} />
             )}
             {agent.tags.slice(0, 3).map(t => (
-              <Badge key={t} label={t} color="#3b82f6" bg="#1e2e42" />
+              <Badge key={t} label={t} color={c.primary} bg={c.primary + '18'} />
             ))}
           </View>
-          <MonoText size={9} color="#3a4555" style={{ marginTop: 4 }}>
+          <MonoText size={9} color={c.textDim} style={{ marginTop: 4 }}>
             last seen {timeAgo(agent.last_seen)}
           </MonoText>
         </View>
