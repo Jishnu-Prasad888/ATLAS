@@ -12,6 +12,16 @@ export default defineConfig({
     },
   },
   server: {
+    watch: {
+      ignored: [
+        '**/bak_outputs/**',
+        '**/coverage/**',
+        '**/dist/**',
+        '**/.vite/**',
+      ],
+      usePolling: process.env.VITE_USE_POLLING === '1',
+      interval: 1000,
+    },
     proxy: {
       '/api/v1/': {
         target:'http://localhost:8000',

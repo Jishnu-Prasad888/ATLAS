@@ -10,23 +10,24 @@
 Users / TUI
      │
      ▼
-Beacon Server (Django + Channels)
+Beacon Server (Django + Channels + NATS JetStream)
   ├── Authentication & RBAC (Argon2id, JWT)
   ├── Audit System (Immutable)
   ├── Telemetry Manager
   ├── REST API  (/api/v1/...)
-  └── WebSocket (/ws/ingest/ · /ws/subscribe/)
+  ├── Agent Transport (NATS JetStream)
+  └── Client WebSocket (/ws/subscribe/)
           │
-          │  Secure WebSocket (TLS 1.3)
+          │  NATS JetStream (TLS 1.3)
           │
-     ▼
+      ▼
 Beacon Agents (Rust, 1 … N)
   ├── Identity Engine    (SHA-256 hardware fingerprint)
   ├── Encryption Engine  (AES-256-GCM)
   ├── Queue Engine       (offline buffering + dead letter)
   ├── Storage Engine     (SQLite WAL — metrics/logs/queue/config)
   ├── Collectors         (CPU · RAM · Storage · Network · Process · Systemd · Docker · Kernel)
-  ├── Transport          (TLS WebSocket, exponential backoff)
+  ├── Transport          (NATS JetStream, exponential backoff)
   ├── Health Engine      (per-collector status tracking)
   └── TUI                (Ratatui — keyboard-driven dashboard)
 ```
@@ -47,7 +48,7 @@ docker compose exec server python manage.py migrate
 docker compose exec server python manage.py beacon_init
 ```
 
-The server starts on **http://localhost:8000** (HTTP + WebSocket).
+The server starts on **http://localhost:8000** (REST + UI) and listens for NATS at **nats://localhost:4222**.
 
 ---
 
@@ -229,7 +230,7 @@ Subscribe to a channel:
 
 | Layer | Mechanism |
 |-------|-----------|
-| Transport | TLS 1.3 (WebSocket) |
+| Transport | NATS JetStream (TLS) |
 | Payload encryption | AES-256-GCM |
 | Key derivation | Argon2id |
 | Password storage | Argon2id |
@@ -281,7 +282,7 @@ Subscribe to a channel:
 
 | Phase | Milestone |
 |-------|-----------|
-| 1 | Agent Core — Identity, auth, storage, WebSocket ✓ |
+| 1 | Agent Core — Identity, auth, storage, NATS transport ✓ |
 | 2 | Telemetry Collection — CPU, RAM, disk, process, network ✓ |
 | 3 | Log Collection — Journald, syslog, kernel logs ✓ |
 | 4 | Container Monitoring — Docker and containerd |

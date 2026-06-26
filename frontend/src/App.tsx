@@ -6,6 +6,7 @@ import { RequireAuth, RequireAdmin, RedirectIfAuthenticated, AuthEventHandler, R
 import { LoadingState } from '@/components/common'
 import { LoginPage } from '@/pages/LoginPage'
 import { RecoverPage } from '@/pages/RecoverPage'
+import { LandingPage } from '@/pages/LandingPage'
 import { AwaitingApprovalPage } from '@/pages/AwaitingApprovalPage'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage'
@@ -74,6 +75,7 @@ export default function App() {
       <BrowserRouter>
         <AuthEventHandler />
         <Routes>
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/login" element={<RedirectIfAuthenticated><LoginPage /></RedirectIfAuthenticated>} />
           <Route path="/recover" element={<RedirectIfAuthenticated><RecoverPage /></RedirectIfAuthenticated>} />
           <Route path="/unauthorized" element={<UnauthorizedPage />} />

@@ -38,7 +38,7 @@
 
 ## 1. Platform Overview
 
-Beacon is a distributed Linux observability and telemetry platform. It operates on an **agent-server architecture**: lightweight Rust agents run on monitored machines, continuously collecting telemetry and buffering data offline when connectivity is unavailable. All data is encrypted before transmission and forwarded to a central Django server via secure WebSocket connections.
+Beacon is a distributed Linux observability and telemetry platform. It operates on an **agent-server architecture**: lightweight Rust agents run on monitored machines, continuously collecting telemetry and buffering data offline when connectivity is unavailable. All data is encrypted before transmission and forwarded to a central Django server via NATS JetStream.
 
 ### Design Principles
 
@@ -70,7 +70,8 @@ Beacon is a distributed Linux observability and telemetry platform. It operates 
 | Framework | Django | 5.0.6 |
 | API layer | Django REST Framework | 3.15.2 |
 | JWT tokens | djangorestframework-simplejwt | 5.3.1 |
-| WebSocket | Django Channels + Daphne | 4.1.0 / 4.1.2 |
+| Client WebSocket | Django Channels + Daphne | 4.1.0 / 4.1.2 |
+| Agent transport | NATS JetStream (nats-py) | 2.6.0 |
 | Channel backend | channels-redis | 4.2.0 |
 | Database | PostgreSQL | 14+ |
 | Cache/Broker | Redis | 7+ |
@@ -85,7 +86,7 @@ Beacon is a distributed Linux observability and telemetry platform. It operates 
 | Component | Crate | Version |
 |-----------|-------|---------|
 | Async runtime | tokio | 1.x (full features) |
-| WebSocket | tokio-tungstenite | 0.21 |
+| NATS client | async-nats | 0.34 |
 | TLS | rustls | 0.22 |
 | Native certs | rustls-native-certs | 0.7 |
 | Encryption | aes-gcm | 0.10 |
