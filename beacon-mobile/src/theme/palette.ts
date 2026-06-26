@@ -22,22 +22,22 @@ export interface ThemePalette {
 
 export const lightPalette: ThemePalette = {
   mode: 'light',
-  bg: '#f5f7fb',
+  bg: '#eef6ff',
   surface: '#ffffff',
-  surface2: '#f2f4f8',
-  border: '#e2e8f0',
-  text: '#0f172a',
-  textDim: '#334155',
-  textMuted: '#64748b',
+  surface2: '#dbeafe',
+  border: '#2563eb',
+  text: '#061225',
+  textDim: '#172554',
+  textMuted: '#1e40af',
   primary: '#2563eb',
   success: '#16a34a',
   warning: '#d97706',
   danger: '#dc2626',
-  cardShadow: 'rgba(15,23,42,0.05)',
-  inputBg: '#ffffff',
-  inputBorder: '#d4dbe6',
-  chipBg: '#e2e8f0',
-  chipText: '#334155',
+  cardShadow: 'rgba(37,99,235,0.18)',
+  inputBg: '#f8fbff',
+  inputBorder: '#1d4ed8',
+  chipBg: '#bfdbfe',
+  chipText: '#172554',
 }
 
 export const darkPalette: ThemePalette = {

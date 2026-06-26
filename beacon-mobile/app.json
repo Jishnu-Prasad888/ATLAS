@@ -5,6 +5,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#06070a"
+    },
     "userInterfaceStyle": "dark",
     "scheme": "beacon",
     "ios": {
@@ -13,7 +18,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0b0d0f",
+        "backgroundColor": "#06070a",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "com.beacon.monitor",

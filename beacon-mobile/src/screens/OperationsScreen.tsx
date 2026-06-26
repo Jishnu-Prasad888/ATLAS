@@ -24,6 +24,29 @@ const DOCKER_SOURCES = new Set(['docker', 'docker_engine'])
 const K8S_SOURCES = new Set(['kubernetes', 'k3s_engine'])
 const COLLECTOR_SOURCES = new Set<string>([...DOCKER_SOURCES, ...K8S_SOURCES])
 
+function useOpsColors() {
+  const { palette: c } = useTheme()
+  const light = c.mode === 'light'
+  return {
+    c,
+    border: c.border,
+    borderSoft: light ? '#93c5fd' : '#25303b',
+    surface: c.surface,
+    surface2: c.surface2,
+    rowA: light ? '#ffffff' : '#0d1117',
+    rowB: light ? '#eef6ff' : '#10151c',
+    header: light ? '#dbeafe' : '#12171d',
+    input: c.inputBg,
+    text: c.text,
+    dim: c.textDim,
+    muted: c.textMuted,
+    greenCell: light ? '#dcfce7' : '#102019',
+    blueCell: light ? '#dbeafe' : '#0f1a2b',
+    cyanCell: light ? '#e0f2fe' : '#0e1a22',
+    purpleCell: light ? '#ede9fe' : '#171529',
+  }
+}
+
 function AgentRow({
   agent,
   selected,
@@ -39,6 +62,7 @@ function AgentRow({
   hasK8sData?: boolean
   hasNetworkData?: boolean
 }) {
+  const oc = useOpsColors()
   const color = statusColor(agent.status)
   const tags = [
     hasDockerData ? 'Docker' : null,
@@ -52,10 +76,10 @@ function AgentRow({
       style={{
         padding: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#1e252e',
-        backgroundColor: selected ? '#1e2e42' : 'transparent',
+        borderBottomColor: oc.border,
+        backgroundColor: selected ? oc.c.primary + '18' : 'transparent',
         borderLeftWidth: 2,
-        borderLeftColor: selected ? '#f59e0b' : 'transparent',
+        borderLeftColor: selected ? oc.c.warning : 'transparent',
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -66,32 +90,33 @@ function AgentRow({
       {tags.length > 0 && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 }}>
           {tags.map(tag => (
-            <Badge key={tag} label={tag} color="#d4dae3" bg="#1e252e" />
+            <Badge key={tag} label={tag} color={oc.c.chipText} bg={oc.c.chipBg} />
           ))}
         </View>
       )}
       <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center' }}>
-        <MonoText size={10} color="#5a6878">{timeAgo(agent.last_seen)}</MonoText>
+        <MonoText size={10} color={oc.muted}>{timeAgo(agent.last_seen)}</MonoText>
       </View>
     </TouchableOpacity>
   )
 }
 
 function CollectorLogRow({ log }: { log: LogEntry }) {
+  const oc = useOpsColors()
   const color = severityColor(log.severity)
   return (
-    <View style={{ paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#1e252e', flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+    <View style={{ paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: oc.border, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
       <View style={{
         paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
-        borderWidth: 1, borderColor: '#1e252e', backgroundColor: '#111418',
+        borderWidth: 1, borderColor: oc.border, backgroundColor: oc.surface2,
       }}>
-        <MonoText size={9} color="#5a6878" style={{ textTransform: 'uppercase' }}>
+        <MonoText size={9} color={oc.muted} style={{ textTransform: 'uppercase' }}>
           {DOCKER_SOURCES.has(log.source) ? 'Docker' : K8S_SOURCES.has(log.source) ? 'K8s' : log.source}
         </MonoText>
       </View>
       <MonoText size={10} color={color} style={{ textTransform: 'uppercase' }}>{log.severity}</MonoText>
-      <MonoText size={10} color="#3a4555">{formatTs(log.timestamp, 'HH:mm:ss')}</MonoText>
-      <MonoText size={11} color="#d4dae3" style={{ flex: 1 }}>{log.message}</MonoText>
+      <MonoText size={10} color={oc.muted}>{formatTs(log.timestamp, 'HH:mm:ss')}</MonoText>
+      <MonoText size={11} color={oc.text} style={{ flex: 1 }}>{log.message}</MonoText>
     </View>
   )
 }
@@ -100,15 +125,17 @@ const toNumber = (v: unknown): number | null => (typeof v === 'number' && !Numbe
 const pick = (obj: any, keys: string[]): any => keys.reduce((acc, k) => (acc != null ? acc : obj?.[k]), null)
 
 function LabeledStat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  const oc = useOpsColors()
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-      <MonoText size={11} color="#5a6878">{label}</MonoText>
-      <MonoText size={12} color={accent ?? '#d4dae3'}>{value}</MonoText>
+      <MonoText size={11} color={oc.muted}>{label}</MonoText>
+      <MonoText size={12} color={accent ?? oc.text}>{value}</MonoText>
     </View>
   )
 }
 
 function DockerCard({ metric, loading }: { metric?: Metric; loading: boolean }) {
+  const oc = useOpsColors()
   const data = metric?.data as Record<string, unknown> | undefined
   const running = toNumber(pick(data, ['containers_running', 'running']))
   const total = toNumber(pick(data, ['containers_total', 'total']))
@@ -122,7 +149,7 @@ function DockerCard({ metric, loading }: { metric?: Metric; loading: boolean }) 
     <Card style={{ flex: 1 }}>
       <SectionHeader
         title="Docker"
-        right={metric ? <MonoText size={9} color="#3a4555">{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null}
+        right={metric ? <MonoText size={9} color={oc.muted}>{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null}
       />
       {loading ? (
         <LoadingState label="Loading docker…" />
@@ -143,6 +170,7 @@ function DockerCard({ metric, loading }: { metric?: Metric; loading: boolean }) 
 }
 
 function KubernetesCard({ metric, loading }: { metric?: Metric; loading: boolean }) {
+  const oc = useOpsColors()
   const data = metric?.data as Record<string, unknown> | undefined
   const nodes = toNumber(pick(data, ['nodes', 'node_count']))
   const pods = toNumber(pick(data, ['pods', 'pod_count']))
@@ -155,7 +183,7 @@ function KubernetesCard({ metric, loading }: { metric?: Metric; loading: boolean
     <Card style={{ flex: 1 }}>
       <SectionHeader
         title="Kubernetes"
-        right={metric ? <MonoText size={9} color="#3a4555">{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null}
+        right={metric ? <MonoText size={9} color={oc.muted}>{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null}
       />
       {loading ? (
         <LoadingState label="Loading k8s…" />
@@ -227,7 +255,7 @@ function ViewTabs({
   onChange: (view: OpsView) => void
   disabled: Partial<Record<OpsView, boolean>>
 }) {
-  const { palette: c } = useTheme()
+  const { c } = useOpsColors()
   const tabs: Array<{ key: OpsView; label: string; color: string }> = [
     { key: 'docker', label: 'Docker', color: '#38bdf8' },
     { key: 'kubernetes', label: 'Kubernetes', color: '#a78bfa' },
@@ -237,7 +265,7 @@ function ViewTabs({
     <View style={{
       flexDirection: 'row',
       gap: 6,
-      backgroundColor: '#080b0f',
+      backgroundColor: c.surface2,
       borderWidth: 1,
       borderColor: c.border,
       padding: 4,
@@ -275,15 +303,16 @@ function ViewTabs({
 }
 
 function NetworkInterfaceCard({ iface }: { iface: NetworkInterface }) {
+  const oc = useOpsColors()
   const addresses = iface.addresses ?? []
   const color = stateTone(iface.state)
   return (
     <View style={{
       borderWidth: 1,
-      borderColor: '#64748b',
+      borderColor: oc.border,
       borderRadius: 8,
       overflow: 'hidden',
-      backgroundColor: '#0d1117',
+      backgroundColor: oc.rowA,
     }}>
       <View style={{
         flexDirection: 'row',
@@ -292,37 +321,37 @@ function NetworkInterfaceCard({ iface }: { iface: NetworkInterface }) {
         paddingHorizontal: 10,
         paddingVertical: 8,
         borderBottomWidth: 1,
-        borderBottomColor: '#25303b',
+        borderBottomColor: oc.borderSoft,
       }}>
-        <MonoText size={12} color="#d4dae3" style={{ flex: 1, fontWeight: '700' }} numberOfLines={1}>
+        <MonoText size={12} color={oc.text} style={{ flex: 1, fontWeight: '700' }} numberOfLines={1}>
           {iface.name}
         </MonoText>
         <Pill label={iface.state ?? 'unknown'} color={color} />
       </View>
 
-      <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#25303b' }}>
-        <View style={{ flex: 1, padding: 8, backgroundColor: '#111820', borderRightWidth: 1, borderRightColor: '#25303b' }}>
+      <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: oc.borderSoft }}>
+        <View style={{ flex: 1, padding: 8, backgroundColor: oc.surface2, borderRightWidth: 1, borderRightColor: oc.borderSoft }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <ArrowDownRight size={13} color="#6b7280" />
-              <MonoText size={10} color="#6b7280">In</MonoText>
+              <ArrowDownRight size={13} color={oc.muted} />
+              <MonoText size={10} color={oc.muted}>In</MonoText>
             </View>
-            <MonoText size={10} color="#d4dae3" style={{ fontWeight: '700' }}>{formatBandwidth(iface.rx_bytes_rate ?? 0)}</MonoText>
+            <MonoText size={10} color={oc.text} style={{ fontWeight: '700' }}>{formatBandwidth(iface.rx_bytes_rate ?? 0)}</MonoText>
           </View>
         </View>
-        <View style={{ flex: 1, padding: 8, backgroundColor: '#111820' }}>
+        <View style={{ flex: 1, padding: 8, backgroundColor: oc.surface2 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <ArrowUpRight size={13} color="#6b7280" />
-              <MonoText size={10} color="#6b7280">Out</MonoText>
+              <ArrowUpRight size={13} color={oc.muted} />
+              <MonoText size={10} color={oc.muted}>Out</MonoText>
             </View>
-            <MonoText size={10} color="#d4dae3" style={{ fontWeight: '700' }}>{formatBandwidth(iface.tx_bytes_rate ?? 0)}</MonoText>
+            <MonoText size={10} color={oc.text} style={{ fontWeight: '700' }}>{formatBandwidth(iface.tx_bytes_rate ?? 0)}</MonoText>
           </View>
         </View>
       </View>
 
-      <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#25303b' }}>
-        <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 6, borderRightWidth: 1, borderRightColor: '#25303b' }}>
+      <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: oc.borderSoft }}>
+        <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 6, borderRightWidth: 1, borderRightColor: oc.borderSoft }}>
           <LabeledStat label="MTU" value={iface.mtu != null ? String(iface.mtu) : '–'} />
         </View>
         <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 6 }}>
@@ -330,14 +359,14 @@ function NetworkInterfaceCard({ iface }: { iface: NetworkInterface }) {
         </View>
       </View>
 
-      <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderBottomWidth: addresses.length ? 1 : 0, borderBottomColor: '#25303b' }}>
+      <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderBottomWidth: addresses.length ? 1 : 0, borderBottomColor: oc.borderSoft }}>
         <LabeledStat label="MAC" value={iface.mac ?? '–'} />
       </View>
 
       {addresses.length > 0 && (
         <View>
-          <View style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#12171d', borderBottomWidth: 1, borderBottomColor: '#25303b' }}>
-            <MonoText size={9} color="#6b7280" style={{ textTransform: 'uppercase', fontWeight: '700' }}>Addresses</MonoText>
+          <View style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: oc.header, borderBottomWidth: 1, borderBottomColor: oc.borderSoft }}>
+            <MonoText size={9} color={oc.muted} style={{ textTransform: 'uppercase', fontWeight: '700' }}>Addresses</MonoText>
           </View>
           {addresses.map((addr, idx) => (
             <View
@@ -349,11 +378,11 @@ function NetworkInterfaceCard({ iface }: { iface: NetworkInterface }) {
                 paddingHorizontal: 10,
                 paddingVertical: 6,
                 borderTopWidth: idx === 0 ? 0 : 1,
-                borderTopColor: '#25303b',
+                borderTopColor: oc.borderSoft,
               }}
             >
-              <MonoText size={10} color="#6b7280">{addr.family === 'inet6' ? 'v6' : 'v4'}</MonoText>
-              <MonoText size={10} color="#d4dae3" style={{ flex: 1, textAlign: 'right' }} numberOfLines={1}>
+              <MonoText size={10} color={oc.muted}>{addr.family === 'inet6' ? 'v6' : 'v4'}</MonoText>
+              <MonoText size={10} color={oc.text} style={{ flex: 1, textAlign: 'right' }} numberOfLines={1}>
                 {addr.address}/{addr.prefix}
               </MonoText>
             </View>
@@ -369,6 +398,7 @@ function StateFilters({ states, selected, onChange }: {
   selected: string
   onChange: (state: string) => void
 }) {
+  const oc = useOpsColors()
   if (!states.length) return null
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingRight: 2 }}>
@@ -385,11 +415,11 @@ function StateFilters({ states, selected, onChange }: {
               paddingVertical: 5,
               borderRadius: 5,
               borderWidth: 1,
-              borderColor: active ? '#64748b' : '#25303b',
-              backgroundColor: active ? '#1a222c' : 'transparent',
+              borderColor: active ? oc.border : oc.borderSoft,
+              backgroundColor: active ? oc.surface2 : 'transparent',
             }}
           >
-            <MonoText size={9} color={active ? '#d4dae3' : '#6b7280'} numberOfLines={1}>
+            <MonoText size={9} color={active ? oc.text : oc.muted} numberOfLines={1}>
               {label}
             </MonoText>
           </TouchableOpacity>
@@ -416,8 +446,9 @@ function SearchControls({
   count: number
   total: number
 }) {
+  const oc = useOpsColors()
   return (
-    <View style={{ gap: 8, paddingHorizontal: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#25303b' }}>
+    <View style={{ gap: 8, paddingHorizontal: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: oc.borderSoft }}>
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <View style={{
           flex: 1,
@@ -427,28 +458,28 @@ function SearchControls({
           gap: 6,
           paddingHorizontal: 8,
           borderWidth: 1,
-          borderColor: '#25303b',
+          borderColor: oc.borderSoft,
           borderRadius: 5,
-          backgroundColor: '#121820',
+          backgroundColor: oc.input,
         }}>
-          <Search size={13} color="#6b7280" />
+          <Search size={13} color={oc.muted} />
           <TextInput
             value={search}
             onChangeText={onSearch}
             placeholder="Search..."
-            placeholderTextColor="#4b5563"
+            placeholderTextColor={oc.muted}
             autoCapitalize="none"
             autoCorrect={false}
             style={{
               flex: 1,
-              color: '#d4dae3',
+              color: oc.text,
               fontSize: 10,
               fontFamily: 'SpaceMono-Regular',
               paddingVertical: 0,
             }}
           />
         </View>
-        <MonoText size={9} color="#6b7280">{count} of {total}</MonoText>
+        <MonoText size={9} color={oc.muted}>{count} of {total}</MonoText>
       </View>
       <StateFilters states={states} selected={stateFilter} onChange={onStateFilter} />
     </View>
@@ -466,6 +497,7 @@ function CollapsibleNetworkCard({
   countLabel: string
   children: React.ReactNode
 }) {
+  const oc = useOpsColors()
   const [open, setOpen] = useState(true)
   const toggle = useCallback(() => {
     setOpen(v => !v)
@@ -481,18 +513,18 @@ function CollapsibleNetworkCard({
         paddingHorizontal: 12,
         paddingVertical: 11,
         borderBottomWidth: open ? 1 : 0,
-        borderBottomColor: '#25303b',
+        borderBottomColor: oc.borderSoft,
       }}>
         <View>
-          <MonoText size={10} color="#6b7280" style={{ textTransform: 'uppercase', fontWeight: '700' }}>{title}</MonoText>
-          <MonoText size={9} color="#3a4555">{count} {countLabel}</MonoText>
+          <MonoText size={10} color={oc.muted} style={{ textTransform: 'uppercase', fontWeight: '700' }}>{title}</MonoText>
+          <MonoText size={9} color={oc.muted}>{count} {countLabel}</MonoText>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <TouchableOpacity onPress={toggle} hitSlop={10} activeOpacity={0.75}>
-            <Maximize2 size={13} color="#6b7280" />
+            <Maximize2 size={13} color={oc.muted} />
           </TouchableOpacity>
           <TouchableOpacity onPress={toggle} hitSlop={10} activeOpacity={0.75}>
-            {open ? <ChevronUp size={18} color="#d4dae3" /> : <ChevronDown size={18} color="#d4dae3" />}
+            {open ? <ChevronUp size={18} color={oc.text} /> : <ChevronDown size={18} color={oc.text} />}
           </TouchableOpacity>
         </View>
       </View>
@@ -502,6 +534,7 @@ function CollapsibleNetworkCard({
 }
 
 function ProcessConnectionsList({ rows }: { rows: ProcessConnection[] }) {
+  const oc = useOpsColors()
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('')
   const states = useMemo(() => Array.from(new Set(rows.map(r => r.state).filter(Boolean))).sort(), [rows])
@@ -546,36 +579,36 @@ function ProcessConnectionsList({ rows }: { rows: ProcessConnection[] }) {
             key={`${row.pid}-${row.local_port}-${row.remote_port}-${idx}`}
             style={{
               borderTopWidth: idx === 0 ? 0 : 1,
-              borderTopColor: '#25303b',
-              backgroundColor: idx % 2 === 0 ? '#0d1117' : '#10151c',
+              borderTopColor: oc.borderSoft,
+              backgroundColor: idx % 2 === 0 ? oc.rowA : oc.rowB,
             }}
           >
             <View style={{ flexDirection: 'row', minHeight: 38 }}>
-              <View style={{ width: 62, padding: 8, backgroundColor: '#102019', justifyContent: 'center' }}>
-                <MonoText size={10} color="#d4dae3" style={{ fontWeight: '700' }}>{row.pid}</MonoText>
+              <View style={{ width: 62, padding: 8, backgroundColor: oc.greenCell, justifyContent: 'center' }}>
+                <MonoText size={10} color={oc.text} style={{ fontWeight: '700' }}>{row.pid}</MonoText>
               </View>
-              <View style={{ flex: 1, padding: 8, backgroundColor: '#0e1a22' }}>
-                <MonoText size={10} color="#d4dae3" numberOfLines={1}>{row.name}</MonoText>
-                {row.exe ? <MonoText size={9} color="#6b7280" numberOfLines={1}>{row.exe}</MonoText> : null}
+              <View style={{ flex: 1, padding: 8, backgroundColor: oc.cyanCell }}>
+                <MonoText size={10} color={oc.text} numberOfLines={1}>{row.name}</MonoText>
+                {row.exe ? <MonoText size={9} color={oc.muted} numberOfLines={1}>{row.exe}</MonoText> : null}
               </View>
             </View>
-            <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#25303b' }}>
-              <View style={{ width: 64, padding: 8, backgroundColor: '#0f1a2b' }}>
+            <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: oc.borderSoft }}>
+              <View style={{ width: 64, padding: 8, backgroundColor: oc.blueCell }}>
                 <Pill label={row.protocol} color={pColor} />
               </View>
-              <View style={{ flex: 1, padding: 8, backgroundColor: '#171529' }}>
-                <MonoText size={9} color="#8b94a3">Local</MonoText>
-                <MonoText size={10} color="#d4dae3" numberOfLines={1}>{endpoint(row.local_addr, row.local_port)}</MonoText>
+              <View style={{ flex: 1, padding: 8, backgroundColor: oc.purpleCell }}>
+                <MonoText size={9} color={oc.muted}>Local</MonoText>
+                <MonoText size={10} color={oc.text} numberOfLines={1}>{endpoint(row.local_addr, row.local_port)}</MonoText>
               </View>
             </View>
-            <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#25303b' }}>
-              <View style={{ flex: 1, padding: 8, backgroundColor: '#171529' }}>
-                <MonoText size={9} color="#8b94a3">Remote</MonoText>
-                <MonoText size={10} color="#d4dae3" numberOfLines={1}>{endpoint(row.remote_addr, row.remote_port)}</MonoText>
+            <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: oc.borderSoft }}>
+              <View style={{ flex: 1, padding: 8, backgroundColor: oc.purpleCell }}>
+                <MonoText size={9} color={oc.muted}>Remote</MonoText>
+                <MonoText size={10} color={oc.text} numberOfLines={1}>{endpoint(row.remote_addr, row.remote_port)}</MonoText>
               </View>
-              <View style={{ width: 112, padding: 8, backgroundColor: '#102019', gap: 4 }}>
+              <View style={{ width: 112, padding: 8, backgroundColor: oc.greenCell, gap: 4 }}>
                 <Pill label={row.state} color={stateColor} />
-                <MonoText size={9} color="#8b94a3">q {row.rx_queue}/{row.tx_queue}</MonoText>
+                <MonoText size={9} color={oc.muted}>q {row.rx_queue}/{row.tx_queue}</MonoText>
               </View>
             </View>
           </View>
@@ -586,6 +619,7 @@ function ProcessConnectionsList({ rows }: { rows: ProcessConnection[] }) {
 }
 
 function OpenPortsList({ rows }: { rows: OpenPort[] }) {
+  const oc = useOpsColors()
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('')
   const states = useMemo(() => Array.from(new Set(rows.map(r => r.state).filter(Boolean))).sort(), [rows])
@@ -628,22 +662,22 @@ function OpenPortsList({ rows }: { rows: OpenPort[] }) {
             style={{
               flexDirection: 'row',
               borderTopWidth: idx === 0 ? 0 : 1,
-              borderTopColor: '#25303b',
+              borderTopColor: oc.borderSoft,
               minHeight: 44,
             }}
           >
-            <View style={{ width: 58, padding: 8, backgroundColor: '#0f1a2b', justifyContent: 'center' }}>
+            <View style={{ width: 58, padding: 8, backgroundColor: oc.blueCell, justifyContent: 'center' }}>
               <Pill label={row.protocol} color={pColor} />
             </View>
-            <View style={{ flex: 1.2, padding: 8, backgroundColor: '#171529', justifyContent: 'center' }}>
-              <MonoText size={10} color="#d4dae3" numberOfLines={1}>{endpoint(row.local_addr, row.local_port)}</MonoText>
+            <View style={{ flex: 1.2, padding: 8, backgroundColor: oc.purpleCell, justifyContent: 'center' }}>
+              <MonoText size={10} color={oc.text} numberOfLines={1}>{endpoint(row.local_addr, row.local_port)}</MonoText>
             </View>
-            <View style={{ width: 86, padding: 8, backgroundColor: '#102019', justifyContent: 'center' }}>
+            <View style={{ width: 86, padding: 8, backgroundColor: oc.greenCell, justifyContent: 'center' }}>
               <Pill label={row.state} color={stateColor} />
             </View>
-            <View style={{ flex: 1, padding: 8, backgroundColor: '#0e1a22', justifyContent: 'center' }}>
-              <MonoText size={10} color="#d4dae3" numberOfLines={1}>{row.name ?? (row.pid ? `pid ${row.pid}` : '–')}</MonoText>
-              {row.exe ? <MonoText size={8} color="#6b7280" numberOfLines={1}>{row.exe}</MonoText> : null}
+            <View style={{ flex: 1, padding: 8, backgroundColor: oc.cyanCell, justifyContent: 'center' }}>
+              <MonoText size={10} color={oc.text} numberOfLines={1}>{row.name ?? (row.pid ? `pid ${row.pid}` : '–')}</MonoText>
+              {row.exe ? <MonoText size={8} color={oc.muted} numberOfLines={1}>{row.exe}</MonoText> : null}
             </View>
           </View>
         )
@@ -655,12 +689,11 @@ function OpenPortsList({ rows }: { rows: OpenPort[] }) {
 function NetworkPanel({
   metric,
   loading,
-  onBackToTop,
 }: {
   metric?: Metric
   loading: boolean
-  onBackToTop: () => void
 }) {
+  const oc = useOpsColors()
   const data = metric?.data as NetworkData | undefined
   const interfaces = data?.interfaces ?? []
   const processConnections = data?.process_connections ?? []
@@ -681,7 +714,7 @@ function NetworkPanel({
           <SectionHeader
             title="Interfaces"
             count={interfaces.length}
-            right={metric ? <MonoText size={9} color="#3a4555">{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null}
+            right={metric ? <MonoText size={9} color={oc.muted}>{formatTs(metric.timestamp, 'HH:mm:ss')}</MonoText> : null}
           />
         </View>
         {interfaces.length === 0 ? (
@@ -700,27 +733,6 @@ function NetworkPanel({
       <CollapsibleNetworkCard title="Open ports" count={openPorts.length} countLabel="ports">
         <OpenPortsList rows={openPorts} />
       </CollapsibleNetworkCard>
-
-      {(interfaces.length > 0 || processConnections.length > 0 || openPorts.length > 0) && (
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-            onBackToTop()
-          }}
-          activeOpacity={0.75}
-          style={{
-            alignSelf: 'center',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-          }}
-        >
-          <ArrowUpToLine size={14} color="#d4dae3" />
-          <MonoText size={10} color="#d4dae3">Back to top</MonoText>
-        </TouchableOpacity>
-      )}
     </View>
   )
 }
@@ -804,7 +816,7 @@ export function OperationsScreen() {
         ref={scrollRef}
         contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing || agentsQ.isFetching || metricsQ.isFetching || logsQ.isFetching} onRefresh={handleRefresh} tintColor="#3b82f6" />
+          <RefreshControl refreshing={refreshing || agentsQ.isFetching || metricsQ.isFetching || logsQ.isFetching} onRefresh={handleRefresh} tintColor={c.primary} />
         }
       >
         {/* Header */}
@@ -865,13 +877,7 @@ export function OperationsScreen() {
           <ViewTabs view={view} onChange={handleViewChange} disabled={{}} />
           {view === 'docker' && <DockerCard metric={dockerMetric} loading={metricsQ.isLoading} />}
           {view === 'kubernetes' && <KubernetesCard metric={k8sMetric} loading={metricsQ.isLoading} />}
-          {view === 'network' && (
-            <NetworkPanel
-              metric={networkMetric}
-              loading={metricsQ.isLoading}
-              onBackToTop={scrollToTop}
-            />
-          )}
+          {view === 'network' && <NetworkPanel metric={networkMetric} loading={metricsQ.isLoading} />}
         </View>
 
         {/* Logs */}
@@ -913,6 +919,35 @@ export function OperationsScreen() {
           )}
         </Card>
       </ScrollView>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Back to top"
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+          scrollToTop()
+        }}
+        activeOpacity={0.82}
+        style={{
+          position: 'absolute',
+          right: 18,
+          bottom: 22,
+          width: 46,
+          height: 46,
+          borderRadius: 23,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: c.primary,
+          borderWidth: 1,
+          borderColor: c.mode === 'light' ? '#1d4ed8' : '#60a5fa',
+          shadowColor: '#000',
+          shadowOpacity: 0.24,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 7,
+        }}
+      >
+        <ArrowUpToLine size={21} color="#ffffff" strokeWidth={2.5} />
+      </TouchableOpacity>
     </View>
   )
 }

@@ -11,6 +11,7 @@ import {
   StyleSheet,
 } from 'react-native'
 import { Eye, EyeOff } from 'lucide-react-native'
+import Svg, { Circle, Path } from 'react-native-svg'
 import axios from 'axios'
 import * as Haptics from 'expo-haptics'
 import { useAuthStore } from '@/store/authStore'
@@ -28,6 +29,20 @@ const BORDER_SOFT = '#111827'
 const TEXT = '#e8edf5'
 const MUTED = '#9aa7b8'
 const INPUT_BG = '#0f1621'
+
+function AtlasShieldLogo({ size = 48 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 34 34" fill="none">
+      <Path
+        d="M17 2 L30 28 L17 22 L4 28 Z"
+        stroke="#5eead4"
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+      />
+      <Circle cx={17} cy={16} r={1.6} fill="#5eead4" />
+    </Svg>
+  )
+}
 
 export function LoginScreen() {
   const [username, setUsername] = useState('')
@@ -155,7 +170,10 @@ export function LoginScreen() {
       <KeyboardAvoidingView style={styles.foreground} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>ATLAS</Text>
+            <View style={styles.logoRow}>
+              <AtlasShieldLogo size={42} />
+              <Text style={styles.headerTitle}>ATLAS</Text>
+            </View>
             <Text style={styles.headerSub}>Autonomous Telemetry, Logging, Analysis, and Surveillance</Text>
           </View>
 
@@ -363,6 +381,7 @@ const styles = StyleSheet.create({
   scrollContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-start', padding: 22, paddingTop: 52, paddingBottom: 52, gap: 22 },
 
   header: { width: '100%', maxWidth: 420, alignItems: 'center', gap: 4 },
+  logoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   headerTitle: { color: TEXT, fontSize: 24, fontWeight: '800', letterSpacing: 1 },
   headerSub: { color: MUTED, fontSize: 12, textAlign: 'center', lineHeight: 18 },
 
