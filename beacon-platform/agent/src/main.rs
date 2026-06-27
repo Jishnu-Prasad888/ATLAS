@@ -40,11 +40,11 @@ struct Cli {
     command: Option<Commands>,
 
     /// Config file path
-    #[arg(short, long, default_value = "/etc/beacon/agent.toml")]
+    #[arg(short, long, global = true, default_value = "/etc/beacon/agent.toml")]
     config: String,
 
     /// Log level (trace|debug|info|warn|error)
-    #[arg(short, long, default_value = "info")]
+    #[arg(short, long, global = true, default_value = "info")]
     log_level: String,
 }
 

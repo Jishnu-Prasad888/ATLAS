@@ -41,7 +41,7 @@ Beacon Agents (Rust, 1 … N)
 ```bash
 cd server
 cp .env.example .env
-# Edit .env — set SECRET_KEY, DB_PASSWORD, etc.
+# Edit .env — set SECRET_KEY, DB_PASSWORD, etc. If you use docker compose, set BEACON_NATS_URL=nats://nats:4222 so the app reaches the NATS container.
 
 docker compose up -d
 docker compose exec server python manage.py migrate

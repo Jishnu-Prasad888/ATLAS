@@ -63,7 +63,7 @@ curl -Ls https://github.com/nats-io/natscli/releases/download/v0.1.5/nats-0.1.5-
 
 ```dotenv
 BEACON_ENABLE_NATS_WORKER=1
-BEACON_NATS_URL=nats://localhost:4222
+BEACON_NATS_URL=nats://nats:4222
 BEACON_NATS_SUBJECT_PREFIX=agent
 BEACON_NATS_COMMAND_PREFIX=agent_cmd
 BEACON_NATS_STREAM_INGEST=agent_ingest
@@ -71,7 +71,7 @@ BEACON_NATS_STREAM_CONTROL=agent_control
 BEACON_NATS_INGEST_CONSUMER=beacon-server
 ```
 
-- **BEACON_NATS_URL**: Accepts comma-separated URLs for clusters. TLS endpoints use `tls://`.
+- **BEACON_NATS_URL**: Accepts comma-separated URLs for clusters. When running via docker-compose, use `nats://nats:4222`; otherwise point at your broker host (e.g. `nats://localhost:4222`). TLS endpoints use `tls://`.
 - Leave `BEACON_ENABLE_NATS_WORKER=0` temporarily if you need to boot the server without transport (e.g. migrations).
 
 ### 4.2 Django settings
