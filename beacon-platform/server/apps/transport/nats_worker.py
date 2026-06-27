@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import json
 import logging
 import threading
@@ -300,7 +301,15 @@ def decode_frame(frame: bytes) -> bytes:
     if encoding == ENCODING_NONE:
         return body
     if encoding == ENCODING_ZSTD:
-        return _decompressor.decompress(body)
+        try:
+            return _decompressor.decompress(body)
+        except zstandard.ZstdError as exc:
+            message = str(exc).lower()
+            if "content size" not in message:
+                raise
+            stream = _decompressor.stream_reader(io.BytesIO(body))
+            with contextlib.closing(stream):
+                return stream.read()
     raise ValueError(f"Unsupported frame encoding {encoding}")
 
 
