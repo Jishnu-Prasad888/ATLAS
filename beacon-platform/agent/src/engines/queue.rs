@@ -9,8 +9,8 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, warn};
+use tokio::sync::RwLock;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::engines::logging::LogEngine;

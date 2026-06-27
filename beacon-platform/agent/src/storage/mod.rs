@@ -2,6 +2,7 @@
 // Manages: config.db, metrics.db, logs.db, queue.db
 // All databases use WAL mode + NORMAL synchronous for durability with performance.
 
+#![allow(dead_code)]
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};

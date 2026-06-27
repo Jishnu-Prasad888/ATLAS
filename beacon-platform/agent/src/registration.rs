@@ -62,6 +62,7 @@ impl RegistrationStatus {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn from_str(s: &str) -> Self {
         match s {
             "registered" => RegistrationStatus::Registered,

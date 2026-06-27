@@ -16,7 +16,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Cell, Clear, Gauge, List, ListItem, ListState, Paragraph, Row,
-        Table, TableState, Tabs, Wrap,
+        Table, Tabs, Wrap,
     },
     Frame, Terminal,
 };
@@ -68,18 +68,6 @@ impl View {
         ]
     }
 
-    pub fn index(&self) -> usize {
-        match self {
-            View::Dashboard => 0,
-            View::Agents => 1,
-            View::Metrics => 2,
-            View::Logs => 3,
-            View::Health => 4,
-            View::Network => 5,
-            View::Configuration => 6,
-        }
-    }
-
     pub fn from_index(i: usize) -> Self {
         match i {
             0 => View::Dashboard,
@@ -117,7 +105,6 @@ pub struct AppState {
     pub rest_base_url: String,
     pub nats_url: String,
     pub status: String,
-    pub uptime_secs: u64,
     pub logs: Vec<LogEntry>,
     pub log_state: ListState,
     pub metrics: Vec<MetricSample>,
@@ -127,8 +114,6 @@ pub struct AppState {
     // Live metric sparklines (ring buffers)
     pub cpu_history: Vec<f64>,
     pub ram_history: Vec<f64>,
-    pub net_rx_history: Vec<f64>,
-    pub net_tx_history: Vec<f64>,
     pub queue_status: String,
     pub collectors: Vec<(String, String)>, // (name, status)
     pub splash_visible: bool,
@@ -147,7 +132,6 @@ impl AppState {
             rest_base_url: config.rest_base_url.clone(),
             nats_url: config.nats.url.clone(),
             status: "ONLINE".to_string(),
-            uptime_secs: 0,
             logs: Vec::new(),
             log_state,
             metrics: Vec::new(),
@@ -156,8 +140,6 @@ impl AppState {
             quit: false,
             cpu_history: vec![0.0; 60],
             ram_history: vec![0.0; 60],
-            net_rx_history: vec![0.0; 60],
-            net_tx_history: vec![0.0; 60],
             queue_status: "OK".to_string(),
             collectors: vec![
                 ("CPU".to_string(), "Healthy".to_string()),
@@ -172,22 +154,6 @@ impl AppState {
         }
     }
 
-    pub fn push_cpu(&mut self, v: f64) {
-        self.cpu_history.remove(0);
-        self.cpu_history.push(v.clamp(0.0, 100.0));
-    }
-
-    pub fn push_ram(&mut self, v: f64) {
-        self.ram_history.remove(0);
-        self.ram_history.push(v.clamp(0.0, 100.0));
-    }
-
-    pub fn push_log(&mut self, entry: LogEntry) {
-        self.logs.insert(0, entry);
-        if self.logs.len() > 1000 {
-            self.logs.truncate(1000);
-        }
-    }
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────

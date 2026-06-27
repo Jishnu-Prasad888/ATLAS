@@ -1,7 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,39 +25,8 @@ const IMAGES_INTERVAL: u64 = 300;
 const PROCESS_INTERVAL: u64 = 15;
 const FILESYSTEM_INTERVAL: u64 = 60;
 
-// ─── Data model (mirrors TypeScript DockerData interface) ─────────────────
-
-#[derive(Debug, Serialize)]
-struct DockerDataPayload {
-    generated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    collector_disabled: Option<bool>,
-    summary: Value,
-    inventory: Value,
-    lifecycle: Value,
-    metrics: MetricsBlock,
-    filesystem: Value,
-    processes: Value,
-    logs: Value,
-    health: Value,
-    topology: Value,
-    security: Value,
-    images: Value,
-    host: Value,
-    cgroups: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct MetricsBlock {
-    cpu: Value,
-    memory: Value,
-    disk: Value,
-    network: Value,
-}
-
 #[derive(Clone, Debug)]
 struct ContainerState {
-    id: String,
     name: String,
     state: String,
     status: String,
@@ -83,9 +51,7 @@ pub struct DockerCollector {
     log_engine: Option<crate::engines::logging::LogEngine>,
     prev_states: Arc<Mutex<HashMap<String, ContainerState>>>,
     flags: CollectorFlags,
-    first_collect: Arc<Mutex<bool>>,
     last_event_ts: Arc<Mutex<Option<i64>>>,
-    last_inventory_ts: Arc<Mutex<Option<i64>>>,
     last_images_ts: Arc<Mutex<Option<i64>>>,
 }
 
@@ -95,9 +61,7 @@ impl DockerCollector {
             log_engine: None,
             prev_states: Arc::new(Mutex::new(HashMap::new())),
             flags,
-            first_collect: Arc::new(Mutex::new(true)),
             last_event_ts: Arc::new(Mutex::new(None)),
-            last_inventory_ts: Arc::new(Mutex::new(None)),
             last_images_ts: Arc::new(Mutex::new(None)),
         }
     }
@@ -110,25 +74,9 @@ impl DockerCollector {
             log_engine: Some(engine),
             prev_states: Arc::new(Mutex::new(HashMap::new())),
             flags,
-            first_collect: Arc::new(Mutex::new(true)),
             last_event_ts: Arc::new(Mutex::new(None)),
-            last_inventory_ts: Arc::new(Mutex::new(None)),
             last_images_ts: Arc::new(Mutex::new(None)),
         }
-    }
-
-    async fn log_diagnostics(&self, label: &str, msg: &str) {
-        if let Some(ref le) = self.log_engine {
-            let _ = le.info(label, msg).await;
-        }
-        info!("[docker] {msg}");
-    }
-
-    async fn log_diag_warn(&self, label: &str, msg: &str) {
-        if let Some(ref le) = self.log_engine {
-            let _ = le.warn(label, msg).await;
-        }
-        warn!("[docker] {msg}");
     }
 }
 
@@ -1018,7 +966,7 @@ fn build_payload(
     let mut stopped = 0u64;
     let mut paused = 0u64;
     let mut restarting = 0u64;
-    let mut failures = 0u64;
+    let failures = 0u64;
 
     for c in normalized {
         let state = get_container_state(c);
@@ -1515,12 +1463,7 @@ impl DockerCollector {
                 let status = get_container_status(c);
                 (
                     id.clone(),
-                    ContainerState {
-                        id,
-                        name,
-                        state,
-                        status,
-                    },
+                    ContainerState { name, state, status },
                 )
             })
             .collect();

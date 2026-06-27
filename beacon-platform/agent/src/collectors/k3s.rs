@@ -65,6 +65,7 @@ impl K3sCollector {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_runner(runner: Box<dyn CommandRunner>, kubeconfig: &str) -> Self {
         Self {
             runner,
@@ -1264,7 +1265,6 @@ impl K3sCollector {
                 match prev.get(key) {
                     Some(prev_state) if prev_state.phase != cur.phase => {
                         actions.push(PodLogAction::PhaseChange {
-                            key: key.clone(),
                             namespace: cur.namespace.clone(),
                             name: cur.name.clone(),
                             old_phase: prev_state.phase.clone(),
@@ -1273,7 +1273,6 @@ impl K3sCollector {
                     }
                     None => {
                         actions.push(PodLogAction::NewPod {
-                            key: key.clone(),
                             namespace: cur.namespace.clone(),
                             name: cur.name.clone(),
                             phase: cur.phase.clone(),
@@ -1286,7 +1285,6 @@ impl K3sCollector {
             for (key, prev_state) in prev.iter() {
                 if !current_states.contains_key(key) {
                     actions.push(PodLogAction::Removed {
-                        key: key.clone(),
                         namespace: prev_state.namespace.clone(),
                         name: prev_state.name.clone(),
                     });
@@ -1310,7 +1308,6 @@ impl K3sCollector {
         for action in diffs {
             match action {
                 PodLogAction::PhaseChange {
-                    key: _,
                     namespace,
                     name,
                     old_phase,
@@ -1337,7 +1334,6 @@ impl K3sCollector {
                     }
                 }
                 PodLogAction::NewPod {
-                    key: _,
                     namespace,
                     name,
                     phase,
@@ -1351,7 +1347,6 @@ impl K3sCollector {
                     }
                 }
                 PodLogAction::Removed {
-                    key: _,
                     namespace,
                     name,
                 } => {
@@ -1381,20 +1376,17 @@ impl K3sCollector {
 
 enum PodLogAction {
     PhaseChange {
-        key: String,
         namespace: String,
         name: String,
         old_phase: String,
         new_phase: String,
     },
     NewPod {
-        key: String,
         namespace: String,
         name: String,
         phase: String,
     },
     Removed {
-        key: String,
         namespace: String,
         name: String,
     },

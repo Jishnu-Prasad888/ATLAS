@@ -14,7 +14,7 @@ mod transport;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use libc::geteuid;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use tracing::{error, info, warn};
@@ -276,6 +276,11 @@ enum QueueAction {
     Pause,
     Resume,
     RetryFailed,
+    /// Remove sent messages older than the provided number of hours
+    Prune {
+        #[arg(short, long, default_value_t = 72)]
+        hours: i64,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -694,8 +699,34 @@ async fn run_status(config_path: &str) -> Result<()> {
     Ok(())
 }
 
-async fn run_login(config_path: &str, username: &str, _password: Option<String>) -> Result<()> {
-    println!("Login as {username} — use the TUI or direct API for interactive login.");
+async fn run_login(config_path: &str, username: &str, password: Option<String>) -> Result<()> {
+    let mut config = AgentConfig::load(config_path).await?;
+
+    let password = match password {
+        Some(p) => p,
+        None => {
+            print!("Password for {username}: ");
+            io::stdout().flush()?;
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            input.trim_end().to_string()
+        }
+    };
+
+    if password.is_empty() {
+        bail!("Password cannot be empty");
+    }
+
+    let token = auth::login(&config.rest_base_url, username, &password).await?;
+
+    config.username = username.to_string();
+    config.password = password.clone();
+    config.save(config_path).await?;
+
+    let storage = StorageManager::new(&config.storage_dir).await?;
+    storage.set_config("auth_token", &token).await?;
+
+    println!("Login successful. Access token cached for agent operations.");
     Ok(())
 }
 
@@ -944,12 +975,56 @@ async fn handle_db_cmd(action: DbAction, config_path: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_encryption_cmd(action: EncryptionAction, _config_path: &str) -> Result<()> {
+async fn handle_encryption_cmd(action: EncryptionAction, config_path: &str) -> Result<()> {
     match action {
-        EncryptionAction::Enable => println!("Encryption enabled."),
-        EncryptionAction::Disable => println!("Encryption disabled."),
-        EncryptionAction::RotateKey => println!("Rotating encryption key..."),
-        EncryptionAction::Status => println!("Encryption: AES-256-GCM | TLS 1.3"),
+        EncryptionAction::Enable => {
+            let mut config = AgentConfig::load(config_path).await?;
+            if config.encryption.enabled {
+                println!("Encryption already enabled.");
+            } else {
+                config.encryption.enabled = true;
+                config.save(config_path).await?;
+                println!("Encryption enabled. Restart the agent to apply.");
+            }
+        }
+        EncryptionAction::Disable => {
+            let mut config = AgentConfig::load(config_path).await?;
+            if !config.encryption.enabled {
+                println!("Encryption already disabled.");
+            } else {
+                config.encryption.enabled = false;
+                config.save(config_path).await?;
+                println!("Encryption disabled. Restart the agent to apply.");
+            }
+        }
+        EncryptionAction::RotateKey | EncryptionAction::Status => {
+            let config = AgentConfig::load(config_path).await?;
+            let storage = StorageManager::new(&config.storage_dir).await?;
+            let engine = EncryptionEngine::new(&config, &storage).await?;
+
+            match action {
+                EncryptionAction::RotateKey => {
+                    if !engine.is_enabled() {
+                        println!("Encryption disabled; nothing to rotate.");
+                    } else {
+                        engine.rotate_key().await?;
+                        println!("Encryption key rotated successfully.");
+                    }
+                }
+                EncryptionAction::Status => {
+                    if engine.is_enabled() {
+                        let sample = engine.encrypt(b"beacon-self-check").await?;
+                        println!(
+                            "Encryption enabled — AES-256-GCM (sample payload {} bytes)",
+                            sample.data.len()
+                        );
+                    } else {
+                        println!("Encryption disabled.");
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
     }
     Ok(())
 }
@@ -978,6 +1053,10 @@ async fn handle_queue_cmd(action: QueueAction, config_path: &str) -> Result<()> 
         QueueAction::RetryFailed => {
             let n = queue.retry_failed().await?;
             println!("Retried {n} messages.");
+        }
+        QueueAction::Prune { hours } => {
+            let removed = queue.prune_sent(hours).await?;
+            println!("Pruned {removed} sent queue rows older than {hours}h.");
         }
     }
     Ok(())

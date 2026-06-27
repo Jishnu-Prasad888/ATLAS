@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use rand::RngCore;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::config::AgentConfig;
 use crate::storage::StorageManager;
@@ -218,6 +218,7 @@ impl EncryptionEngine {
     }
 
     /// Derive a 256-bit key from a password using Argon2id.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn derive_key_from_password(password: &[u8], salt: &[u8]) -> Result<Vec<u8>> {
         use argon2::{Algorithm, Argon2, Params, Version};
         let params = Params::new(65536, 3, 4, Some(KEY_SIZE))

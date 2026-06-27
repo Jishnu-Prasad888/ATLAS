@@ -48,6 +48,7 @@ pub trait Collector: Send + Sync {
     /// Run forever, calling `collect()` every `interval` and forwarding to `enqueuer`.
     /// Override only when you need custom loop behaviour (e.g. Docker needs
     /// a daemon check before each collection).
+    #[cfg_attr(not(test), allow(dead_code))]
     async fn run(&self, enqueuer: &dyn MetricsEnqueuer, interval: Duration, agent_id: &str) {
         use tracing::error;
         loop {
