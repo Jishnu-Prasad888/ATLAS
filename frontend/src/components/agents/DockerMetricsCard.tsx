@@ -22,7 +22,7 @@ interface Image { image_id: string; repo_tags: string[]; repo_digests: string[];
 interface InventoryContainer { container_id: string; name: string; image: string; state: string; restart_count: number; created: string; }
 interface DockerData {
   inventory: { containers: InventoryContainer[] };
-  summary: { total_containers: number; state_counts: Record<string, number>; last_event: string; resource_totals: { cpu_percent_avg: number; cpu_system_usage_sum: number; cpu_throttled_periods_sum: number; cpu_throttled_time_sum: number; memory_usage_bytes_sum: number; memory_limit_bytes_sum: number; memory_percent_avg: number; network_rx_bytes_sum: number; network_tx_bytes_sum: number; block_read_bytes_sum: number; block_write_bytes_sum: number; pids_sum: number; } };
+  summary: { total_containers: number; state_counts: Record<string, number>; last_event: string; resource_totals: { cpu_percent_avg: number; cpu_system_usage_sum: number; cpu_throttled_periods_sum: number; cpu_throttled_time_sum: number; memory_usage_bytes_sum: number; memory_limit_bytes_sum: number; memory_percent_avg: number; network_rx_bytes_sum: number; network_tx_bytes_sum: number; block_read_bytes_sum: number; block_write_bytes_sum: number; pids_sum: number; } | null };
   host: { metrics: { hostname: string; cpu_percent: number; memory_used: number; memory_total: number; disk_used: number; disk_total: number; load_1: number; load_5: number; load_15: number; uptime: number; } };
   metrics: { cpu: { samples: CpuSample[] }; memory: { samples: MemSample[] }; disk: { samples: DiskSample[] }; network: { samples: NetSample[] } };
   health: { statuses: HealthStatus[] };
@@ -215,14 +215,21 @@ function TileHostSnapshot({ data }: { data: DockerData }) {
 function TileSummary({ data }: { data: DockerData }) {
   const { summary } = data;
   const t = summary.resource_totals;
+  const cpuAvgValue = typeof t?.cpu_percent_avg === "number" ? `${t.cpu_percent_avg.toFixed(1)}%` : "–";
+  const cpuThrottleSub = typeof t?.cpu_throttled_periods_sum === "number" ? `${t.cpu_throttled_periods_sum} throttled` : "No throttle data";
+  const memValue = typeof t?.memory_usage_bytes_sum === "number" ? formatBytes(t.memory_usage_bytes_sum) : "–";
+  const memSub = typeof t?.memory_limit_bytes_sum === "number" ? `/ ${formatBytes(t.memory_limit_bytes_sum)}` : "limit n/a";
+  const netSum = typeof t?.network_rx_bytes_sum === "number" && typeof t?.network_tx_bytes_sum === "number" ? t.network_rx_bytes_sum + t.network_tx_bytes_sum : null;
+  const netValue = netSum != null ? formatBytes(netSum) : "–";
+  const netSub = typeof t?.pids_sum === "number" ? `${t.pids_sum} PIDs` : "PIDs n/a";
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <SectionLabel title="Cluster" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, flex: 1 }}>
         <StatCard label="Containers" value={String(summary.total_containers)}              sub={`${summary.state_counts.running ?? 0} running`} />
-        <StatCard label="CPU avg"    value={t.cpu_percent_avg.toFixed(1) + "%"}    sub={`${t.cpu_throttled_periods_sum} throttled`} />
-        <StatCard label="Memory"     value={formatBytes(t.memory_usage_bytes_sum)} sub={`/ ${formatBytes(t.memory_limit_bytes_sum)}`} />
-        <StatCard label="Net I/O"    value={formatBytes(t.network_rx_bytes_sum + t.network_tx_bytes_sum)} sub={`${t.pids_sum} PIDs`} />
+        <StatCard label="CPU avg"    value={cpuAvgValue}    sub={cpuThrottleSub} />
+        <StatCard label="Memory"     value={memValue} sub={memSub} />
+        <StatCard label="Net I/O"    value={netValue} sub={netSub} />
       </div>
       <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
         {Object.entries(summary.state_counts).map(([state, count]) => (
