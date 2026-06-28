@@ -22,12 +22,12 @@ export function readEnv(key: EnvKey, fallback: string): string {
 export const env = {
   /** Base origin for all REST API calls, e.g. "https://beacon.example.com" */
   get apiBaseUrl(): string {
-    return readEnv('VITE_API_BASE_URL', '')
+    return readEnv('VITE_API_BASE_URL', 'http://57.158.25.89')
   },
 
   /** Base origin for WebSocket connections */
   get wsBaseUrl(): string {
-    return readEnv('VITE_WS_BASE_URL', '')
+    return readEnv('VITE_WS_BASE_URL', 'ws://57.158.25.89')
   },
 
   /** REST API path prefix */

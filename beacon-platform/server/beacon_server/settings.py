@@ -21,7 +21,17 @@ SECRET_KEY = require_env("SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = require_env("ALLOWED_HOSTS").split(",")
+def _parse_list(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item and item.strip()]
+
+
+_base_allowed_hosts = _parse_list(require_env("ALLOWED_HOSTS"))
+_default_allowed_hosts = ["atlas-beacon.vercel.app", "57.158.25.89"]
+for _host in _default_allowed_hosts:
+    if _host not in _base_allowed_hosts:
+        _base_allowed_hosts.append(_host)
+
+ALLOWED_HOSTS = _base_allowed_hosts
 
 # ─── Applications ────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
@@ -184,8 +194,10 @@ REST_FRAMEWORK = {
 }
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
+
 _cors_origins_raw = os.environ.get(
-    "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000"
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:3000,http://localhost:8000,https://atlas-beacon.vercel.app,http://57.158.25.89",
 )
 
 def _parse_cors_origins(raw: str) -> tuple[bool, list[str]]:
@@ -200,8 +212,34 @@ def _parse_cors_origins(raw: str) -> tuple[bool, list[str]]:
     return False, candidates
 
 CORS_ALLOW_ALL_ORIGINS, CORS_ALLOWED_ORIGINS = _parse_cors_origins(_cors_origins_raw)
+CORS_ALLOWED_ORIGIN_REGEXES = _parse_list(
+    os.environ.get(
+        "CORS_ALLOWED_ORIGIN_REGEXES",
+        r"^https://([a-z0-9-]+\.)?atlas-beacon\.vercel\.app$",
+    )
+)
 CORS_ALLOW_ALL_HEADERS = CORS_ALLOW_ALL_ORIGINS
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = _parse_list(
+    os.environ.get(
+        "CSRF_TRUSTED_ORIGINS",
+        "https://atlas-beacon.vercel.app,https://*.atlas-beacon.vercel.app,http://57.158.25.89",
+    )
+)
+
+secure_redirect = os.environ.get("SECURE_SSL_REDIRECT", "false").lower() == "true"
+SECURE_SSL_REDIRECT = secure_redirect
+
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", str(secure_redirect)).lower() == "true"
+CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", str(secure_redirect)).lower() == "true"
+
+USE_X_FORWARDED_HOST = os.environ.get("USE_X_FORWARDED_HOST", "false").lower() == "true"
+
+if os.environ.get("SECURE_PROXY_SSL_HEADER", ""):
+    header, sep, value = os.environ["SECURE_PROXY_SSL_HEADER"].partition(":")
+    if header and value:
+        SECURE_PROXY_SSL_HEADER = (header.strip(), value.strip())
 
 # ─── Encryption ───────────────────────────────────────────────────────────────
 BEACON_AGENT_SECRET = require_env("BEACON_AGENT_SECRET")
