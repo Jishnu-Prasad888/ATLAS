@@ -197,7 +197,7 @@ REST_FRAMEWORK = {
 
 _cors_origins_raw = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000,http://localhost:8000,https://atlas-beacon.vercel.app,http://57.158.25.89",
+    "http://localhost:5173,http://localhost:3000,http://localhost:8000,https://atlas-beacon.vercel.app,http://57.158.25.89,https://57.158.25.89",
 )
 
 def _parse_cors_origins(raw: str) -> tuple[bool, list[str]]:
@@ -224,7 +224,7 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = _parse_list(
     os.environ.get(
         "CSRF_TRUSTED_ORIGINS",
-        "https://atlas-beacon.vercel.app,https://*.atlas-beacon.vercel.app,http://57.158.25.89",
+        "https://atlas-beacon.vercel.app,https://*.atlas-beacon.vercel.app,http://57.158.25.89,https://57.158.25.89",
     )
 )
 
