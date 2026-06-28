@@ -1,4 +1,5 @@
 import { getAccessToken } from '@/api/client'
+import { env } from '@/config/env'
 
 export type Role = 'administrator' | 'moderator' | 'viewer' | 'guest'
 
@@ -33,9 +34,7 @@ export class BeaconError extends Error {
 
 async function callBeacon<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAccessToken()
-  const apiBase = (import.meta.env as Record<string, string>)['VITE_API_BASE_URL'] || ''
-  const prefix = (import.meta.env as Record<string, string>)['VITE_API_PREFIX'] || '/api/v1'
-  const url = `${apiBase}${prefix}${path}`
+  const url = `${env.restBase}${path}`
 
   const res = await fetch(url, {
     ...init,

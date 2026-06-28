@@ -1,0 +1,13 @@
+{
+  "VITE_API_BASE_URL": "https://beacon.example.com",
+  "VITE_WS_BASE_URL": "wss://beacon.example.com",
+  "VITE_API_PREFIX": "/api/v1",
+  "VITE_WS_PATH": "/ws/subscribe/",
+  "VITE_ATLAS_AI_ENABLED": "true",
+  "VITE_ATLAS_AI_BASE_URL": "https://beacon.example.com/atlas-ai",
+  "VITE_ATLAS_AI_LLM_PROVIDER": "openai",
+  "VITE_ATLAS_AI_OPENAI_MODEL": "gpt-4o",
+  "VITE_ATLAS_AI_LOCAL_LLM_BASE_URL": "http://localhost:11434/v1",
+  "VITE_ATLAS_AI_LOCAL_LLM_MODEL": "qwen2.5-coder:14b",
+  "VITE_GOOGLE_CLIENT_ID": "your-google-oauth-client-id"
+}

@@ -1,8 +1,23 @@
-import { env } from '@/config/env'
+import { env, readEnv } from '@/config/env'
 import type { WsChannel, WsEnvelope } from '@/types'
 
-const log = console.log
 const LOG_PREFIX = '[WS]'
+
+function shouldLog(): boolean {
+  return import.meta.env.DEV || readEnv('VITE_DEBUG_WS', 'false') === 'true'
+}
+
+function log(...args: unknown[]): void {
+  if (shouldLog()) {
+    console.log(...args)
+  }
+}
+
+function logError(...args: unknown[]): void {
+  if (shouldLog()) {
+    console.error(...args)
+  }
+}
 
 export type WsListener<T = unknown> = (data: T) => void
 
@@ -75,7 +90,7 @@ class BeaconWebSocketClient {
     }
 
     this.ws.onerror = (event) => {
-      log(`${LOG_PREFIX} error    WebSocket error`, event)
+      logError(`${LOG_PREFIX} error    WebSocket error`, event)
       this._emit('error', event)
     }
 
@@ -87,7 +102,7 @@ class BeaconWebSocketClient {
           this._dispatch(msg.channel, msg.data)
         }
       } catch {
-        log(`${LOG_PREFIX} receive  Malformed message:`, event.data)
+        logError(`${LOG_PREFIX} receive  Malformed message:`, event.data)
       }
     }
   }

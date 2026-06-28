@@ -3,9 +3,13 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './styles/atlas-shell.css'
 import App from './App'
+import { initRuntimeConfig } from './config/runtime'
+import { readEnv } from './config/env'
 
 async function start() {
-  if (import.meta.env.VITE_ENABLE_MOCKS === 'true') {
+  await initRuntimeConfig()
+
+  if (readEnv('VITE_ENABLE_MOCKS', 'false') === 'true') {
     const { worker } = await import('./mocks/browser')
     await worker.start({ onUnhandledRequest: 'bypass' })
   }

@@ -36,7 +36,13 @@ export function DashboardShowcase() {
     setTilt({ rotateX: 0, rotateY: 0, depth: 0 })
   }
 
-  const tiltStyle: CSSProperties = {
+  interface ConsoleStyle extends CSSProperties {
+    '--atlas-console-rotateX': string
+    '--atlas-console-rotateY': string
+    '--atlas-console-translateZ': string
+  }
+
+  const tiltStyle: ConsoleStyle = {
     '--atlas-console-rotateX': `${tilt.rotateX}deg`,
     '--atlas-console-rotateY': `${tilt.rotateY}deg`,
     '--atlas-console-translateZ': `${tilt.depth}px`,

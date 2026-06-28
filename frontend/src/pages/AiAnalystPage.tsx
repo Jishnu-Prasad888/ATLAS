@@ -3,14 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { clsx } from 'clsx'
-import {
-  Button,
-  Input,
-  Textarea,
-  LoadingState,
-  ErrorState,
-  CopyButton,
-} from '@/components/common'
+import { CopyButton } from '@/components/common'
 import { AtlasAiMarkdown } from '@/components/atlasAi/Markdown'
 import { useAtlasAiStore, type ChatEntry } from '@/store/atlasAiStore'
 import { useShallow } from 'zustand/react/shallow'

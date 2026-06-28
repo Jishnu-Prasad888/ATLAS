@@ -8,26 +8,52 @@
  * VITE_WS_PATH       - WebSocket subscribe path (default: /ws/subscribe/)
  */
 
-function get(key: string, fallback: string): string {
-  const value = (import.meta.env as Record<string, string>)[key]
+import { runtimeValue } from './runtime'
+
+type EnvKey = string
+
+export function readEnv(key: EnvKey, fallback: string): string {
+  const runtime = runtimeValue(key)
+  if (runtime !== undefined && runtime !== '') return runtime
+  const value = (import.meta.env as Record<string, string | undefined>)[key]
   return value ?? fallback
 }
 
 export const env = {
   /** Base origin for all REST API calls, e.g. "https://beacon.example.com" */
-  apiBaseUrl: get('VITE_API_BASE_URL', ''),
+  get apiBaseUrl(): string {
+    return readEnv('VITE_API_BASE_URL', '')
+  },
 
   /** Base origin for WebSocket connections */
-  wsBaseUrl: get('VITE_WS_BASE_URL', ''),
+  get wsBaseUrl(): string {
+    return readEnv('VITE_WS_BASE_URL', '')
+  },
 
   /** REST API path prefix */
-  apiPrefix: get('VITE_API_PREFIX', '/api/v1'),
+  get apiPrefix(): string {
+    return readEnv('VITE_API_PREFIX', '/api/v1')
+  },
 
   /** WebSocket path */
-  wsPath: get('VITE_WS_PATH', '/ws/subscribe/'),
+  get wsPath(): string {
+    return readEnv('VITE_WS_PATH', '/ws/subscribe/')
+  },
 
   /** Feature flag for ATLAS-AI UI */
-  atlasAiEnabled: get('VITE_ATLAS_AI_ENABLED', 'false') === 'true',
+  get atlasAiEnabled(): boolean {
+    return readEnv('VITE_ATLAS_AI_ENABLED', 'false') === 'true'
+  },
+
+  /** Optional custom base URL for the ATLAS-AI gateway */
+  get atlasAiBaseUrl(): string {
+    return readEnv('VITE_ATLAS_AI_BASE_URL', '')
+  },
+
+  /** Google OAuth configuration */
+  get googleClientId(): string {
+    return readEnv('VITE_GOOGLE_CLIENT_ID', '')
+  },
 
   /** Derived: full REST base */
   get restBase(): string {
@@ -36,20 +62,25 @@ export const env = {
 
   /** Derived: full WebSocket URL */
   get wsUrl(): string {
-    if (this.wsBaseUrl) {
-      return `${this.wsBaseUrl}${this.wsPath}`
+    const base = this.wsBaseUrl
+    const path = this.wsPath
+
+    if (base) {
+      return `${base}${path}`
     }
-    if (this.apiBaseUrl) {
+
+    const apiBase = this.apiBaseUrl
+    if (apiBase) {
       try {
-        const api = new URL(this.apiBaseUrl)
+        const api = new URL(apiBase)
         const protocol = api.protocol === 'https:' ? 'wss:' : 'ws:'
-        return `${protocol}//${api.host}${this.wsPath}`
+        return `${protocol}//${api.host}${path}`
       } catch {
-        // fall back to window location below
+        // fall through to window location
       }
     }
-    // Auto-derive ws/wss from current page protocol
+
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    return `${protocol}://${window.location.host}${this.wsPath}`
+    return `${protocol}://${window.location.host}${path}`
   },
 } as const

@@ -4,11 +4,26 @@ import axios, {
   type AxiosError,
   type InternalAxiosRequestConfig,
 } from 'axios'
-import { env } from '@/config/env'
+import { env, readEnv } from '@/config/env'
 import type { ApiErrorBody } from '@/types'
 
-const log = console.log
 const LOG_PREFIX = '[API]'
+
+function shouldLog(): boolean {
+  return import.meta.env.DEV || readEnv('VITE_DEBUG_HTTP', 'false') === 'true'
+}
+
+function log(...args: unknown[]): void {
+  if (shouldLog()) {
+    console.log(...args)
+  }
+}
+
+function logError(...args: unknown[]): void {
+  if (shouldLog()) {
+    console.error(...args)
+  }
+}
 
 // ─── Custom error class ───────────────────────────────────────────────────────
 
@@ -82,7 +97,6 @@ export function parseJwt<T = unknown>(token: string): T {
 // ─── Axios instance ────────────────────────────────────────────────────────────
 
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: env.restBase,
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -92,6 +106,7 @@ export const apiClient: AxiosInstance = axios.create({
 
 // Attach access token to every request
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  config.baseURL = env.restBase || config.baseURL
   const { method, url, params, data } = config
   log(`${LOG_PREFIX} REQUEST  ${method?.toUpperCase()} ${url}`, params ? { params } : '', data ? { body: data } : '')
   if (_accessToken) {
@@ -158,7 +173,7 @@ apiClient.interceptors.response.use(
 
     const reqUrl = error.config?.url ?? '?'
     const reqMethod = error.config?.method?.toUpperCase() ?? '?'
-    log(`${LOG_PREFIX} ERROR    ${reqMethod} ${reqUrl} → ${status}`, { message, body })
+    logError(`${LOG_PREFIX} ERROR    ${reqMethod} ${reqUrl} → ${status}`, { message, body })
 
     return Promise.reject(new ApiError(status, message, body as ApiErrorBody | null))
   },
