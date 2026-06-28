@@ -11,6 +11,11 @@
   ],
   "routes": [
     {
+      "src": "/",
+      "dest": "/landing",
+      "status": 308
+    },
+    {
       "handle": "filesystem"
     },
     {

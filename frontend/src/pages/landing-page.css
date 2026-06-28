@@ -8,6 +8,7 @@ html:has(.atlas-landing) {
 .atlas-landing {
   position: relative;
   min-height: 100vh;
+  padding-top: clamp(1.25rem, 3vw, 2.25rem);
   overflow: hidden;
   background:
     radial-gradient(circle at 18% 10%, rgba(34, 197, 94, 0.12), transparent 28rem),
@@ -62,6 +63,158 @@ html:has(.atlas-landing) {
   background:
     radial-gradient(circle at 50% 16%, rgba(5, 7, 10, 0.06), transparent 22rem),
     linear-gradient(180deg, rgba(5, 7, 10, 0.24), rgba(5, 7, 10, 0.72) 74%, rgba(5, 7, 10, 0.92));
+}
+
+.atlas-landing-navbar {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  width: min(1160px, calc(100% - 40px));
+  margin: 0 auto clamp(2rem, 4vw, 3.5rem);
+  padding: 0.85rem 1.35rem;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(7, 10, 14, 0.78);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 26px 60px rgba(2, 6, 23, 0.42);
+}
+
+.atlas-landing-navbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  color: #f8fafc;
+  text-decoration: none;
+}
+
+.atlas-landing-navbar__brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.atlas-landing-navbar__brand-text strong {
+  font-size: 0.95rem;
+  font-weight: 900;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #f8fafc;
+}
+
+.atlas-landing-navbar__brand-text span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #96a3b7;
+}
+
+.atlas-landing-navbar__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.atlas-landing-navbar__button {
+  min-height: 42px;
+  padding-inline: 1.1rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.atlas-landing-navbar__icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(11, 14, 19, 0.82);
+  color: #dbe2ec;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.atlas-landing-navbar__icon-mark {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+}
+
+.atlas-landing-navbar__icon:hover,
+.atlas-landing-navbar__icon:focus-visible {
+  border-color: rgba(209, 213, 219, 0.42);
+  color: #f8fafc;
+  background: rgba(15, 19, 24, 0.92);
+}
+
+.atlas-landing-navbar__icon span {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+@media (max-width: 960px) {
+  .atlas-landing-navbar {
+    width: min(700px, calc(100% - 32px));
+    margin-bottom: clamp(1.5rem, 4vw, 2.5rem);
+  }
+
+  .atlas-landing-navbar__brand-text span {
+    font-size: 0.64rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .atlas-landing-navbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.9rem;
+    width: min(520px, calc(100% - 28px));
+    padding: 0.95rem 1.1rem;
+  }
+
+  .atlas-landing-navbar__actions {
+    width: 100%;
+    gap: 0.65rem;
+    justify-content: space-between;
+  }
+
+  .atlas-landing-navbar__button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .atlas-landing-navbar__icon {
+    justify-content: center;
+    padding-inline: 0.85rem;
+  }
+}
+
+@media (max-width: 540px) {
+  .atlas-landing-navbar__actions {
+    flex-direction: column;
+  }
+
+  .atlas-landing-navbar__icon span {
+    display: none;
+  }
+
+  .atlas-landing-navbar {
+    width: calc(100% - 24px);
+  }
+}
+
+@media (max-width: 460px) {
+  .atlas-landing-navbar__brand-text span {
+    display: none;
+  }
 }
 
 .atlas-landing-grid-bg {
