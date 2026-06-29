@@ -1,6 +1,6 @@
 {
-  "VITE_API_BASE_URL": "https://57.158.25.89",
-  "VITE_WS_BASE_URL": "wss://57.158.25.89",
+  "VITE_API_BASE_URL": "https://atlas-beacon-server.xyz",
+  "VITE_WS_BASE_URL": "wss://atlas-beacon-server.xyz",
   "VITE_API_PREFIX": "/api/v1",
   "VITE_WS_PATH": "/ws/subscribe/",
   "VITE_ATLAS_AI_ENABLED": "true",
