@@ -5,8 +5,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-const DEFAULT_HTTP_TARGET = 'http://localhost:8000'
-const DEFAULT_WS_TARGET = 'ws://localhost:8000'
+const DEFAULT_HTTP_TARGET = 'http://localhost:80'
+const DEFAULT_WS_TARGET = 'ws://localhost:80'
 
 function withLeadingSlash(pathname: string): string {
   if (!pathname.startsWith('/')) return `/${pathname}`
