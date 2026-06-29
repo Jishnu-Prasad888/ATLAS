@@ -30,13 +30,13 @@ export function readEnv(key: EnvKey, fallback: string): string {
 export const env = {
   /** Base origin for all REST API calls, e.g. "https://beacon.example.com" */
   get apiBaseUrl(): string {
-    const value = readEnv('VITE_API_BASE_URL', 'http://atlas-beacon-server.xyz')
+    const value = readEnv('VITE_API_BASE_URL', 'https://atlas-beacon-server.xyz')
     return preferSecureProtocol(value, 'http://', 'https://')
   },
 
   /** Base origin for WebSocket connections */
   get wsBaseUrl(): string {
-    const value = readEnv('VITE_WS_BASE_URL', 'ws://atlas-beacon-server.xyz')
+    const value = readEnv('VITE_WS_BASE_URL', 'wss://atlas-beacon-server.xyz')
     return preferSecureProtocol(value, 'ws://', 'wss://')
   },
 
