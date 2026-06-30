@@ -21,9 +21,8 @@ SECRET_KEY = require_env("SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = [
-    "atlas-beacon-server.xyz",
-]
+_allowed_hosts_env = os.environ.get("ALLOWED_HOSTS", "atlas-beacon-server.xyz")
+ALLOWED_HOSTS = [host.strip() for host in _allowed_hosts_env.split(",") if host.strip()]
 
 # ─── Applications ────────────────────────────────────────────────────────────
 INSTALLED_APPS = [

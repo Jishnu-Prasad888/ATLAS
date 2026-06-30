@@ -63,6 +63,7 @@ services:
       DB_HOST: db
       REDIS_URL: redis://redis:6379/0
       BEACON_NATS_URL: nats://nats:4222
+      ALLOWED_HOSTS: "atlas-beacon-server.xyz,localhost,127.0.0.1,0.0.0.0"
     depends_on:
       db:
         condition: service_healthy
