@@ -148,10 +148,17 @@ async def _ingest_loop(js) -> None:
         for msg in messages:
             try:
                 await _handle_ingest_message(js, msg)
-                await msg.ack()
+            except ValueError as exc:
+                subject = getattr(msg, "subject", "<unknown>")
+                logger.warning(
+                    "Dropping invalid ingest frame from %s: %s", subject, exc
+                )
+                await msg.term()
             except Exception as exc:
                 logger.exception("Failed to process ingest message: %s", exc)
                 await msg.nak()
+            else:
+                await msg.ack()
 
 
 async def _handle_ingest_message(js, msg) -> None:
