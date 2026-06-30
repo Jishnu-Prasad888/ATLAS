@@ -150,8 +150,12 @@ async def _ingest_loop(js) -> None:
                 await _handle_ingest_message(js, msg)
             except ValueError as exc:
                 subject = getattr(msg, "subject", "<unknown>")
+                preview = bytes(msg.data[:16]) if getattr(msg, "data", None) else b""
                 logger.warning(
-                    "Dropping invalid ingest frame from %s: %s", subject, exc
+                    "Dropping invalid ingest frame from %s: %s (first bytes=%s)",
+                    subject,
+                    exc,
+                    preview.hex(" "),
                 )
                 await msg.term()
             except Exception as exc:
@@ -162,6 +166,9 @@ async def _ingest_loop(js) -> None:
 
 
 async def _handle_ingest_message(js, msg) -> None:
+    subject = getattr(msg, "subject", "")
+    if subject and not subject.startswith("agent.sha256:"):
+        logger.warning("Unexpected ingest subject %s", subject)
     envelope_bytes = decode_frame(bytes(msg.data))
     try:
         envelope = json.loads(envelope_bytes.decode("utf-8"))
