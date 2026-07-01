@@ -52,3 +52,7 @@ cp .env.example .env   # fill secrets
 docker compose up -d
 docker compose exec server python manage.py beacon_init  # one-time admin bootstrap
 That command set now gives you the database, Redis, JetStream, and Django server in one go
+
+
+1. chmod +x beacon-platform/server/scripts/purge_jetstream.sh
+2. Run beacon-platform/server/scripts/purge_jetstream.sh --server nats://localhost:4222 --force (adjust URL as needed)
