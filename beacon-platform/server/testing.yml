@@ -1,13 +1,9 @@
-version: "3.9"
-
 services:
   nats:
     image: nats:2.10
     restart: unless-stopped
     command:
       - "-js"
-      - "-DV"
-      - "-DVV"
       - "-sd"
       - "/data/jetstream"
       - "-p"
@@ -20,16 +16,15 @@ services:
       - "8222:8222"
     volumes:
       - natsdata:/data/jetstream
-
   db:
     image: postgres:16-alpine
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: beacon
-      POSTGRES_USER: beacon
-      POSTGRES_PASSWORD: beacon
     ports:
       - "5432:5432"
+    environment:
+      POSTGRES_DB:       beacon
+      POSTGRES_USER:     beacon
+      POSTGRES_PASSWORD: beacon
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,7 +32,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -50,34 +44,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  server:
-    build: .
-    restart: unless-stopped
-    command: >-
-      /bin/sh -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 beacon_server.asgi:application"
-    env_file:
-      - .env
-    environment:
-      DJANGO_SETTINGS_MODULE: beacon_server.settings
-      DB_HOST: db
-      REDIS_URL: redis://redis:6379/0
-      BEACON_NATS_URL: nats://nats:4222
-      ALLOWED_HOSTS: "atlas-beacon-server.xyz,localhost,127.0.0.1,0.0.0.0"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_started
-    ports:
-      - "127.0.0.1:8001:8000"
-    volumes:
-      - ./logs:/app/logs
-      - ./staticfiles:/app/staticfiles
-      - ./media:/app/media
-
   sandbox:
     build:
       context: ./sandbox
@@ -88,7 +54,6 @@ services:
     depends_on:
       nats:
         condition: service_started
-
 volumes:
   natsdata:
   pgdata:
