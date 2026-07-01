@@ -88,11 +88,20 @@ if [[ ${#STREAMS[@]} -eq 0 ]]; then
     exit 1
   fi
 
-  mapfile -t STREAMS < <(printf '%s' "$stream_json" | "$PYTHON_BIN" - <<'PY'
+  if [[ -z "${stream_json// }" ]]; then
+    echo "No JetStream streams found."
+    exit 0
+  fi
+
+  mapfile -t STREAMS < <(
+    "$PYTHON_BIN" -c '
 import json
 import sys
 
-data = json.load(sys.stdin)
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(0)
 
 if isinstance(data, dict):
     streams = data.get("streams") or data.get("Streams") or []
@@ -100,32 +109,36 @@ else:
     streams = data
 
 names = []
+
 for item in streams:
-    name = None
     if isinstance(item, dict):
         name = item.get("name") or item.get("config", {}).get("name")
     else:
         name = str(item)
+
     if name and name not in names:
         names.append(name)
 
 for name in names:
     print(name)
-PY
+' "$stream_json"
   )
 
   if [[ ${#STREAMS[@]} -eq 0 ]]; then
-    echo "No JetStream streams found." >&2
+    echo "No JetStream streams found."
     exit 0
   fi
 fi
 
 for stream in "${STREAMS[@]}"; do
   echo "Purging stream: $stream"
+
   purge_cmd=("${NATS_ARGS[@]}" stream purge "$stream")
+
   if [[ $FORCE -eq 1 ]]; then
     purge_cmd+=("--force")
   fi
+
   if ! "${purge_cmd[@]}"; then
     echo "error: failed to purge stream '$stream'." >&2
     exit 1
