@@ -44,16 +44,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  sandbox:
-    build:
-      context: ./sandbox
-    restart: unless-stopped
-    command: ["sleep", "infinity"]
-    volumes:
-      - ./sandbox:/workspace
-    depends_on:
-      nats:
-        condition: service_started
 volumes:
   natsdata:
   pgdata:
