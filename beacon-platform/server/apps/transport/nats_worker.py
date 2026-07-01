@@ -167,8 +167,11 @@ async def _ingest_loop(js) -> None:
 
 async def _handle_ingest_message(js, msg) -> None:
     subject = getattr(msg, "subject", "")
-    if subject and not subject.startswith("agent.sha256:"):
-        logger.warning("Unexpected ingest subject %s", subject)
+
+    if subject:
+        expected_subject_prefix = f"{settings.BEACON_NATS_SUBJECT_PREFIX}."
+        if not subject.startswith(expected_subject_prefix):
+            logger.warning("Unexpected ingest subject %s", subject)
     envelope_bytes = decode_frame(bytes(msg.data))
     try:
         envelope = json.loads(envelope_bytes.decode("utf-8"))
